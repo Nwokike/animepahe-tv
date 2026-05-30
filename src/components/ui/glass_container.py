@@ -19,11 +19,15 @@ class GlassContainer(ft.Container):
         self.padding = padding
         self.border_radius = border_radius
         self.key = key
-        self._default_border = ft.Border.all(0.5, ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE))
+        self._default_border = ft.Border.all(
+            0.5, ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE)
+        )
         self._focus_border = ft.Border.all(2.5, AppColors.PRIMARY)
         self.bgcolor = ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE)
         self.border = self._default_border
-        self.animate_scale = ft.Animation(duration=150, curve=ft.AnimationCurve.EASE_OUT)
+        self.animate_scale = ft.Animation(
+            duration=150, curve=ft.AnimationCurve.EASE_OUT
+        )
         self.expand = expand
         self.on_click = on_click
         if focusable:

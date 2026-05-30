@@ -89,7 +89,9 @@ class KwikResolver:
                 headers={"User-Agent": "Mozilla/5.0", "Referer": referer},
                 timeout=5,
             )
-            return resp.status_code == 200 and "mpegurl" in resp.headers.get("content-type", "")
+            return resp.status_code == 200 and "mpegurl" in resp.headers.get(
+                "content-type", ""
+            )
         except httpx.RequestError:
             return False
 

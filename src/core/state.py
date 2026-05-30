@@ -48,6 +48,7 @@ class LatestRelease:
     session: str
     created_at: str
 
+
 @ft.observable
 class AppState:
     is_loading: bool = False

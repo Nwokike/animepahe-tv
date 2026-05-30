@@ -30,7 +30,9 @@ def build_player_view(
         text_align=ft.TextAlign.CENTER,
     )
 
-    loading = ft.ProgressRing(width=40, height=40, stroke_width=4, color=AppColors.PRIMARY)
+    loading = ft.ProgressRing(
+        width=40, height=40, stroke_width=4, color=AppColors.PRIMARY
+    )
 
     overlay = ft.Container(
         expand=True,
@@ -50,6 +52,11 @@ def build_player_view(
     def on_back(e):
         if len(page_obj.views) > 1:
             page_obj.views.pop()
+            if hasattr(page_obj, "refresh_episodes"):
+                try:
+                    page_obj.refresh_episodes()
+                except Exception:
+                    pass
             page_obj.update()
 
     def _on_focus_btn(e):
@@ -87,7 +94,11 @@ def build_player_view(
             if state.selected_source:
                 m3u8 = kwik.resolve(state.selected_source.url)
                 if m3u8:
-                    video.playlist = [fv.VideoMedia(m3u8, http_headers={"Referer": state.selected_source.url})]
+                    video.playlist = [
+                        fv.VideoMedia(
+                            m3u8, http_headers={"Referer": state.selected_source.url}
+                        )
+                    ]
                     video.autoplay = True
                     overlay.visible = False
                 else:

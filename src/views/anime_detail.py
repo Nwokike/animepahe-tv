@@ -86,7 +86,7 @@ def build_anime_detail_view(
             parts.append(f"\u2605 {anime.score:.1f}")
         info_text.value = " \u2022 ".join(parts)
 
-    EP_CARD_HEIGHT = 180
+    EP_CARD_HEIGHT = 140
 
     episode_grid = ft.ResponsiveRow(
         spacing=16,

@@ -64,7 +64,11 @@ class AppColors:
         try:
             surface = page.dark_theme.color_scheme.surface
             is_dark = surface and str(surface).lower().startswith(("#0", "#1"))
-            return AppColors.DARK_SURFACE_VARIANT if is_dark else AppColors.LIGHT_SURFACE_VARIANT
+            return (
+                AppColors.DARK_SURFACE_VARIANT
+                if is_dark
+                else AppColors.LIGHT_SURFACE_VARIANT
+            )
         except Exception:
             return AppColors.DARK_SURFACE_VARIANT
 

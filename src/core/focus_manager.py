@@ -17,11 +17,11 @@ class FocusManager:
 
     @staticmethod
     def make_scroll_on_focus(scrollable: ft.ListView | ft.Column):
-        def _on_focus(e):
+        async def _on_focus(e):
             control_key = getattr(e.control, "key", None)
             if control_key and hasattr(scrollable, "scroll_to"):
                 try:
-                    scrollable.scroll_to(key=control_key, duration=200)
+                    await scrollable.scroll_to(scroll_key=control_key, duration=200)
                 except Exception:
                     pass
 

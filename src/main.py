@@ -39,13 +39,18 @@ def _theme_button_style(page: ft.Page, is_primary: bool = False):
 
 
 def show_ktv_install_dialog(page: ft.Page):
+    page.dialog_open = True
+
     def open_store(e):
+        page.dialog_open = False
         page.run_task(page.launch_url, KTV_PLAY_STORE_URL)
 
     def open_uptodown(e):
+        page.dialog_open = False
         page.run_task(page.launch_url, KTV_UPTODOWN_URL)
 
     def dismiss(e):
+        page.dialog_open = False
         try:
             page.pop_dialog()
         except Exception:
@@ -120,8 +125,12 @@ async def main(page: ft.Page):
     state.scraper = scraper
 
     def handle_global_back():
-        if page.dialog and page.dialog.open:
-            page.dialog.open = False
+        if getattr(page, "dialog_open", False):
+            page.dialog_open = False
+            try:
+                page.pop_dialog()
+            except Exception:
+                pass
             page.update()
             return
         if len(page.views) > 1:
@@ -202,6 +211,7 @@ async def main(page: ft.Page):
         sources.sort(key=lambda s: s.resolution, reverse=True)
 
         def on_select(e, src):
+            page.dialog_open = False
             state.selected_source = src
             state.current_anime_session = anime_session
             state.current_episode_session = episode_session
@@ -254,11 +264,16 @@ async def main(page: ft.Page):
             content=ft.ListView(controls=buttons, spacing=10),
             actions=[
                 ft.Button(
-                    content=ft.Text("Cancel"), on_click=lambda e: page.pop_dialog()
+                    content=ft.Text("Cancel"),
+                    on_click=lambda e: (
+                        setattr(page, "dialog_open", False),
+                        page.pop_dialog(),
+                    ),
                 )
             ],
             modal=True,
         )
+        page.dialog_open = True
         page.show_dialog(dlg)
 
     async def play_episode_external(anime_session: str, episode_session: str):
@@ -360,11 +375,17 @@ async def main(page: ft.Page):
                             pass
 
             page.views.pop()
-            if route.startswith("/play") and hasattr(page, "refresh_episodes"):
-                try:
-                    page.refresh_episodes()
-                except Exception:
-                    pass
+            if route.startswith("/play"):
+                if hasattr(page, "refresh_episodes"):
+                    try:
+                        page.refresh_episodes()
+                    except Exception:
+                        pass
+                if hasattr(page, "update_home_grid"):
+                    try:
+                        page.update_home_grid()
+                    except Exception:
+                        pass
             page.update()
 
     page.on_route_change = route_change

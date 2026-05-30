@@ -12,7 +12,7 @@ def build_home_view(
     on_page_change: callable = None,
 ) -> ft.View:
 
-    CARD_HEIGHT = 180
+    CARD_HEIGHT = 140
 
     latest_grid = ft.ResponsiveRow(
         spacing=16,
@@ -24,6 +24,19 @@ def build_home_view(
         FocusManager.focus_style(container, e.data == "true", AppColors.PRIMARY)
 
     def build_card(release: LatestRelease, idx: int):
+        is_playing = (
+            state.current_anime_session == release.anime_session
+            and state.current_episode_session == release.session
+        )
+
+        play_icon = ft.Icon(
+            ft.Icons.EQUALIZER_ROUNDED
+            if is_playing
+            else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+            size=40,
+            color=AppColors.PRIMARY if is_playing else ft.Colors.WHITE,
+        )
+
         img = ft.Image(
             src=release.snapshot,
             fit="cover",
@@ -32,11 +45,11 @@ def build_home_view(
 
         gradient = ft.Container(
             gradient=ft.LinearGradient(
-                begin=ft.Alignment.TOP_CENTER,
-                end=ft.Alignment.BOTTOM_CENTER,
+                begin=ft.Alignment.CENTER_LEFT,
+                end=ft.Alignment.CENTER_RIGHT,
                 colors=[
-                    ft.Colors.TRANSPARENT,
                     ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
+                    ft.Colors.TRANSPARENT,
                 ],
             ),
             expand=True,
@@ -46,13 +59,13 @@ def build_home_view(
             release.anime_title,
             color=ft.Colors.WHITE,
             weight=ft.FontWeight.BOLD,
-            size=14,
+            size=16,
             max_lines=2,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
 
         ep_text = ft.Text(
-            f"Ep {release.episode}",
+            f"Episode {release.episode}",
             color=AppColors.PRIMARY,
             weight=ft.FontWeight.BOLD,
             size=12,
@@ -63,13 +76,18 @@ def build_home_view(
                 img,
                 gradient,
                 ft.Container(
-                    padding=12,
-                    alignment=ft.Alignment.BOTTOM_LEFT,
+                    padding=16,
+                    alignment=ft.Alignment.CENTER_LEFT,
                     content=ft.Column(
                         [title_text, ep_text],
-                        alignment=ft.MainAxisAlignment.END,
+                        alignment=ft.MainAxisAlignment.CENTER,
                         spacing=4,
                     ),
+                ),
+                ft.Container(
+                    alignment=ft.Alignment.CENTER_RIGHT,
+                    padding=16,
+                    content=play_icon,
                 ),
             ],
             expand=True,
@@ -81,6 +99,7 @@ def build_home_view(
             padding=4,
             border_radius=16,
             clip_behavior="antiAlias",
+            bgcolor=AppColors.get_glass_bg(page_obj),
             animate_scale=300,
             animate=300,
             ink=True,
@@ -95,7 +114,7 @@ def build_home_view(
 
         wrapper = ft.Container(
             content=card_container,
-            col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
+            col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
         )
         return wrapper
 

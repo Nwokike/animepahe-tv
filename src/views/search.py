@@ -11,7 +11,7 @@ def build_search_view(
     on_back: callable,
 ) -> ft.View:
 
-    CARD_HEIGHT = 180
+    CARD_HEIGHT = 240
 
     search_field = ft.TextField(
         hint_text="Search for anime...",
@@ -37,6 +37,9 @@ def build_search_view(
 
     def _on_blur_card(e, ctrl):
         FocusManager.focus_style(ctrl, False, AppColors.PRIMARY)
+
+    def on_hover_card(e, container):
+        FocusManager.focus_style(container, e.data == "true", AppColors.PRIMARY)
 
     def _style_focusable(control, focused):
         if focused:
@@ -65,10 +68,13 @@ def build_search_view(
             pass
 
     def _build_card(anime, idx: int):
+        is_playing = state.current_anime_session == anime.session
+
         img = ft.Image(
             src=anime.poster if anime.poster else "",
             fit="cover",
             expand=True,
+            opacity=0.5 if is_playing else 1.0,
         )
         if not anime.poster:
             img = ft.Container(
@@ -86,7 +92,7 @@ def build_search_view(
                 end=ft.Alignment.BOTTOM_CENTER,
                 colors=[
                     ft.Colors.TRANSPARENT,
-                    ft.Colors.with_opacity(0.9, ft.Colors.BLACK),
+                    ft.Colors.with_opacity(0.85, ft.Colors.BLACK),
                 ],
             ),
             expand=True,
@@ -108,22 +114,34 @@ def build_search_view(
         )
 
         type_text = ft.Text(
-            anime.type,
+            anime.type if anime.type else "",
             size=12,
             color=ft.Colors.WHITE_70,
         )
 
         score_text = ft.Text(
-            f"{anime.score:.1f}",
+            f"\u2605 {anime.score:.1f}" if anime.score else "",
             size=12,
             weight=ft.FontWeight.BOLD,
             color=AppColors.SUCCESS if anime.score >= 7.5 else AppColors.WARNING,
         )
 
-        content = ft.Stack(
+        play_badge = ft.Container(
+            alignment=ft.Alignment.CENTER,
+            content=ft.Icon(
+                ft.Icons.PLAY_CIRCLE_FILL_ROUNDED
+                if not is_playing
+                else ft.Icons.EQUALIZER_ROUNDED,
+                size=48,
+                color=AppColors.PRIMARY if is_playing else ft.Colors.WHITE,
+            ),
+        )
+
+        content_stack = ft.Stack(
             controls=[
                 img,
                 gradient,
+                play_badge,
                 ft.Container(
                     padding=12,
                     alignment=ft.Alignment.BOTTOM_LEFT,
@@ -135,6 +153,7 @@ def build_search_view(
                                     year_text,
                                     ft.Container(expand=True),
                                     type_text,
+                                    ft.Container(width=4),
                                     score_text,
                                 ],
                                 spacing=4,
@@ -148,26 +167,33 @@ def build_search_view(
             expand=True,
         )
 
+        card_inner = ft.Container(
+            content=content_stack,
+            border_radius=12,
+            clip_behavior="antiAlias",
+            height=CARD_HEIGHT,
+        )
+
         card_container = ft.Container(
-            content=content,
+            content=card_inner,
             border=ft.Border.all(4, ft.Colors.TRANSPARENT),
             padding=4,
             border_radius=16,
-            clip_behavior="antiAlias",
             animate_scale=300,
             animate=300,
             ink=True,
-            height=CARD_HEIGHT,
             key=f"search_card_{idx}",
             on_click=lambda _: on_select_anime(anime),
         )
+        card_container.on_hover = lambda e, ctr=card_container: on_hover_card(e, ctr)
         card_container.tab_index = idx + 2
         card_container.on_focus = lambda e: _on_focus_card(e, card_container)
         card_container.on_blur = lambda e: _on_blur_card(e, card_container)
 
         wrapper = ft.Container(
             content=card_container,
-            col={"xs": 6, "sm": 4, "md": 3, "lg": 3, "xl": 2},
+            padding=4,
+            col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
         )
         return wrapper
 

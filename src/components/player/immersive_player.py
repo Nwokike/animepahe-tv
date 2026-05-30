@@ -3,7 +3,9 @@ import flet_video as fv
 
 
 class ImmersivePlayer(ft.Stack):
-    def __init__(self, resource: str, http_headers: dict | None = None, on_close: callable = None):
+    def __init__(
+        self, resource: str, http_headers: dict | None = None, on_close: callable = None
+    ):
         super().__init__()
         self.resource = resource
         self.http_headers = http_headers
