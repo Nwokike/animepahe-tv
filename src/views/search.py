@@ -1,7 +1,6 @@
 import flet as ft
 from core.theme import AppColors
 from core.state import state
-from core.focus_manager import FocusManager
 
 
 def build_search_view(
@@ -32,14 +31,7 @@ def build_search_view(
         run_spacing=16,
     )
 
-    def _on_focus_card(e, ctrl):
-        FocusManager.focus_style(ctrl, True, AppColors.PRIMARY)
 
-    def _on_blur_card(e, ctrl):
-        FocusManager.focus_style(ctrl, False, AppColors.PRIMARY)
-
-    def on_hover_card(e, container):
-        FocusManager.focus_style(container, e.data == "true", AppColors.PRIMARY)
 
     def _style_focusable(control, focused):
         if focused:
@@ -185,10 +177,7 @@ def build_search_view(
             key=f"search_card_{idx}",
             on_click=lambda _: on_select_anime(anime),
         )
-        card_container.on_hover = lambda e, ctr=card_container: on_hover_card(e, ctr)
         card_container.tab_index = idx + 2
-        card_container.on_focus = lambda e: _on_focus_card(e, card_container)
-        card_container.on_blur = lambda e: _on_blur_card(e, card_container)
 
         wrapper = ft.Container(
             content=card_container,

@@ -1,7 +1,6 @@
 import flet as ft
 from core.theme import AppColors
 from core.state import state
-from core.focus_manager import FocusManager
 
 
 def build_anime_detail_view(
@@ -99,11 +98,7 @@ def build_anime_detail_view(
         visible=False,
     )
 
-    def _on_focus_ep(e, ctrl):
-        FocusManager.focus_style(ctrl, True, AppColors.PRIMARY)
 
-    def _on_blur_ep(e, ctrl):
-        FocusManager.focus_style(ctrl, False, AppColors.PRIMARY)
 
     def _style_focusable(control, focused):
         if focused:
@@ -215,8 +210,6 @@ def build_anime_detail_view(
             ),
         )
         card_container.tab_index = idx + 2
-        card_container.on_focus = lambda e: _on_focus_ep(e, card_container)
-        card_container.on_blur = lambda e: _on_blur_ep(e, card_container)
 
         wrapper = ft.Container(
             content=card_container,

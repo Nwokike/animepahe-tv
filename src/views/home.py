@@ -1,7 +1,6 @@
 import flet as ft
 from core.state import state, LatestRelease
 from core.theme import AppColors
-from core.focus_manager import FocusManager
 
 
 def build_home_view(
@@ -20,8 +19,7 @@ def build_home_view(
         margin=24,
     )
 
-    def on_hover_card(e, container):
-        FocusManager.focus_style(container, e.data == "true", AppColors.PRIMARY)
+
 
     def build_card(release: LatestRelease, idx: int):
         is_playing = (
@@ -106,11 +104,8 @@ def build_home_view(
             height=CARD_HEIGHT,
             key=f"home_card_{idx}",
             on_click=lambda _: on_select_anime(release.anime_session),
-            on_hover=lambda e: on_hover_card(e, e.control),
         )
         card_container.tab_index = idx + 3
-        card_container.on_focus = lambda e: _on_focus_card(e, card_container)
-        card_container.on_blur = lambda e: _on_blur_card(e, card_container)
 
         wrapper = ft.Container(
             content=card_container,
@@ -118,11 +113,7 @@ def build_home_view(
         )
         return wrapper
 
-    def _on_focus_card(e, ctrl):
-        FocusManager.focus_style(ctrl, True, AppColors.PRIMARY)
 
-    def _on_blur_card(e, ctrl):
-        FocusManager.focus_style(ctrl, False, AppColors.PRIMARY)
 
     def load_page(page_num: int):
         state.is_loading = True
