@@ -2,7 +2,7 @@
 
 # Set to False to use internal flet-video player (for testing / pre-KTV launch)
 # Set to True to use KTV Player deep link approach (for monetization)
-USE_EXTERNAL_PLAYER = False
+USE_EXTERNAL_PLAYER = True
 
 # Play Store URL for KTV Player
 KTV_PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=ng.kiri.ktvplayer"

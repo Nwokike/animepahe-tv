@@ -33,6 +33,8 @@ def build_anime_detail_view(
     def on_back(e):
         if len(page_obj.views) > 1:
             page_obj.views.pop()
+            if page_obj.views:
+                page_obj.route = page_obj.views[-1].route
             page_obj.update()
 
     bg_image_url = anime.poster if anime and anime.poster else ""

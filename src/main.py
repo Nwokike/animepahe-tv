@@ -6,11 +6,9 @@ import urllib.parse
 from core.theme import AppTheme, AppColors
 from core.state import state
 from core.config import (
-    USE_EXTERNAL_PLAYER,
     KTV_PLAY_STORE_URL,
     KTV_UPTODOWN_URL,
     KTV_DEEP_LINK_SCHEME,
-    EXTERNAL_PLAYER_NAMES,
 )
 from core.focus_manager import FocusManager
 from services.animepahe import AnimePaheScraper
@@ -18,7 +16,6 @@ from views.splash import build_splash_view
 from views.home import build_home_view
 from views.search import build_search_view
 from views.anime_detail import build_anime_detail_view
-from views.player import build_player_view
 
 
 def _theme_button_style(page: ft.Page, is_primary: bool = False):
@@ -41,13 +38,23 @@ def _theme_button_style(page: ft.Page, is_primary: bool = False):
 def show_ktv_install_dialog(page: ft.Page):
     page.dialog_open = True
 
-    def open_store(e):
+    async def open_store(e):
         page.dialog_open = False
-        page.run_task(page.launch_url, KTV_PLAY_STORE_URL)
+        try:
+            page.pop_dialog()
+        except Exception:
+            pass
+        await ft.UrlLauncher().launch_url(KTV_PLAY_STORE_URL)
+        page.update()
 
-    def open_uptodown(e):
+    async def open_uptodown(e):
         page.dialog_open = False
-        page.run_task(page.launch_url, KTV_UPTODOWN_URL)
+        try:
+            page.pop_dialog()
+        except Exception:
+            pass
+        await ft.UrlLauncher().launch_url(KTV_UPTODOWN_URL)
+        page.update()
 
     def dismiss(e):
         page.dialog_open = False
@@ -55,40 +62,34 @@ def show_ktv_install_dialog(page: ft.Page):
             page.pop_dialog()
         except Exception:
             pass
-
-    player_buttons = []
-    for name in EXTERNAL_PLAYER_NAMES:
-        player_buttons.append(
-            ft.Button(
-                content=ft.Text(name),
-                icon=ft.Icons.PLAY_CIRCLE_ROUNDED,
-                on_click=open_store,
-                style=_theme_button_style(page, is_primary=(name == "KTV Player")),
-            )
-        )
+        page.update()
 
     dlg = ft.AlertDialog(
         modal=True,
-        title=ft.Text("Install a Player", weight=ft.FontWeight.BOLD),
+        title=ft.Text("Install KTV Player", weight=ft.FontWeight.BOLD),
         content=ft.Column(
             [
                 ft.Text(
-                    "To stream this episode, please install one of the following players. "
-                    "We recommend KTV Player for the best experience.",
+                    "To stream this episode, please install KTV Player for the best experience.",
                     size=14,
                 ),
-                ft.Container(height=16),
-                ft.Column(player_buttons, spacing=10),
             ],
             tight=True,
         ),
         actions=[
             ft.Button(content=ft.Text("Not now"), on_click=dismiss),
             ft.Button(
-                content=ft.Text("Download from Uptodown"), on_click=open_uptodown
+                content=ft.Text("Play Store"),
+                on_click=lambda e: page.run_task(open_store, e),
+                style=_theme_button_style(page, is_primary=True),
+            ),
+            ft.Button(
+                content=ft.Text("Uptodown"),
+                on_click=lambda e: page.run_task(open_uptodown, e),
+                style=_theme_button_style(page, is_primary=False),
             ),
         ],
-        actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        actions_alignment=ft.MainAxisAlignment.END,
     )
 
     page.show_dialog(dlg)
@@ -137,9 +138,7 @@ async def main(page: ft.Page):
             top_view = page.views[-1]
             route = getattr(top_view, "route", "")
 
-            if route.startswith("/play"):
-                page.run_task(navigate, "/anime?session=" + state.current_anime_session)
-            elif route in ("/anime", "/search"):
+            if route in ("/anime", "/search"):
                 page.run_task(navigate, "/home")
             else:
                 page.run_task(navigate, "/home")
@@ -227,18 +226,7 @@ async def main(page: ft.Page):
                 page.pop_dialog()
             except Exception:
                 pass
-            if USE_EXTERNAL_PLAYER:
-                page.run_task(play_episode_external, anime_session, episode_session)
-            else:
-                page.run_task(_start_playback)
-
-        async def _start_playback():
-            page.snack_bar = ft.SnackBar(
-                ft.Text("Resolving stream..."), bgcolor=AppColors.SUCCESS
-            )
-            page.snack_bar.open = True
-            page.update()
-            await navigate("/play")
+            page.run_task(play_episode_external, anime_session, episode_session)
 
         buttons = []
         for src in sources:
@@ -286,7 +274,7 @@ async def main(page: ft.Page):
         deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_m3u8}"
 
         try:
-            await page.launch_url(deep_link)
+            await ft.UrlLauncher().launch_url(deep_link)
         except Exception:
             pass
 
@@ -346,46 +334,13 @@ async def main(page: ft.Page):
                 )
                 page.run_task(load_episodes, session, 1)
 
-        elif parsed.path == "/play":
-            try:
-                page.pop_dialog()
-            except Exception:
-                pass
-            if state.current_anime_session and state.current_episode_session:
-                page.views.append(
-                    build_player_view(
-                        page_obj=page,
-                    )
-                )
-            else:
-                await navigate("/search")
-
         page.update()
 
     def view_pop(e: ft.ViewPopEvent):
         if len(page.views) > 1:
-            top_view = page.views[-1]
-            route = getattr(top_view, "route", "")
-            if route.startswith("/play"):
-                for control in top_view.controls:
-                    if hasattr(control, "pause"):
-                        try:
-                            control.pause()
-                        except Exception:
-                            pass
-
             page.views.pop()
-            if route.startswith("/play"):
-                if hasattr(page, "refresh_episodes"):
-                    try:
-                        page.refresh_episodes()
-                    except Exception:
-                        pass
-                if hasattr(page, "update_home_grid"):
-                    try:
-                        page.update_home_grid()
-                    except Exception:
-                        pass
+            if page.views:
+                page.route = page.views[-1].route
             page.update()
 
     page.on_route_change = route_change
