@@ -33,31 +33,7 @@ def build_search_view(
 
 
 
-    def _style_focusable(control, focused):
-        if focused:
-            control.bgcolor = ft.Colors.with_opacity(0.1, AppColors.PRIMARY)
-            control.border = ft.Border.all(2, AppColors.PRIMARY)
-        else:
-            control.bgcolor = None
-            control.border = ft.Border.all(1.5, AppColors.PRIMARY)
-        try:
-            control.update()
-        except Exception:
-            pass
 
-    def _on_focus_btn(e):
-        e.control.bgcolor = ft.Colors.with_opacity(0.1, AppColors.PRIMARY)
-        try:
-            e.control.update()
-        except Exception:
-            pass
-
-    def _on_blur_btn(e):
-        e.control.bgcolor = None
-        try:
-            e.control.update()
-        except Exception:
-            pass
 
     def _build_card(anime, idx: int):
         is_playing = state.current_anime_session == anime.session
@@ -251,8 +227,6 @@ def build_search_view(
         on_click=lambda _: on_back(),
     )
     back_btn.tab_index = 1
-    back_btn.on_focus = _on_focus_btn
-    back_btn.on_blur = _on_blur_btn
 
     header = ft.Container(
         padding=ft.Padding.only(left=24, right=24, top=24, bottom=16),

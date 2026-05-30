@@ -100,31 +100,7 @@ def build_anime_detail_view(
 
 
 
-    def _style_focusable(control, focused):
-        if focused:
-            control.bgcolor = ft.Colors.with_opacity(0.1, AppColors.PRIMARY)
-            control.border = ft.Border.all(2, AppColors.PRIMARY)
-        else:
-            control.bgcolor = None
-            control.border = ft.Border.all(1.5, AppColors.PRIMARY)
-        try:
-            control.update()
-        except Exception:
-            pass
 
-    def _on_focus_btn(e):
-        e.control.bgcolor = ft.Colors.with_opacity(0.1, AppColors.PRIMARY)
-        try:
-            e.control.update()
-        except Exception:
-            pass
-
-    def _on_blur_btn(e):
-        e.control.bgcolor = None
-        try:
-            e.control.update()
-        except Exception:
-            pass
 
     def _build_episode_card(ep, idx: int) -> ft.Container:
         is_playing = (
@@ -252,8 +228,6 @@ def build_anime_detail_view(
         )
         num_eps = len(state.episodes)
         prev_btn.tab_index = num_eps + 2
-        prev_btn.on_focus = lambda e: _style_focusable(e.control, True)
-        prev_btn.on_blur = lambda e: _style_focusable(e.control, False)
 
         next_btn = ft.Container(
             content=ft.Row(
@@ -280,8 +254,6 @@ def build_anime_detail_view(
             on_click=on_next_ep_page if state.episodes_has_more else None,
         )
         next_btn.tab_index = num_eps + 3
-        next_btn.on_focus = lambda e: _style_focusable(e.control, True)
-        next_btn.on_blur = lambda e: _style_focusable(e.control, False)
 
         ep_nav = ft.Row(
             controls=[
@@ -352,8 +324,6 @@ def build_anime_detail_view(
         on_click=on_back,
     )
     back_btn.tab_index = 1
-    back_btn.on_focus = _on_focus_btn
-    back_btn.on_blur = _on_blur_btn
 
     header = ft.Container(
         padding=ft.Padding.all(32),

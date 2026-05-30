@@ -129,17 +129,7 @@ def build_home_view(
         if state.latest_page > 1:
             load_page(state.latest_page - 1)
 
-    def _style_focusable(control, focused):
-        if focused:
-            control.bgcolor = ft.Colors.with_opacity(0.1, AppColors.PRIMARY)
-            control.border = ft.Border.all(2, AppColors.PRIMARY)
-        else:
-            control.bgcolor = None
-            control.border = ft.Border.all(1.5, AppColors.PRIMARY)
-        try:
-            control.update()
-        except Exception:
-            pass
+
 
     def update_grid():
         latest_grid.controls.clear()
@@ -172,8 +162,6 @@ def build_home_view(
         )
         num_cards = len(state.latest_releases)
         prev_btn.tab_index = num_cards + 3
-        prev_btn.on_focus = lambda e: _style_focusable(e.control, True)
-        prev_btn.on_blur = lambda e: _style_focusable(e.control, False)
 
         next_btn = ft.Container(
             content=ft.Row(
@@ -200,8 +188,6 @@ def build_home_view(
             on_click=on_next_page if state.latest_has_more else None,
         )
         next_btn.tab_index = num_cards + 4
-        next_btn.on_focus = lambda e: _style_focusable(e.control, True)
-        next_btn.on_blur = lambda e: _style_focusable(e.control, False)
 
         nav_row = ft.Row(
             controls=[
@@ -250,19 +236,7 @@ def build_home_view(
         )
         page_obj.update()
 
-    def _on_focus_btn(e):
-        e.control.bgcolor = ft.Colors.with_opacity(0.1, AppColors.PRIMARY)
-        try:
-            e.control.update()
-        except Exception:
-            pass
 
-    def _on_blur_btn(e):
-        e.control.bgcolor = None
-        try:
-            e.control.update()
-        except Exception:
-            pass
 
     search_btn = ft.Container(
         content=ft.Icon(ft.Icons.SEARCH_ROUNDED, color=ft.Colors.ON_SURFACE),
@@ -272,8 +246,6 @@ def build_home_view(
         on_click=lambda _: on_search_click(),
     )
     search_btn.tab_index = 1
-    search_btn.on_focus = _on_focus_btn
-    search_btn.on_blur = _on_blur_btn
 
     theme_btn = ft.Container(
         content=ft.Icon(
@@ -288,8 +260,6 @@ def build_home_view(
         on_click=handle_theme_toggle,
     )
     theme_btn.tab_index = 2
-    theme_btn.on_focus = _on_focus_btn
-    theme_btn.on_blur = _on_blur_btn
 
     header = ft.Container(
         padding=ft.Padding.only(left=24, right=24, top=24, bottom=8),

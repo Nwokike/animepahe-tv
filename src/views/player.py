@@ -59,19 +59,7 @@ def build_player_view(
                     pass
             page_obj.update()
 
-    def _on_focus_btn(e):
-        e.control.bgcolor = ft.Colors.with_opacity(0.5, ft.Colors.BLACK)
-        try:
-            e.control.update()
-        except Exception:
-            pass
 
-    def _on_blur_btn(e):
-        e.control.bgcolor = ft.Colors.with_opacity(0.3, ft.Colors.BLACK)
-        try:
-            e.control.update()
-        except Exception:
-            pass
 
     back_btn = ft.Container(
         left=24,
@@ -86,8 +74,6 @@ def build_player_view(
         ),
     )
     back_btn.tab_index = 1
-    back_btn.on_focus = _on_focus_btn
-    back_btn.on_blur = _on_blur_btn
 
     async def resolve_and_play():
         try:
