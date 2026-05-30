@@ -89,7 +89,7 @@ class AppTheme:
                 outline=AppColors.DARK_TEXT_MUTED,
                 surface_tint=AppColors.TRANSPARENT,
             ),
-            focus_color=ft.Colors.PRIMARY,
+            focus_color=AppColors.PRIMARY,
             visual_density=ft.VisualDensity.COMFORTABLE,
         )
 
@@ -108,6 +108,6 @@ class AppTheme:
                 outline=AppColors.LIGHT_TEXT_MUTED,
                 surface_tint=AppColors.TRANSPARENT,
             ),
-            focus_color=ft.Colors.PRIMARY,
+            focus_color=AppColors.PRIMARY,
             visual_density=ft.VisualDensity.COMFORTABLE,
         )
