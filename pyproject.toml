@@ -1,6 +1,6 @@
 [project]
 name = "animepahe-tv"
-version = "0.1.0"
+version = "1.0.0"
 description = "Lightweight client-side Android TV / mobile / desktop app for streaming anime from AnimePahe."
 readme = "README.md"
 requires-python = ">=3.13"
