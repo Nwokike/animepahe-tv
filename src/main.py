@@ -18,19 +18,15 @@ from views.search import build_search_view
 from views.anime_detail import build_anime_detail_view
 
 
-def _theme_button_style(page: ft.Page, is_primary: bool = False):
+def _theme_button_style():
     return ft.ButtonStyle(
         bgcolor={
             ft.ControlState.FOCUSED: AppColors.PRIMARY,
-            ft.ControlState.DEFAULT: AppColors.PRIMARY
-            if is_primary
-            else ft.Colors.SURFACE,
+            ft.ControlState.DEFAULT: ft.Colors.SURFACE,
         },
         color={
             ft.ControlState.FOCUSED: ft.Colors.WHITE,
-            ft.ControlState.DEFAULT: ft.Colors.WHITE
-            if is_primary
-            else ft.Colors.ON_SURFACE,
+            ft.ControlState.DEFAULT: ft.Colors.ON_SURFACE,
         },
     )
 
@@ -81,12 +77,12 @@ def show_ktv_install_dialog(page: ft.Page):
             ft.Button(
                 content=ft.Text("Play Store"),
                 on_click=lambda e: page.run_task(open_store, e),
-                style=_theme_button_style(page, is_primary=True),
+                style=_theme_button_style(),
             ),
             ft.Button(
                 content=ft.Text("Uptodown"),
                 on_click=lambda e: page.run_task(open_uptodown, e),
-                style=_theme_button_style(page, is_primary=False),
+                style=_theme_button_style(),
             ),
         ],
         actions_alignment=ft.MainAxisAlignment.END,
@@ -243,7 +239,7 @@ async def main(page: ft.Page):
                 ft.Button(
                     content=ft.Text(label),
                     on_click=lambda e, s=src: on_select(e, s),
-                    style=_theme_button_style(page),
+                    style=_theme_button_style(),
                 )
             )
 
@@ -273,8 +269,11 @@ async def main(page: ft.Page):
         encoded_m3u8 = base64.urlsafe_b64encode(m3u8_url.encode()).decode()
         deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_m3u8}"
 
+        launcher = ft.UrlLauncher()
         try:
-            await ft.UrlLauncher().launch_url(deep_link)
+            if await launcher.can_launch_url(deep_link):
+                await launcher.launch_url(deep_link)
+                return
         except Exception:
             pass
 
