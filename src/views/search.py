@@ -1,6 +1,7 @@
 import flet as ft
 from core.theme import AppColors
 from core.state import state
+from core.focus_manager import FocusManager
 
 
 def build_search_view(
@@ -10,7 +11,7 @@ def build_search_view(
     on_back: callable,
 ) -> ft.View:
 
-    CARD_HEIGHT = 260
+    CARD_HEIGHT = 180
 
     search_field = ft.TextField(
         hint_text="Search for anime...",
@@ -32,25 +33,10 @@ def build_search_view(
     )
 
     def _on_focus_card(e, ctrl):
-        ctrl.scale = 1.05
-        ctrl.shadow = ft.BoxShadow(
-            spread_radius=2,
-            blur_radius=15,
-            color=ft.Colors.with_opacity(0.3, AppColors.PRIMARY),
-            offset=ft.Offset(0, 8),
-        )
-        try:
-            ctrl.update()
-        except Exception:
-            pass
+        FocusManager.focus_style(ctrl, True, AppColors.PRIMARY)
 
     def _on_blur_card(e, ctrl):
-        ctrl.scale = 1.0
-        ctrl.shadow = None
-        try:
-            ctrl.update()
-        except Exception:
-            pass
+        FocusManager.focus_style(ctrl, False, AppColors.PRIMARY)
 
     def _style_focusable(control, focused):
         if focused:
@@ -86,7 +72,9 @@ def build_search_view(
         )
         if not anime.poster:
             img = ft.Container(
-                content=ft.Icon(ft.Icons.MOVIE_ROUNDED, size=48, color=ft.Colors.ON_SURFACE_VARIANT),
+                content=ft.Icon(
+                    ft.Icons.MOVIE_ROUNDED, size=48, color=ft.Colors.ON_SURFACE_VARIANT
+                ),
                 expand=True,
                 bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
                 alignment=ft.Alignment.CENTER,
@@ -142,19 +130,29 @@ def build_search_view(
                     content=ft.Column(
                         [
                             title_text,
-                            ft.Row([year_text, ft.Container(expand=True), type_text, score_text], spacing=4),
+                            ft.Row(
+                                [
+                                    year_text,
+                                    ft.Container(expand=True),
+                                    type_text,
+                                    score_text,
+                                ],
+                                spacing=4,
+                            ),
                         ],
                         alignment=ft.MainAxisAlignment.END,
                         spacing=4,
-                    )
-                )
+                    ),
+                ),
             ],
             expand=True,
         )
 
         card_container = ft.Container(
             content=content,
-            border_radius=12,
+            border=ft.Border.all(4, ft.Colors.TRANSPARENT),
+            padding=4,
+            border_radius=16,
             clip_behavior="antiAlias",
             animate_scale=300,
             animate=300,
@@ -184,9 +182,13 @@ def build_search_view(
             empty_state.visible = True
             results_grid.visible = False
             if state.search_query:
-                empty_state.content.controls[1].value = f"No results found for '{state.search_query}'"
+                empty_state.content.controls[
+                    1
+                ].value = f"No results found for '{state.search_query}'"
             else:
-                empty_state.content.controls[1].value = "Search for an anime to get started."
+                empty_state.content.controls[
+                    1
+                ].value = "Search for an anime to get started."
         else:
             loading_indicator.visible = False
             empty_state.visible = False
@@ -208,8 +210,16 @@ def build_search_view(
         alignment=ft.Alignment.CENTER,
         content=ft.Column(
             [
-                ft.Icon(ft.Icons.SEARCH_OFF_ROUNDED, size=64, color=ft.Colors.ON_SURFACE_VARIANT),
-                ft.Text("Search for an anime to get started.", size=16, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Icon(
+                    ft.Icons.SEARCH_OFF_ROUNDED,
+                    size=64,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                ft.Text(
+                    "Search for an anime to get started.",
+                    size=16,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=16,
@@ -217,7 +227,9 @@ def build_search_view(
     )
 
     back_btn = ft.Container(
-        content=ft.Icon(ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, color=ft.Colors.ON_SURFACE),
+        content=ft.Icon(
+            ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, color=ft.Colors.ON_SURFACE
+        ),
         padding=10,
         border_radius=10,
         ink=True,
@@ -240,10 +252,7 @@ def build_search_view(
                             border_radius=10,
                             alignment=ft.Alignment.CENTER,
                             content=ft.Image(
-                                src="icon.png",
-                                width=24,
-                                height=24,
-                                fit="contain"
+                                src="icon.png", width=24, height=24, fit="contain"
                             ),
                         ),
                         ft.Text("Search", size=24, weight=ft.FontWeight.BOLD),
@@ -254,7 +263,7 @@ def build_search_view(
                 search_field,
             ],
             spacing=0,
-        )
+        ),
     )
 
     grid_area = ft.Container(

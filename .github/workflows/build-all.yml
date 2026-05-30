@@ -16,72 +16,21 @@ env:
   PYTHONUTF8: "1"
   FLET_CLI_NO_RICH_OUTPUT: "1"
   UV_PYTHON: "3.13"
-  BUILD_VERSION: ${{ inputs.build_version || '0.1.0' }}
+  BUILD_VERSION: ${{ inputs.build_version || github.ref_name || '0.1.0' }}
   BUILD_NUMBER: ${{ inputs.build_number || '1' }}
 
 jobs:
-  # ─── Windows (Automated .exe Installer) ────────────────────
-  build-windows:
-    runs-on: windows-latest
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      
-      - name: Build Windows Portable
-        run: uv run flet build windows --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v
-        
-      - name: Generate Icon for Installer
-        run: |
-          uv pip install pillow
-          uv run python -c "from PIL import Image; Image.open('src/assets/icon.png').save('src/assets/icon.ico', format='ICO', sizes=[(256, 256)])"
-
-      - name: Build Windows Installer (Inno Setup)
-        run: |
-          $IssContent = @"
-          [Setup]
-          AppId={{7B132174-8745-4B95-8F9B-983C66986F12}}
-          AppName=AnimePahe TV
-          AppVersion=${{ env.BUILD_VERSION }}
-          AppPublisher=Nwokike
-          AppPublisherURL=https://github.com/Nwokike
-          AppSupportURL=https://github.com/Nwokike/animepahe-tv
-          AppUpdatesURL=https://github.com/Nwokike/animepahe-tv
-          AppCopyright=Copyright (C) 2026 Nwokike
-          DefaultDirName={autopf}\AnimePahe TV
-          DefaultGroupName=AnimePahe TV
-          OutputDir=.\build\installer
-          OutputBaseFilename=AnimePahe_TV_Setup
-          Compression=lzma2
-          SolidCompression=yes
-          WizardStyle=modern
-          ArchitecturesAllowed=x64
-          ArchitecturesInstallIn64BitMode=x64
-          PrivilegesRequired=lowest
-          SetupIconFile=.\src\assets\icon.ico
-          UninstallDisplayIcon={app}\animepahe_tv.exe
-          CloseApplications=yes
-          AppMutex=AnimePaheTV_Mutex
-
-          [Files]
-          Source: "build\windows\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-          [Icons]
-          Name: "{group}\AnimePahe TV"; Filename: "{app}\animepahe_tv.exe"
-          Name: "{autodesktop}\AnimePahe TV"; Filename: "{app}\animepahe_tv.exe"; Tasks: desktopicon
-
-          [Tasks]
-          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
-          "@
-          Set-Content -Path "installer.iss" -Value $IssContent -Encoding UTF8
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-          
-      - uses: actions/upload-artifact@v5.0.0
-        with:
-          name: windows-installer
-          path: build/installer/AnimePahe_TV_Setup.exe
+      - name: Lint with Ruff
+        run: uv run ruff check src/
 
   # ─── Android APK (universal) ───────────────────────────
   build-apk:
+    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +39,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -108,6 +61,7 @@ jobs:
 
   # ─── Android APK (split per ABI) ───────────────────────
   build-apk-split:
+    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,6 +70,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -131,3 +89,23 @@ jobs:
         with:
           name: apk-split-abi
           path: build/apk/
+
+  # ─── Release ───────────────────────────────────────────
+  release:
+    needs: [build-apk, build-apk-split]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v5.0.0
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/apk-universal/*.apk
+            artifacts/apk-split-abi/*.apk
+          tag_name: ${{ env.BUILD_VERSION }}
+          generate_release_notes: true

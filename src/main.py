@@ -5,7 +5,13 @@ import urllib.parse
 
 from core.theme import AppTheme, AppColors
 from core.state import state
-from core.config import USE_EXTERNAL_PLAYER, KTV_PLAY_STORE_URL, KTV_UPTODOWN_URL, KTV_DEEP_LINK_SCHEME, EXTERNAL_PLAYER_NAMES
+from core.config import (
+    USE_EXTERNAL_PLAYER,
+    KTV_PLAY_STORE_URL,
+    KTV_UPTODOWN_URL,
+    KTV_DEEP_LINK_SCHEME,
+    EXTERNAL_PLAYER_NAMES,
+)
 from core.focus_manager import FocusManager
 from services.animepahe import AnimePaheScraper
 from views.splash import build_splash_view
@@ -19,11 +25,15 @@ def _theme_button_style(page: ft.Page, is_primary: bool = False):
     return ft.ButtonStyle(
         bgcolor={
             ft.ControlState.FOCUSED: AppColors.PRIMARY,
-            ft.ControlState.DEFAULT: AppColors.PRIMARY if is_primary else ft.Colors.SURFACE,
+            ft.ControlState.DEFAULT: AppColors.PRIMARY
+            if is_primary
+            else ft.Colors.SURFACE,
         },
         color={
             ft.ControlState.FOCUSED: ft.Colors.WHITE,
-            ft.ControlState.DEFAULT: ft.Colors.WHITE if is_primary else ft.Colors.ON_SURFACE,
+            ft.ControlState.DEFAULT: ft.Colors.WHITE
+            if is_primary
+            else ft.Colors.ON_SURFACE,
         },
     )
 
@@ -69,7 +79,9 @@ def show_ktv_install_dialog(page: ft.Page):
         ),
         actions=[
             ft.Button(content=ft.Text("Not now"), on_click=dismiss),
-            ft.Button(content=ft.Text("Download from Uptodown"), on_click=open_uptodown),
+            ft.Button(
+                content=ft.Text("Download from Uptodown"), on_click=open_uptodown
+            ),
         ],
         actions_alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
     )
@@ -108,6 +120,10 @@ async def main(page: ft.Page):
     state.scraper = scraper
 
     def handle_global_back():
+        if page.dialog and page.dialog.open:
+            page.dialog.open = False
+            page.update()
+            return
         if len(page.views) > 1:
             top_view = page.views[-1]
             route = getattr(top_view, "route", "")
@@ -176,7 +192,9 @@ async def main(page: ft.Page):
 
         sources = scraper.sources(anime_session, episode_session)
         if not sources:
-            page.snack_bar = ft.SnackBar(ft.Text("No sources found."), bgcolor=AppColors.ERROR)
+            page.snack_bar = ft.SnackBar(
+                ft.Text("No sources found."), bgcolor=AppColors.ERROR
+            )
             page.snack_bar.open = True
             page.update()
             return
@@ -187,6 +205,14 @@ async def main(page: ft.Page):
             state.selected_source = src
             state.current_anime_session = anime_session
             state.current_episode_session = episode_session
+
+            if hasattr(page, "refresh_episodes"):
+                try:
+                    page.refresh_episodes()
+                except Exception:
+                    pass
+            page.update()
+
             try:
                 page.pop_dialog()
             except Exception:
@@ -197,14 +223,20 @@ async def main(page: ft.Page):
                 page.run_task(_start_playback)
 
         async def _start_playback():
-            page.snack_bar = ft.SnackBar(ft.Text("Resolving stream..."), bgcolor=AppColors.SUCCESS)
+            page.snack_bar = ft.SnackBar(
+                ft.Text("Resolving stream..."), bgcolor=AppColors.SUCCESS
+            )
             page.snack_bar.open = True
             page.update()
             await navigate("/play")
 
         buttons = []
         for src in sources:
-            audio_label = "DUB (ENG)" if "eng" in src.audio.lower() else f"SUB ({src.audio.upper()})"
+            audio_label = (
+                "DUB (ENG)"
+                if "eng" in src.audio.lower()
+                else f"SUB ({src.audio.upper()})"
+            )
             label = f"{src.resolution}p - {audio_label}"
             if src.fansub:
                 label += f" ({src.fansub})"
@@ -220,7 +252,11 @@ async def main(page: ft.Page):
         dlg = ft.AlertDialog(
             title=ft.Text("Select Quality & Audio", weight=ft.FontWeight.BOLD),
             content=ft.ListView(controls=buttons, spacing=10),
-            actions=[ft.Button(content=ft.Text("Cancel"), on_click=lambda e: page.pop_dialog())],
+            actions=[
+                ft.Button(
+                    content=ft.Text("Cancel"), on_click=lambda e: page.pop_dialog()
+                )
+            ],
             modal=True,
         )
         page.show_dialog(dlg)
@@ -261,7 +297,9 @@ async def main(page: ft.Page):
                 build_home_view(
                     page_obj=page,
                     on_load_latest=load_latest,
-                    on_select_anime=lambda a: page.run_task(navigate, f"/anime?session={a}"),
+                    on_select_anime=lambda a: page.run_task(
+                        navigate, f"/anime?session={a}"
+                    ),
                     on_search_click=lambda: page.run_task(navigate, "/search"),
                 )
             )
@@ -271,7 +309,9 @@ async def main(page: ft.Page):
                 build_search_view(
                     page_obj=page,
                     on_search=load_search,
-                    on_select_anime=lambda a: page.run_task(navigate, f"/anime?session={a.session}"),
+                    on_select_anime=lambda a: page.run_task(
+                        navigate, f"/anime?session={a.session}"
+                    ),
                     on_back=lambda: page.run_task(navigate, "/home"),
                 )
             )
@@ -320,8 +360,12 @@ async def main(page: ft.Page):
                             pass
 
             page.views.pop()
-            previous_view = page.views[-1]
-            page.run_task(navigate, previous_view.route)
+            if route.startswith("/play") and hasattr(page, "refresh_episodes"):
+                try:
+                    page.refresh_episodes()
+                except Exception:
+                    pass
+            page.update()
 
     page.on_route_change = route_change
     page.on_view_pop = view_pop

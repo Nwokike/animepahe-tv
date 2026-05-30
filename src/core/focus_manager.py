@@ -24,13 +24,29 @@ class FocusManager:
                     scrollable.scroll_to(key=control_key, duration=200)
                 except Exception:
                     pass
+
         return _on_focus
 
     @staticmethod
-    def focus_style(control: ft.Container, focused: bool, primary_color: str = "#E94560"):
+    def focus_style(
+        control: ft.Container, focused: bool, primary_color: str = "#E94560"
+    ):
         if focused:
-            control.border = ft.Border.all(2.5, primary_color)
-            control.scale = 1.05
+            control.scale = 1.08
+            control.bgcolor = ft.Colors.with_opacity(0.25, primary_color)
+            control.border = ft.Border.all(4, primary_color)
+            control.shadow = ft.BoxShadow(
+                spread_radius=8,
+                blur_radius=35,
+                color=ft.Colors.with_opacity(0.85, primary_color),
+                offset=ft.Offset(0, 12),
+            )
         else:
-            control.border = ft.Border.all(0.5, ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE))
             control.scale = 1.0
+            control.bgcolor = ft.Colors.TRANSPARENT
+            control.border = ft.Border.all(4, ft.Colors.TRANSPARENT)
+            control.shadow = None
+        try:
+            control.update()
+        except Exception:
+            pass

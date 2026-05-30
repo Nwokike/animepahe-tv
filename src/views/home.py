@@ -1,6 +1,7 @@
 import flet as ft
 from core.state import state, LatestRelease
 from core.theme import AppColors
+from core.focus_manager import FocusManager
 
 
 def build_home_view(
@@ -11,7 +12,7 @@ def build_home_view(
     on_page_change: callable = None,
 ) -> ft.View:
 
-    CARD_HEIGHT = 140
+    CARD_HEIGHT = 180
 
     latest_grid = ft.ResponsiveRow(
         spacing=16,
@@ -20,18 +21,7 @@ def build_home_view(
     )
 
     def on_hover_card(e, container):
-        if e.data == "true":
-            container.scale = 1.05
-            container.shadow = ft.BoxShadow(
-                spread_radius=2,
-                blur_radius=15,
-                color=ft.Colors.with_opacity(0.3, AppColors.PRIMARY),
-                offset=ft.Offset(0, 8),
-            )
-        else:
-            container.scale = 1.0
-            container.shadow = None
-        container.update()
+        FocusManager.focus_style(container, e.data == "true", AppColors.PRIMARY)
 
     def build_card(release: LatestRelease, idx: int):
         img = ft.Image(
@@ -79,15 +69,17 @@ def build_home_view(
                         [title_text, ep_text],
                         alignment=ft.MainAxisAlignment.END,
                         spacing=4,
-                    )
-                )
+                    ),
+                ),
             ],
             expand=True,
         )
 
         card_container = ft.Container(
             content=content,
-            border_radius=12,
+            border=ft.Border.all(4, ft.Colors.TRANSPARENT),
+            padding=4,
+            border_radius=16,
             clip_behavior="antiAlias",
             animate_scale=300,
             animate=300,
@@ -108,25 +100,10 @@ def build_home_view(
         return wrapper
 
     def _on_focus_card(e, ctrl):
-        ctrl.scale = 1.05
-        ctrl.shadow = ft.BoxShadow(
-            spread_radius=2,
-            blur_radius=15,
-            color=ft.Colors.with_opacity(0.3, AppColors.PRIMARY),
-            offset=ft.Offset(0, 8),
-        )
-        try:
-            ctrl.update()
-        except Exception:
-            pass
+        FocusManager.focus_style(ctrl, True, AppColors.PRIMARY)
 
     def _on_blur_card(e, ctrl):
-        ctrl.scale = 1.0
-        ctrl.shadow = None
-        try:
-            ctrl.update()
-        except Exception:
-            pass
+        FocusManager.focus_style(ctrl, False, AppColors.PRIMARY)
 
     def load_page(page_num: int):
         state.is_loading = True
@@ -162,8 +139,18 @@ def build_home_view(
         prev_btn = ft.Container(
             content=ft.Row(
                 [
-                    ft.Icon(ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, color=ft.Colors.ON_SURFACE if state.latest_page > 1 else ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text("Previous", color=ft.Colors.ON_SURFACE if state.latest_page > 1 else ft.Colors.ON_SURFACE_VARIANT),
+                    ft.Icon(
+                        ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
+                        color=ft.Colors.ON_SURFACE
+                        if state.latest_page > 1
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                    ft.Text(
+                        "Previous",
+                        color=ft.Colors.ON_SURFACE
+                        if state.latest_page > 1
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
                 ],
                 spacing=8,
             ),
@@ -181,8 +168,18 @@ def build_home_view(
         next_btn = ft.Container(
             content=ft.Row(
                 [
-                    ft.Text("Next", color=ft.Colors.ON_SURFACE if state.latest_has_more else ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Icon(ft.Icons.ARROW_FORWARD_IOS_ROUNDED, color=ft.Colors.ON_SURFACE if state.latest_has_more else ft.Colors.ON_SURFACE_VARIANT),
+                    ft.Text(
+                        "Next",
+                        color=ft.Colors.ON_SURFACE
+                        if state.latest_has_more
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                    ft.Icon(
+                        ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                        color=ft.Colors.ON_SURFACE
+                        if state.latest_has_more
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
                 ],
                 spacing=8,
             ),
@@ -197,7 +194,15 @@ def build_home_view(
         next_btn.on_blur = lambda e: _style_focusable(e.control, False)
 
         nav_row = ft.Row(
-            controls=[prev_btn, ft.Text(f"Page {state.latest_page}", color=ft.Colors.ON_SURFACE, weight=ft.FontWeight.W_500), next_btn],
+            controls=[
+                prev_btn,
+                ft.Text(
+                    f"Page {state.latest_page}",
+                    color=ft.Colors.ON_SURFACE,
+                    weight=ft.FontWeight.W_500,
+                ),
+                next_btn,
+            ],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=16,
         )
@@ -219,8 +224,8 @@ def build_home_view(
                 ft.Container(
                     expand=True,
                     alignment=ft.Alignment.CENTER,
-                    content=ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4)
-                )
+                    content=ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4),
+                ),
             ]
         else:
             scroll_content.controls = [header, section_header, latest_grid, nav_row]
@@ -228,7 +233,11 @@ def build_home_view(
         page_obj.update()
 
     def handle_theme_toggle(e):
-        page_obj.theme_mode = ft.ThemeMode.LIGHT if page_obj.theme_mode == ft.ThemeMode.DARK else ft.ThemeMode.DARK
+        page_obj.theme_mode = (
+            ft.ThemeMode.LIGHT
+            if page_obj.theme_mode == ft.ThemeMode.DARK
+            else ft.ThemeMode.DARK
+        )
         page_obj.update()
 
     def _on_focus_btn(e):
@@ -258,7 +267,9 @@ def build_home_view(
 
     theme_btn = ft.Container(
         content=ft.Icon(
-            ft.Icons.LIGHT_MODE_ROUNDED if page_obj.theme_mode == ft.ThemeMode.DARK else ft.Icons.DARK_MODE_ROUNDED,
+            ft.Icons.LIGHT_MODE_ROUNDED
+            if page_obj.theme_mode == ft.ThemeMode.DARK
+            else ft.Icons.DARK_MODE_ROUNDED,
             color=ft.Colors.ON_SURFACE,
         ),
         padding=10,
@@ -283,10 +294,10 @@ def build_home_view(
                 ),
                 ft.Row(
                     controls=[search_btn, theme_btn],
-                )
+                ),
             ],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        )
+        ),
     )
 
     scroll_content = ft.Column(

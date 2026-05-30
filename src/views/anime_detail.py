@@ -1,6 +1,7 @@
 import flet as ft
 from core.theme import AppColors
 from core.state import state
+from core.focus_manager import FocusManager
 
 
 def build_anime_detail_view(
@@ -11,9 +12,12 @@ def build_anime_detail_view(
 ) -> ft.View:
     anime = next((a for a in state.search_results if a.session == anime_session), None)
     if not anime:
-        lr = next((a for a in state.latest_releases if a.anime_session == anime_session), None)
+        lr = next(
+            (a for a in state.latest_releases if a.anime_session == anime_session), None
+        )
         if lr:
             from core.state import Anime
+
             anime = Anime(
                 id=lr.anime_id,
                 title=lr.anime_title,
@@ -82,7 +86,7 @@ def build_anime_detail_view(
             parts.append(f"\u2605 {anime.score:.1f}")
         info_text.value = " \u2022 ".join(parts)
 
-    EP_CARD_HEIGHT = 140
+    EP_CARD_HEIGHT = 180
 
     episode_grid = ft.ResponsiveRow(
         spacing=16,
@@ -96,20 +100,10 @@ def build_anime_detail_view(
     )
 
     def _on_focus_ep(e, ctrl):
-        ctrl.scale = 1.02
-        ctrl.bgcolor = ft.Colors.with_opacity(0.2, AppColors.PRIMARY)
-        try:
-            ctrl.update()
-        except Exception:
-            pass
+        FocusManager.focus_style(ctrl, True, AppColors.PRIMARY)
 
     def _on_blur_ep(e, ctrl):
-        ctrl.scale = 1.0
-        ctrl.bgcolor = AppColors.get_glass_bg(page_obj)
-        try:
-            ctrl.update()
-        except Exception:
-            pass
+        FocusManager.focus_style(ctrl, False, AppColors.PRIMARY)
 
     def _style_focusable(control, focused):
         if focused:
@@ -138,7 +132,18 @@ def build_anime_detail_view(
             pass
 
     def _build_episode_card(ep, idx: int) -> ft.Container:
-        play_icon = ft.Icon(ft.Icons.PLAY_CIRCLE_FILL_ROUNDED, size=40, color=ft.Colors.WHITE)
+        is_playing = (
+            state.current_anime_session == anime_session
+            and state.current_episode_session == ep.session
+        )
+
+        play_icon = ft.Icon(
+            ft.Icons.EQUALIZER_ROUNDED
+            if is_playing
+            else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+            size=40,
+            color=AppColors.PRIMARY if is_playing else ft.Colors.WHITE,
+        )
 
         img = ft.Image(
             src=ep.snapshot if ep.snapshot else "",
@@ -182,20 +187,22 @@ def build_anime_detail_view(
                         [ep_text, duration_text],
                         alignment=ft.MainAxisAlignment.CENTER,
                         spacing=4,
-                    )
+                    ),
                 ),
                 ft.Container(
                     alignment=ft.Alignment.CENTER_RIGHT,
                     padding=16,
                     content=play_icon,
-                )
+                ),
             ],
             expand=True,
         )
 
         card_container = ft.Container(
             content=content,
-            border_radius=12,
+            border=ft.Border.all(4, ft.Colors.TRANSPARENT),
+            padding=4,
+            border_radius=16,
             clip_behavior="antiAlias",
             bgcolor=AppColors.get_glass_bg(page_obj),
             animate_scale=300,
@@ -203,7 +210,9 @@ def build_anime_detail_view(
             ink=True,
             height=EP_CARD_HEIGHT,
             key=f"ep_card_{idx}",
-            on_click=lambda _, a=anime_session, es=ep.session: page_obj.run_task(on_play, a, es),
+            on_click=lambda _, a=anime_session, es=ep.session: page_obj.run_task(
+                on_play, a, es
+            ),
         )
         card_container.tab_index = idx + 2
         card_container.on_focus = lambda e: _on_focus_ep(e, card_container)
@@ -227,8 +236,18 @@ def build_anime_detail_view(
         prev_btn = ft.Container(
             content=ft.Row(
                 [
-                    ft.Icon(ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, color=ft.Colors.ON_SURFACE if state.episodes_page > 1 else ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text("Previous", color=ft.Colors.ON_SURFACE if state.episodes_page > 1 else ft.Colors.ON_SURFACE_VARIANT),
+                    ft.Icon(
+                        ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
+                        color=ft.Colors.ON_SURFACE
+                        if state.episodes_page > 1
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                    ft.Text(
+                        "Previous",
+                        color=ft.Colors.ON_SURFACE
+                        if state.episodes_page > 1
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
                 ],
                 spacing=8,
             ),
@@ -246,8 +265,18 @@ def build_anime_detail_view(
         next_btn = ft.Container(
             content=ft.Row(
                 [
-                    ft.Text("Next", color=ft.Colors.ON_SURFACE if state.episodes_has_more else ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Icon(ft.Icons.ARROW_FORWARD_IOS_ROUNDED, color=ft.Colors.ON_SURFACE if state.episodes_has_more else ft.Colors.ON_SURFACE_VARIANT),
+                    ft.Text(
+                        "Next",
+                        color=ft.Colors.ON_SURFACE
+                        if state.episodes_has_more
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                    ft.Icon(
+                        ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                        color=ft.Colors.ON_SURFACE
+                        if state.episodes_has_more
+                        else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
                 ],
                 spacing=8,
             ),
@@ -262,12 +291,25 @@ def build_anime_detail_view(
         next_btn.on_blur = lambda e: _style_focusable(e.control, False)
 
         ep_nav = ft.Row(
-            controls=[prev_btn, ft.Text(f"Page {state.episodes_page}", color=ft.Colors.ON_SURFACE, weight=ft.FontWeight.W_500), next_btn],
+            controls=[
+                prev_btn,
+                ft.Text(
+                    f"Page {state.episodes_page}",
+                    color=ft.Colors.ON_SURFACE,
+                    weight=ft.FontWeight.W_500,
+                ),
+                next_btn,
+            ],
             alignment=ft.MainAxisAlignment.CENTER,
             spacing=16,
         )
 
-        episodes_section.controls = [episodes_header, episode_grid, ep_nav, loading_indicator]
+        episodes_section.controls = [
+            episodes_header,
+            episode_grid,
+            ep_nav,
+            loading_indicator,
+        ]
         page_obj.update()
 
     def on_next_ep_page(e):
@@ -297,7 +339,9 @@ def build_anime_detail_view(
             ft.Image(src=anime.poster, fit="cover", border_radius=16)
             if anime and anime.poster
             else ft.Container(
-                content=ft.Icon(ft.Icons.MOVIE_ROUNDED, size=64, color=ft.Colors.ON_SURFACE_VARIANT),
+                content=ft.Icon(
+                    ft.Icons.MOVIE_ROUNDED, size=64, color=ft.Colors.ON_SURFACE_VARIANT
+                ),
                 bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
                 border_radius=16,
                 alignment=ft.Alignment.CENTER,
@@ -306,7 +350,9 @@ def build_anime_detail_view(
     )
 
     back_btn = ft.Container(
-        content=ft.Icon(ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, color=ft.Colors.ON_SURFACE),
+        content=ft.Icon(
+            ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED, color=ft.Colors.ON_SURFACE
+        ),
         padding=10,
         border_radius=10,
         ink=True,
