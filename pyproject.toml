@@ -35,3 +35,8 @@ bundle_id = "com.animepahe.tv"
 dev = [
     "ruff>=0.15.13",
 ]
+
+[tool.flet.splash]
+color = "#F8FAFC"
+dark_color = "#0B0F19"
+

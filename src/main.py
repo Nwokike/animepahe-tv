@@ -1,5 +1,4 @@
 import flet as ft
-import asyncio
 import base64
 import urllib.parse
 
@@ -12,7 +11,6 @@ from core.config import (
 )
 from core.focus_manager import FocusManager
 from services.animepahe import AnimePaheScraper
-from views.splash import build_splash_view
 from views.home import build_home_view
 from views.search import build_search_view
 from views.anime_detail import build_anime_detail_view
@@ -276,10 +274,6 @@ async def main(page: ft.Page):
         except Exception:
             show_ktv_install_dialog(page)
 
-    async def splash_complete():
-        await asyncio.sleep(1.5)
-        await navigate("/home")
-
     async def route_change(e: ft.RouteChangeEvent | None = None):
         route = page.route
         parsed = urllib.parse.urlparse(route)
@@ -287,11 +281,7 @@ async def main(page: ft.Page):
         if parsed.path in ["/", "/home", "/search"]:
             page.views.clear()
 
-        if parsed.path == "/":
-            page.views.append(build_splash_view())
-            page.run_task(splash_complete)
-
-        elif parsed.path == "/home":
+        if parsed.path in ["/", "/home"]:
             page.views.append(
                 build_home_view(
                     page_obj=page,
