@@ -1,4 +1,5 @@
 import flet as ft
+import asyncio
 from core.state import state, LatestRelease
 from core.theme import AppColors
 
@@ -10,8 +11,6 @@ def build_home_view(
     on_search_click,
     on_page_change: callable = None,
 ) -> ft.View:
-
-    CARD_HEIGHT = 140
 
     latest_grid = ft.ResponsiveRow(
         spacing=16,
@@ -99,7 +98,7 @@ def build_home_view(
             animate_scale=300,
             animate=300,
             ink=True,
-            height=CARD_HEIGHT,
+            aspect_ratio=1.67,
             key=f"home_card_{idx}",
             on_click=lambda _: on_select_anime(release.anime_session),
         )
@@ -286,14 +285,284 @@ def build_home_view(
         auto_scroll=True,
     )
 
+    # Local Button Style with high-contrast D-pad focus state
+    def local_button_style():
+        return ft.ButtonStyle(
+            bgcolor={
+                ft.ControlState.FOCUSED: AppColors.PRIMARY,
+                ft.ControlState.DEFAULT: ft.Colors.SURFACE_CONTAINER_HIGHEST
+                if hasattr(ft.Colors, "SURFACE_CONTAINER_HIGHEST")
+                else ft.Colors.SURFACE,
+            },
+            color={
+                ft.ControlState.FOCUSED: ft.Colors.WHITE,
+                ft.ControlState.DEFAULT: ft.Colors.ON_SURFACE,
+            },
+        )
+
+    # Developer Feedback and Support Dialog
+    def show_support_dialog():
+        page_obj.dialog_open = True
+
+        async def open_email(e):
+            page_obj.dialog_open = False
+            try:
+                page_obj.pop_dialog()
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(
+                    ft.UrlLauncher().launch_url(
+                        "mailto:nwokikeonyeka@gmail.com?subject=AnimePahe%20TV%20Support%20and%20Feedback"
+                    ),
+                    timeout=1.0,
+                )
+            except Exception:
+                pass
+            page_obj.update()
+
+        async def open_telegram(e):
+            page_obj.dialog_open = False
+            try:
+                page_obj.pop_dialog()
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(
+                    ft.UrlLauncher().launch_url("https://t.me/aham_bu_onyeka"),
+                    timeout=1.0,
+                )
+            except Exception:
+                pass
+            page_obj.update()
+
+        def dismiss(e):
+            page_obj.dialog_open = False
+            try:
+                page_obj.pop_dialog()
+            except Exception:
+                pass
+            page_obj.update()
+
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Contact Support & Feedback", weight=ft.FontWeight.BOLD),
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "We would love to hear your suggestions, feature requests, or bug reports. "
+                        "Our contact channels are completely safe and secure.",
+                        size=13,
+                    ),
+                ],
+                tight=True,
+            ),
+            actions=[
+                ft.Button(content=ft.Text("Close"), on_click=dismiss),
+                ft.Button(
+                    content=ft.Text("Send Email"),
+                    on_click=lambda e: page_obj.run_task(open_email, e),
+                    style=local_button_style(),
+                ),
+                ft.Button(
+                    content=ft.Text("Telegram Chat"),
+                    on_click=lambda e: page_obj.run_task(open_telegram, e),
+                    style=local_button_style(),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+        page_obj.show_dialog(dlg)
+
+    # Secure asynchronous URL launcher using modern UrlLauncher
+    async def launch_url_async(url: str):
+        try:
+            await ft.UrlLauncher().launch_url(url)
+        except Exception:
+            pass
+
+    # Dynamic Banner Slides Generator
+    def build_slide(slide_idx: int) -> ft.Control:
+        if slide_idx == 0:
+            logo_src = "nkiri_logo.png"
+            title = "Nkiri TV"
+            tagline = "Watch your favorite Movies, Series & Dramas for free on TV"
+            badge_text = "Watch Movies"
+
+            def on_click_action(_):
+                page_obj.run_task(launch_url_async, "https://nkiritv.github.io/")
+        elif slide_idx == 1:
+            logo_src = "livescore_logo.png"
+            title = "LiveScore TV"
+            tagline = "Live football scores, standings & match streams on your TV"
+            badge_text = "Live Sports"
+
+            def on_click_action(_):
+                page_obj.run_task(launch_url_async, "https://livescore-tv.github.io/")
+        else:
+            logo_src = None
+            title = "Contact Support & Send Feedback"
+            tagline = "Suggest features, report bugs, or request content directly to us"
+            badge_text = "Contact Support"
+
+            def on_click_action(_):
+                show_support_dialog()
+
+        # Leading Logo Icon / Container
+        if logo_src:
+            leading = ft.Container(
+                content=ft.Image(src=logo_src, width=38, height=38, fit="contain"),
+                border_radius=8,
+                clip_behavior="antiAlias",
+            )
+        else:
+            leading = ft.Container(
+                content=ft.Icon(
+                    ft.Icons.MARK_CHAT_UNREAD_ROUNDED, size=24, color=AppColors.PRIMARY
+                ),
+                bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
+                border_radius=8,
+                width=38,
+                height=38,
+                alignment=ft.Alignment.CENTER,
+            )
+
+        # Slide Card Component
+        slide_card = ft.Container(
+            key=f"slide_card_{slide_idx}",
+            padding=ft.Padding(16, 12, 16, 12),
+            bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
+            border_radius=12,
+            border=ft.Border.all(1.5, ft.Colors.TRANSPARENT),
+            animate=200,
+            animate_scale=200,
+            on_click=on_click_action,
+            content=ft.Row(
+                controls=[
+                    ft.Row(
+                        controls=[
+                            leading,
+                            ft.Column(
+                                controls=[
+                                    ft.Row(
+                                        controls=[
+                                            ft.Text(
+                                                title,
+                                                size=13,
+                                                weight=ft.FontWeight.BOLD,
+                                                color=ft.Colors.ON_SURFACE,
+                                            ),
+                                            ft.Container(
+                                                content=ft.Text(
+                                                    badge_text,
+                                                    size=9,
+                                                    weight=ft.FontWeight.BOLD,
+                                                    color=AppColors.PRIMARY,
+                                                ),
+                                                padding=ft.Padding(6, 2, 6, 2),
+                                                border_radius=6,
+                                                border=ft.Border.all(
+                                                    1,
+                                                    ft.Colors.with_opacity(
+                                                        0.3, AppColors.PRIMARY
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                        spacing=8,
+                                        vertical_alignment=ft.VerticalAlignment.CENTER,
+                                    ),
+                                    ft.Text(
+                                        tagline,
+                                        size=11,
+                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                        overflow=ft.TextOverflow.ELLIPSIS,
+                                        max_lines=1,
+                                    ),
+                                ],
+                                spacing=2,
+                                alignment=ft.MainAxisAlignment.CENTER,
+                                expand=True,
+                            ),
+                        ],
+                        spacing=12,
+                        expand=True,
+                    ),
+                    ft.Icon(
+                        ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                        size=14,
+                        color=ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.VerticalAlignment.CENTER,
+            ),
+        )
+
+        # Remote D-pad focus visual triggers
+        def on_focus_change(e):
+            if e.control.focused:
+                e.control.border = ft.Border.all(1.5, AppColors.PRIMARY)
+                e.control.scale = 1.01
+                e.control.bgcolor = ft.Colors.with_opacity(0.12, AppColors.PRIMARY)
+            else:
+                e.control.border = ft.Border.all(1.5, ft.Colors.TRANSPARENT)
+                e.control.scale = 1.0
+                e.control.bgcolor = ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE)
+            e.control.update()
+
+        slide_card.on_focus = on_focus_change
+        slide_card.tab_index = 1000
+        return slide_card
+
+    current_slide_idx = 0
+    switcher = ft.AnimatedSwitcher(
+        content=build_slide(0),
+        transition=ft.AnimatedSwitcherTransition.FADE,
+        duration=300,
+        expand=True,
+    )
+
+    async def auto_rotate():
+        nonlocal current_slide_idx
+        try:
+            while True:
+                await asyncio.sleep(10)
+                if "/home" not in [v.route for v in page_obj.views]:
+                    break
+                current_slide_idx = (current_slide_idx + 1) % 3
+                switcher.content = build_slide(current_slide_idx)
+                page_obj.update()
+        except Exception:
+            pass
+
+    # Start banner slide loop background task
+    page_obj.run_task(auto_rotate)
+
+    banner_container = ft.Container(
+        padding=ft.Padding(24, 8, 24, 16),
+        bgcolor=ft.Colors.SURFACE,
+        content=ft.Row(
+            controls=[switcher],
+            expand=True,
+        ),
+    )
+
     view = ft.View(
         route="/home",
         controls=[
             ft.SafeArea(
-                ft.Container(
-                    content=scrollable,
+                ft.Column(
+                    controls=[
+                        ft.Container(
+                            content=scrollable,
+                            expand=True,
+                            bgcolor=ft.Colors.SURFACE,
+                        ),
+                        banner_container,
+                    ],
                     expand=True,
-                    bgcolor=ft.Colors.SURFACE,
+                    spacing=0,
                 ),
                 expand=True,
             )

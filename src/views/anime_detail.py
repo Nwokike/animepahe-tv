@@ -87,8 +87,6 @@ def build_anime_detail_view(
             parts.append(f"\u2605 {anime.score:.1f}")
         info_text.value = " \u2022 ".join(parts)
 
-    EP_CARD_HEIGHT = 140
-
     episode_grid = ft.ResponsiveRow(
         spacing=16,
         run_spacing=16,
@@ -177,7 +175,7 @@ def build_anime_detail_view(
             animate_scale=300,
             animate=300,
             ink=True,
-            height=EP_CARD_HEIGHT,
+            aspect_ratio=1.67,
             key=f"ep_card_{idx}",
             on_click=lambda _, a=anime_session, es=ep.session: page_obj.run_task(
                 on_play, a, es

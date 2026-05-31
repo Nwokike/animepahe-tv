@@ -10,8 +10,6 @@ def build_search_view(
     on_back: callable,
 ) -> ft.View:
 
-    CARD_HEIGHT = 240
-
     search_field = ft.TextField(
         hint_text="Search for anime...",
         color=ft.Colors.ON_SURFACE,
@@ -135,7 +133,7 @@ def build_search_view(
             content=content_stack,
             border_radius=12,
             clip_behavior="antiAlias",
-            height=CARD_HEIGHT,
+            aspect_ratio=0.67,
         )
 
         card_container = ft.Container(
