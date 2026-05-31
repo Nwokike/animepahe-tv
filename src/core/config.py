@@ -11,7 +11,7 @@ KTV_PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=ng.kiri.ktvp
 KTV_UPTODOWN_URL = "https://ktv-player.uptodown.com/android"
 
 # Deep link scheme for KTV Player
-KTV_DEEP_LINK_SCHEME = "https://play.kiri.ng/play?url="
+KTV_DEEP_LINK_SCHEME = "ktv://play?url="
 
 # Fake player names to show in dialog (all buttons go to KTV Player)
 EXTERNAL_PLAYER_NAMES = [
