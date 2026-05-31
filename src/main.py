@@ -266,18 +266,15 @@ async def main(page: ft.Page):
 
         m3u8_url = state.selected_source.url
 
-        encoded_m3u8 = base64.urlsafe_b64encode(m3u8_url.encode()).decode()
+        # Strip trailing '=' padding characters to prevent URL query parameter parsing issues
+        encoded_m3u8 = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
         deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_m3u8}"
 
         launcher = ft.UrlLauncher()
         try:
-            if await launcher.can_launch_url(deep_link):
-                await launcher.launch_url(deep_link)
-                return
+            await launcher.launch_url(deep_link)
         except Exception:
-            pass
-
-        show_ktv_install_dialog(page)
+            show_ktv_install_dialog(page)
 
     async def splash_complete():
         await asyncio.sleep(1.5)
