@@ -1,4 +1,5 @@
 import flet as ft
+import asyncio
 import base64
 import urllib.parse
 
@@ -38,7 +39,12 @@ def show_ktv_install_dialog(page: ft.Page):
             page.pop_dialog()
         except Exception:
             pass
-        await ft.UrlLauncher().launch_url(KTV_PLAY_STORE_URL)
+        try:
+            await asyncio.wait_for(
+                ft.UrlLauncher().launch_url(KTV_PLAY_STORE_URL), timeout=1.0
+            )
+        except Exception:
+            pass
         page.update()
 
     async def open_uptodown(e):
@@ -47,7 +53,12 @@ def show_ktv_install_dialog(page: ft.Page):
             page.pop_dialog()
         except Exception:
             pass
-        await ft.UrlLauncher().launch_url(KTV_UPTODOWN_URL)
+        try:
+            await asyncio.wait_for(
+                ft.UrlLauncher().launch_url(KTV_UPTODOWN_URL), timeout=1.0
+            )
+        except Exception:
+            pass
         page.update()
 
     def dismiss(e):
@@ -268,9 +279,14 @@ async def main(page: ft.Page):
         encoded_m3u8 = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
         deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_m3u8}"
 
-        launcher = ft.UrlLauncher()
         try:
-            await launcher.launch_url(deep_link)
+            # We await the launch with a 1.0s timeout. If it succeeds, KTV Player opens,
+            # and since the app goes to the background, the completion event is suspended.
+            # Thus, TimeoutError is raised, which is actually a SUCCESS indicator!
+            # If it fails instantly (e.g. scheme not registered), Exception is raised immediately.
+            await asyncio.wait_for(ft.UrlLauncher().launch_url(deep_link), timeout=1.0)
+        except asyncio.TimeoutError:
+            pass  # Successfully launched and transitioned to background!
         except Exception:
             show_ktv_install_dialog(page)
 
