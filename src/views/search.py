@@ -31,10 +31,6 @@ def build_search_view(
         run_spacing=16,
     )
 
-
-
-
-
     def _build_card(anime, idx: int):
         is_playing = state.current_anime_session == anime.session
 

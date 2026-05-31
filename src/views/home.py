@@ -19,8 +19,6 @@ def build_home_view(
         margin=24,
     )
 
-
-
     def build_card(release: LatestRelease, idx: int):
         is_playing = (
             state.current_anime_session == release.anime_session
@@ -113,8 +111,6 @@ def build_home_view(
         )
         return wrapper
 
-
-
     def load_page(page_num: int):
         state.is_loading = True
         state.latest_page = page_num
@@ -128,8 +124,6 @@ def build_home_view(
     def on_prev_page(e):
         if state.latest_page > 1:
             load_page(state.latest_page - 1)
-
-
 
     def update_grid():
         latest_grid.controls.clear()
@@ -235,8 +229,6 @@ def build_home_view(
             else ft.ThemeMode.DARK
         )
         page_obj.update()
-
-
 
     search_btn = ft.Container(
         content=ft.Icon(ft.Icons.SEARCH_ROUNDED, color=ft.Colors.ON_SURFACE),

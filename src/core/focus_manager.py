@@ -26,5 +26,3 @@ class FocusManager:
                     pass
 
         return _on_focus
-
-

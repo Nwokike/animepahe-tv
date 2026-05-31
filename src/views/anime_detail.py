@@ -100,10 +100,6 @@ def build_anime_detail_view(
         visible=False,
     )
 
-
-
-
-
     def _build_episode_card(ep, idx: int) -> ft.Container:
         is_playing = (
             state.current_anime_session == anime_session
