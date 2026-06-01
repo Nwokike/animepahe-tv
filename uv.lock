@@ -19,6 +19,7 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "beautifulsoup4" },
     { name = "flet" },
+    { name = "flet-video" },
     { name = "httpx" },
 ]
 
@@ -32,6 +33,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "flet", specifier = "==0.85.0" },
+    { name = "flet-video", specifier = ">=0.85.0" },
     { name = "httpx", specifier = ">=0.28.1" },
 ]
 
@@ -85,6 +87,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/96/05/fad3c45a31707779c745e5361f25022f3d8447aba29c6dcaaa4e03e6ec0a/flet-0.85.0.tar.gz", hash = "sha256:17ba534fdf5bc4d806468156302216c4c906d483fa37c505dc629c9e9a42f3ee", size = 501301, upload-time = "2026-05-08T22:15:46.541Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/46/52/80ecbec0ea38150d755f6686689dd36e4db1812234abc19ebadd80e416f5/flet-0.85.0-py3-none-any.whl", hash = "sha256:ebc0e8bf378be186f664e3a751f0f6d6bc012f1ff50fabbe9b05a92f65414b32", size = 579720, upload-time = "2026-05-08T22:15:47.962Z" },
+]
+
+[[package]]
+name = "flet-video"
+version = "0.85.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flet" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/90/51/68bff4ff0e486602cd0b4e80af7ec57921e7dfbd9fc8841ab19388250813/flet_video-0.85.0.tar.gz", hash = "sha256:d61f3c10111031a4c4b72bc9f9b09dcb64c5297f7dff2640c8888d51a43c406c", size = 23761, upload-time = "2026-05-08T22:16:54.325Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/27/37/e47280d5116be11349332da3ee97f05c4d5a2d3ec81bf775acca857d423b/flet_video-0.85.0-py3-none-any.whl", hash = "sha256:bdcd33f9feca9b58e2ff100631ea7c56c8680465e9089b201b70106b5da067ee", size = 25691, upload-time = "2026-05-08T22:16:53.401Z" },
 ]
 
 [[package]]

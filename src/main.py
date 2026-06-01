@@ -6,15 +6,18 @@ import urllib.parse
 from core.theme import AppTheme, AppColors
 from core.state import state
 from core.config import (
+    USE_EXTERNAL_PLAYER,
     KTV_PLAY_STORE_URL,
     KTV_UPTODOWN_URL,
     KTV_DEEP_LINK_SCHEME,
 )
 from core.focus_manager import FocusManager
 from services.animepahe import AnimePaheScraper
+from services.kwik_resolver import KwikResolver
 from views.home import build_home_view
 from views.search import build_search_view
 from views.anime_detail import build_anime_detail_view
+from views.player import build_player_view
 
 
 def _theme_button_style():
@@ -84,7 +87,7 @@ def show_ktv_install_dialog(page: ft.Page):
         actions=[
             ft.Button(content=ft.Text("Not now"), on_click=dismiss),
             ft.Button(
-                content=ft.Text("Play Store"),
+                content=ft.Text("Get it on Play Store"),
                 on_click=lambda e: page.run_task(open_store, e),
                 style=_theme_button_style(),
             ),
@@ -125,6 +128,7 @@ async def main(page: ft.Page):
     page.theme_mode = ft.ThemeMode.SYSTEM
 
     scraper = AnimePaheScraper()
+    kwik = KwikResolver()
 
     focus_manager = FocusManager(page)
 
@@ -143,7 +147,12 @@ async def main(page: ft.Page):
             top_view = page.views[-1]
             route = getattr(top_view, "route", "")
 
-            if route in ("/anime", "/search"):
+            if route == "/player":
+                page.views.pop()
+                if page.views:
+                    page.route = page.views[-1].route
+                page.update()
+            elif route in ("/anime", "/search"):
                 page.run_task(navigate, "/home")
             else:
                 page.run_task(navigate, "/home")
@@ -273,22 +282,67 @@ async def main(page: ft.Page):
         if not state.selected_source:
             return
 
-        m3u8_url = state.selected_source.url
+        kwik_url = state.selected_source.url
 
-        # Strip trailing '=' padding characters to prevent URL query parameter parsing issues
-        encoded_m3u8 = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
-        deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_m3u8}"
+        if USE_EXTERNAL_PLAYER:
+            if not kwik_url.startswith("http"):
+                return
+            encoded_m3u8 = (
+                base64.urlsafe_b64encode(kwik_url.encode()).decode().rstrip("=")
+            )
+            deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_m3u8}"
 
-        try:
-            # We await the launch with a 1.0s timeout. If it succeeds, KTV Player opens,
-            # and since the app goes to the background, the completion event is suspended.
-            # Thus, TimeoutError is raised, which is actually a SUCCESS indicator!
-            # If it fails instantly (e.g. scheme not registered), Exception is raised immediately.
-            await asyncio.wait_for(ft.UrlLauncher().launch_url(deep_link), timeout=1.0)
-        except asyncio.TimeoutError:
-            pass  # Successfully launched and transitioned to background!
-        except Exception:
-            show_ktv_install_dialog(page)
+            try:
+                await asyncio.wait_for(
+                    ft.UrlLauncher().launch_url(deep_link), timeout=1.0
+                )
+            except asyncio.TimeoutError:
+                pass
+            except Exception:
+                show_ktv_install_dialog(page)
+        else:
+            loading_dlg = ft.AlertDialog(
+                modal=True,
+                content=ft.Container(
+                    padding=40,
+                    content=ft.Column(
+                        [
+                            ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4),
+                            ft.Container(height=16),
+                            ft.Text(
+                                "Resolving stream...",
+                                size=14,
+                                color=ft.Colors.ON_SURFACE,
+                            ),
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ),
+                bgcolor=ft.Colors.SURFACE,
+            )
+            page.dialog_open = True
+            page.show_dialog(loading_dlg)
+            page.update()
+
+            m3u8_url = kwik.resolve(kwik_url)
+            page.dialog_open = False
+            try:
+                page.pop_dialog()
+            except Exception:
+                pass
+
+            if not m3u8_url:
+                page.snack_bar = ft.SnackBar(
+                    ft.Text("Failed to resolve stream."),
+                    bgcolor=AppColors.ERROR,
+                )
+                page.snack_bar.open = True
+                page.update()
+                return
+
+            state.playing_url = m3u8_url
+            state.player_referer = kwik_url
+            await navigate("/player")
 
     async def route_change(e: ft.RouteChangeEvent | None = None):
         route = page.route
@@ -335,6 +389,19 @@ async def main(page: ft.Page):
                     )
                 )
                 page.run_task(load_episodes, session, 1)
+
+        elif parsed.path == "/player":
+            headers = (
+                {"Referer": state.player_referer} if state.player_referer else None
+            )
+            page.views.append(
+                build_player_view(
+                    page_obj=page,
+                    m3u8_url=state.playing_url,
+                    title="",
+                    http_headers=headers,
+                )
+            )
 
         page.update()
 

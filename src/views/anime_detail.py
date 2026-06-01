@@ -59,11 +59,21 @@ def build_anime_detail_view(
 
     title_text = ft.Text(
         anime.title if anime else "Loading...",
-        size=36,
+        size=28,
         weight=ft.FontWeight.BOLD,
         color=ft.Colors.ON_SURFACE,
         max_lines=2,
         overflow=ft.TextOverflow.ELLIPSIS,
+    )
+
+    title_container = ft.Container(
+        content=title_text,
+        expand=True,
+        size_change_interval=100,
+        on_size_change=lambda e: (
+            setattr(title_text, 'size', max(14, min(36, int(e.width * 0.07))))
+            or title_text.update()
+        ),
     )
 
     info_text = ft.Text(
@@ -332,7 +342,7 @@ def build_anime_detail_view(
                     controls=[
                         back_btn,
                         ft.Container(height=16),
-                        title_text,
+                        title_container,
                         ft.Container(height=8),
                         info_text,
                     ],

@@ -392,13 +392,13 @@ def build_home_view(
             def on_click_action(_):
                 page_obj.run_task(launch_url_async, "https://nkiritv.github.io/")
         elif slide_idx == 1:
-            logo_src = "livescore_logo.png"
-            title = "LiveScore TV"
-            tagline = "Live football scores, standings & match streams on your TV"
+            logo_src = "socolive_logo.png"
+            title = "Socolive TV"
+            tagline = "Live football streams, match scores & highlights on your TV"
             badge_text = "Live Sports"
 
             def on_click_action(_):
-                page_obj.run_task(launch_url_async, "https://livescore-tv.github.io/")
+                page_obj.run_task(launch_url_async, "https://soco-live.github.io/")
         else:
             logo_src = None
             title = "Contact Support & Send Feedback"
