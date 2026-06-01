@@ -24,13 +24,10 @@ Get the latest version of AnimePahe TV. If you aren't sure which Android version
 
 | Platform | Download | Size | Notes |
 |:--------:|:--------:|:----:|:------|
-| 🤖 **Android (Universal)** | [**animepahe-tv.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv.apk) | 85.1 MB | Works on all Android devices (ARM64, ARMv7, x86_64) |
-| 🤖 **Android (ARM64)** | [**animepahe-tv-arm64-v8a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-arm64-v8a.apk) | 30.3 MB | For modern 64-bit Android devices and TVs |
-| 🤖 **Android (ARM32)** | [**animepahe-tv-armeabi-v7a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-armeabi-v7a.apk) | 29.4 MB | For older 32-bit Android devices and older Firesticks |
-| 🤖 **Android (x86_64)** | [**animepahe-tv-x86_64.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-x86_64.apk) | 31.5 MB | For Android emulators / ChromeOS |
-| 🪟 **Windows** | [**AnimePahe_TV_Setup.exe**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/AnimePahe_TV_Setup.exe) | 35.5 MB | Windows 10/11 Installer (64-bit) |
-| 🍎 **macOS** | *Coming soon* | - | |
-| 📱 **iOS** | *Coming soon* | - | |
+| 🤖 **Android (ARM64)** | [**animepahe-tv-arm64-v8a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-arm64-v8a.apk) | ~31 MB | For modern 64-bit Android TVs and smartphones |
+| 🤖 **Android (ARM32)** | [**animepahe-tv-armeabi-v7a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-armeabi-v7a.apk) | ~30 MB | For older 32-bit Android devices and older Firesticks |
+| 🤖 **Android (x86_64)** | [**animepahe-tv-x86_64.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-x86_64.apk) | ~31 MB | For Android emulators / ChromeOS |
+| 🤖 **Android (Universal)** | [**animepahe-tv.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv.apk) | ~76 MB | Works on all devices (use if hardware type is unknown) |
 
 ---
 
