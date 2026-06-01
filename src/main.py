@@ -24,6 +24,7 @@ from core.constants import (
 from services.animepahe import AnimePaheScraper
 from services.kwik_resolver import KwikResolver
 from services.cache import Cache
+from services.update_service import UpdateService
 from views.home import build_home_view
 from views.search import build_search_view
 from views.anime_detail import build_anime_detail_view
@@ -109,6 +110,73 @@ def show_ktv_install_dialog(page: ft.Page):
     page.show_dialog(dlg)
 
 
+def show_update_dialog(page: ft.Page, update_data: dict):
+    page.dialog_open = True
+
+    async def open_download(e):
+        page.dialog_open = False
+        try:
+            page.pop_dialog()
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(
+                ft.UrlLauncher().launch_url(update_data["apk_url"]), timeout=1.0
+            )
+        except Exception:
+            pass
+        page.update()
+
+    def dismiss(e):
+        page.dialog_open = False
+        try:
+            page.pop_dialog()
+        except Exception:
+            pass
+        page.update()
+
+    dlg = ft.AlertDialog(
+        modal=update_data["mandatory"],
+        title=ft.Text("New Version Available! 🎉", weight=ft.FontWeight.BOLD),
+        content=ft.Column(
+            [
+                ft.Text(
+                    f"Version {update_data['version']} is ready for installation.",
+                    size=14,
+                ),
+                ft.Container(height=8),
+                ft.Text("Highlights:", weight=ft.FontWeight.W_600, size=13),
+                ft.Text(
+                    update_data["release_notes"],
+                    size=12,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+            ],
+            tight=True,
+        ),
+        actions=[
+            ft.Button(
+                content=ft.Text("Update Now"),
+                on_click=lambda e: page.run_task(open_download, e),
+                style=_theme_button_style(),
+            ),
+        ]
+        + (
+            []
+            if update_data["mandatory"]
+            else [
+                ft.Button(
+                    content=ft.Text("Later"),
+                    on_click=dismiss,
+                )
+            ]
+        ),
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+    page.show_dialog(dlg)
+
+
 class AppController:
     def __init__(self, page: ft.Page):
         self.page = page
@@ -144,6 +212,15 @@ class AppController:
         self.focus_manager = FocusManager(self.page)
         self.focus_manager.set_back_handler(self._handle_global_back)
 
+        self.update_service = UpdateService()
+        self.page.run_task(self._check_for_updates_bg)
+
+    async def _check_for_updates_bg(self):
+        await asyncio.sleep(2.0)
+        update_data = await self.update_service.check_for_update()
+        if update_data:
+            show_update_dialog(self.page, update_data)
+
     def _show_error_snackbar(self):
         try:
             self.page.snack_bar = ft.SnackBar(
@@ -171,10 +248,27 @@ class AppController:
             return
         if len(self.page.views) > 1:
             self.page.views.pop()
+            if self.page.views:
+                self.page.route = self.page.views[-1].route
             self.page.update()
 
     async def navigate(self, route: str):
         await self.page.push_route(route)
+
+    def _open_anime_detail(self, anime):
+        session = anime if isinstance(anime, str) else anime.session
+        state.episodes_page = 1
+        self.page.views.append(
+            build_anime_detail_view(
+                page_obj=self.page,
+                anime_session=session,
+                on_load_episodes=self.load_episodes,
+                on_play=self.play_episode,
+            )
+        )
+        self.page.route = f"/anime?session={session}"
+        self.page.run_task(self.load_episodes, session, 1)
+        self.page.update()
 
     async def load_latest(self, page_num: int = 1):
         task_key = f"latest_{page_num}"
@@ -391,9 +485,7 @@ class AppController:
                 build_home_view(
                     page_obj=self.page,
                     on_load_latest=self.load_latest,
-                    on_select_anime=lambda a: self.page.run_task(
-                        self.navigate, f"/anime?session={a}"
-                    ),
+                    on_select_anime=self._open_anime_detail,
                     on_search_click=lambda: self.page.run_task(
                         self.navigate, "/search"
                     ),
@@ -405,27 +497,10 @@ class AppController:
                 build_search_view(
                     page_obj=self.page,
                     on_search=self.load_search,
-                    on_select_anime=lambda a: self.page.run_task(
-                        self.navigate, f"/anime?session={a.session}"
-                    ),
+                    on_select_anime=self._open_anime_detail,
                     on_back=lambda: self.page.run_task(self.navigate, "/home"),
                 )
             )
-
-        elif parsed.path == "/anime":
-            params = urllib.parse.parse_qs(parsed.query)
-            session = params.get("session", [None])[0]
-            if session:
-                state.episodes_page = 1
-                self.page.views.append(
-                    build_anime_detail_view(
-                        page_obj=self.page,
-                        anime_session=session,
-                        on_load_episodes=self.load_episodes,
-                        on_play=self.play_episode,
-                    )
-                )
-                self.page.run_task(self.load_episodes, session, 1)
 
         self.page.update()
 

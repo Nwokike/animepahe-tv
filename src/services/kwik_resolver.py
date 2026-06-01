@@ -111,12 +111,17 @@ class KwikResolver:
             client = self._get_client()
             resp = await client.head(
                 url,
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Referer": referer},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": referer,
+                },
                 timeout=5,
             )
             ct = resp.headers.get("content-type", "")
             result = resp.status_code == 200 and "mpegurl" in ct
-            print(f"[KWIK] verify HEAD {url} -> {resp.status_code} ct={ct} result={result}")
+            print(
+                f"[KWIK] verify HEAD {url} -> {resp.status_code} ct={ct} result={result}"
+            )
             return result
         except httpx.RequestError as ex:
             print(f"[KWIK] verify HEAD {url} -> RequestError: {ex}")

@@ -1,4 +1,3 @@
-import asyncio
 import flet as ft
 from core.theme import AppColors
 from core.state import state
@@ -20,28 +19,8 @@ def build_search_view(
     search_spinner = ft.ProgressRing(
         color=AppColors.PRIMARY, stroke_width=3, width=20, height=20, visible=False
     )
-    _debounce_task: asyncio.Task | None = None
-
-    def _cancel_debounce():
-        nonlocal _debounce_task
-        if _debounce_task and not _debounce_task.done():
-            _debounce_task.cancel()
-
-    def on_search_change(e):
-        query = e.control.value.strip() if e.control.value else ""
-        if not query:
-            return
-        _cancel_debounce()
-        nonlocal _debounce_task
-        _debounce_task = asyncio.create_task(_delayed_search(query))
-
-    async def _delayed_search(query: str):
-        await asyncio.sleep(0.5)
-        if query and not state.is_loading:
-            page_obj.run_task(on_search, query)
 
     def do_search(query: str):
-        _cancel_debounce()
         if not query or state.is_loading:
             return
         if len(query) > MAX_SEARCH_QUERY_LENGTH:
@@ -61,7 +40,6 @@ def build_search_view(
         content_padding=20,
         text_size=16,
         on_submit=lambda e: do_search(e.control.value.strip()),
-        on_change=lambda e: on_search_change(e),
         focused_border_color=AppColors.PRIMARY,
         focused_bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
     )
