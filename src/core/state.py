@@ -64,9 +64,8 @@ class AppState:
     selected_source: Source | None = None
     current_anime_session: str = ""
     current_episode_session: str = ""
-    playing_url: str = ""
-    playing_title: str = ""
-    player_referer: str = ""
+    player_error: str | None = None
+    cache: object | None = None
 
     def __init__(self):
         self.search_results = []

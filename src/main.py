@@ -6,18 +6,27 @@ import urllib.parse
 from core.theme import AppTheme, AppColors
 from core.state import state
 from core.config import (
-    USE_EXTERNAL_PLAYER,
     KTV_PLAY_STORE_URL,
     KTV_UPTODOWN_URL,
     KTV_DEEP_LINK_SCHEME,
 )
 from core.focus_manager import FocusManager
+from core.constants import (
+    APP_NAME,
+    ERR_NETWORK,
+    ERR_NO_STREAM,
+    ERR_LOAD_EPISODE,
+    LBL_INSTALL_PLAYER_TITLE,
+    LBL_INSTALL_PLAYER_BODY,
+    LBL_NOT_NOW,
+    LBL_DOWNLOAD_UPTODOWN,
+)
 from services.animepahe import AnimePaheScraper
 from services.kwik_resolver import KwikResolver
+from services.cache import Cache
 from views.home import build_home_view
 from views.search import build_search_view
 from views.anime_detail import build_anime_detail_view
-from views.player import build_player_view
 
 
 def _theme_button_style():
@@ -74,25 +83,22 @@ def show_ktv_install_dialog(page: ft.Page):
 
     dlg = ft.AlertDialog(
         modal=True,
-        title=ft.Text("Install KTV Player", weight=ft.FontWeight.BOLD),
+        title=ft.Text(LBL_INSTALL_PLAYER_TITLE, weight=ft.FontWeight.BOLD),
         content=ft.Column(
             [
-                ft.Text(
-                    "To stream this episode, please install KTV Player for the best experience.",
-                    size=14,
-                ),
+                ft.Text(LBL_INSTALL_PLAYER_BODY, size=14),
             ],
             tight=True,
         ),
         actions=[
-            ft.Button(content=ft.Text("Not now"), on_click=dismiss),
+            ft.Button(content=ft.Text(LBL_NOT_NOW), on_click=dismiss),
             ft.Button(
                 content=ft.Text("Get it on Play Store"),
                 on_click=lambda e: page.run_task(open_store, e),
                 style=_theme_button_style(),
             ),
             ft.Button(
-                content=ft.Text("Uptodown"),
+                content=ft.Text(LBL_DOWNLOAD_UPTODOWN),
                 on_click=lambda e: page.run_task(open_uptodown, e),
                 style=_theme_button_style(),
             ),
@@ -103,144 +109,173 @@ def show_ktv_install_dialog(page: ft.Page):
     page.show_dialog(dlg)
 
 
-async def main(page: ft.Page):
-    page.title = "AnimePahe TV"
-    page.padding = 0
-    page.spacing = 0
+class AppController:
+    def __init__(self, page: ft.Page):
+        self.page = page
+        self.scraper: AnimePaheScraper | None = None
+        self.kwik: KwikResolver | None = None
+        self.cache: Cache | None = None
+        self.focus_manager: FocusManager | None = None
+        self._loading_locks: dict[str, asyncio.Lock] = {}
 
-    def global_error_handler(e):
-        page.snack_bar = ft.SnackBar(
-            ft.Text("Network error or stream unavailable."),
-            bgcolor=AppColors.ERROR,
-        )
-        page.snack_bar.open = True
-        page.update()
+    async def init(self):
+        self.page.title = APP_NAME
+        self.page.padding = 0
+        self.page.spacing = 0
 
-    page.on_error = global_error_handler
+        self.page.on_error = lambda e: self._show_error_snackbar()
 
-    page.fonts = {
-        "Outfit": "https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
-    }
-    page.theme = AppTheme.get_light_theme()
-    page.dark_theme = AppTheme.get_dark_theme()
-    page.theme.font_family = "Outfit"
-    page.dark_theme.font_family = "Outfit"
-    page.theme_mode = ft.ThemeMode.SYSTEM
+        self.page.fonts = {"Outfit": "assets/outfit.css"}
+        self.page.theme = AppTheme.get_light_theme()
+        self.page.dark_theme = AppTheme.get_dark_theme()
+        self.page.theme.font_family = "Outfit"
+        self.page.dark_theme.font_family = "Outfit"
+        self.page.theme_mode = ft.ThemeMode.SYSTEM
 
-    scraper = AnimePaheScraper()
-    kwik = KwikResolver()
+        self.cache = Cache()
+        self.scraper = AnimePaheScraper()
+        self.kwik = KwikResolver()
 
-    focus_manager = FocusManager(page)
+        await self.cache.start_sweep(interval=300)
 
-    state.scraper = scraper
+        state.scraper = self.scraper
+        state.cache = self.cache
 
-    def handle_global_back():
-        if getattr(page, "dialog_open", False):
-            page.dialog_open = False
+        self.focus_manager = FocusManager(self.page)
+        self.focus_manager.set_back_handler(self._handle_global_back)
+
+    def _show_error_snackbar(self):
+        try:
+            self.page.snack_bar = ft.SnackBar(
+                ft.Text(ERR_NETWORK),
+                bgcolor=AppColors.ERROR,
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception:
+            pass
+
+    def _get_lock(self, key: str) -> asyncio.Lock:
+        if key not in self._loading_locks:
+            self._loading_locks[key] = asyncio.Lock()
+        return self._loading_locks[key]
+
+    def _handle_global_back(self):
+        if getattr(self.page, "dialog_open", False):
+            self.page.dialog_open = False
             try:
-                page.pop_dialog()
+                self.page.pop_dialog()
             except Exception:
                 pass
-            page.update()
+            self.page.update()
             return
-        if len(page.views) > 1:
-            top_view = page.views[-1]
-            route = getattr(top_view, "route", "")
+        if len(self.page.views) > 1:
+            self.page.views.pop()
+            self.page.update()
 
-            if route == "/player":
-                page.views.pop()
-                if page.views:
-                    page.route = page.views[-1].route
-                page.update()
-            elif route in ("/anime", "/search"):
-                page.run_task(navigate, "/home")
-            else:
-                page.run_task(navigate, "/home")
+    async def navigate(self, route: str):
+        await self.page.push_route(route)
 
-    focus_manager.set_back_handler(handle_global_back)
+    async def load_latest(self, page_num: int = 1):
+        task_key = f"latest_{page_num}"
+        lock = self._get_lock(task_key)
+        if lock.locked():
+            return
 
-    async def navigate(route: str):
-        await page.push_route(route)
+        async with lock:
+            state.is_loading = True
+            state.latest_page = page_num
+            self._update_home_grid()
 
-    async def load_latest(page_num: int = 1):
-        state.is_loading = True
-        state.latest_page = page_num
-        if hasattr(page, "update_home_grid"):
-            page.update_home_grid()
-        page.update()
+            try:
+                results, has_more = await self.scraper.latest_releases(page_num)
+                state.latest_releases = results
+                state.latest_has_more = has_more
+            except Exception:
+                state.latest_releases = []
+                state.latest_has_more = False
+            finally:
+                state.is_loading = False
+                self._update_home_grid()
 
-        results, has_more = scraper.latest_releases(page_num)
-        state.latest_releases = results
-        state.latest_has_more = has_more
-        state.is_loading = False
-        if hasattr(page, "update_home_grid"):
-            page.update_home_grid()
-        page.update()
+    async def load_search(self, query: str):
+        if not query:
+            return
+        task_key = f"search_{query}"
+        lock = self._get_lock(task_key)
+        if lock.locked():
+            return
 
-    async def load_search(query: str):
-        state.is_loading = True
-        state.search_query = query
-        if hasattr(page, "refresh_search_results"):
-            page.refresh_search_results()
-        page.update()
+        async with lock:
+            state.is_loading = True
+            state.search_query = query
+            self._refresh_search_results()
 
-        results, has_more = scraper.search(query, 1)
-        state.search_results = results
-        state.search_has_more = has_more
-        state.is_loading = False
-        if hasattr(page, "refresh_search_results"):
-            page.refresh_search_results()
-        page.update()
+            try:
+                results, has_more = await self.scraper.search(query, 1)
+                state.search_results = results
+                state.search_has_more = has_more
+            except Exception:
+                state.search_results = []
+                state.search_has_more = False
+            finally:
+                state.is_loading = False
+                self._refresh_search_results()
 
-    async def load_episodes(anime_session: str, page_num: int = 1):
-        state.is_loading = True
-        state.episodes_page = page_num
-        if hasattr(page, "refresh_episodes"):
-            page.refresh_episodes()
-        page.update()
+    async def load_episodes(self, anime_session: str, page_num: int = 1):
+        task_key = f"episodes_{anime_session}"
+        lock = self._get_lock(task_key)
+        if lock.locked():
+            return
 
-        episodes, has_more = scraper.episodes(anime_session, page_num)
-        state.episodes = episodes
-        state.episodes_has_more = has_more
-        state.is_loading = False
-        if hasattr(page, "refresh_episodes"):
-            page.refresh_episodes()
-        page.update()
+        async with lock:
+            state.is_loading = True
+            state.episodes_page = page_num
+            self._refresh_episodes()
 
-    async def play_episode(anime_session: str, episode_session: str):
-        page.snack_bar = ft.SnackBar(ft.Text("Fetching available qualities..."))
-        page.snack_bar.open = True
-        page.update()
+            try:
+                episodes, has_more = await self.scraper.episodes(
+                    anime_session, page_num
+                )
+                state.episodes = episodes
+                state.episodes_has_more = has_more
+            except Exception:
+                state.episodes = []
+                state.episodes_has_more = False
+            finally:
+                state.is_loading = False
+                self._refresh_episodes()
 
-        sources = scraper.sources(anime_session, episode_session)
+    async def play_episode(self, anime_session: str, episode_session: str):
+        self._show_snackbar("Fetching available qualities...", AppColors.PRIMARY)
+
+        try:
+            sources = await self.scraper.sources(anime_session, episode_session)
+        except Exception:
+            self._show_snackbar(ERR_LOAD_EPISODE, AppColors.ERROR)
+            return
+
         if not sources:
-            page.snack_bar = ft.SnackBar(
-                ft.Text("No sources found."), bgcolor=AppColors.ERROR
-            )
-            page.snack_bar.open = True
-            page.update()
+            self._show_snackbar(ERR_NO_STREAM, AppColors.ERROR)
             return
 
         sources.sort(key=lambda s: s.resolution, reverse=True)
 
         def on_select(e, src):
-            page.dialog_open = False
+            self.page.dialog_open = False
             state.selected_source = src
             state.current_anime_session = anime_session
             state.current_episode_session = episode_session
 
-            if hasattr(page, "refresh_episodes"):
-                try:
-                    page.refresh_episodes()
-                except Exception:
-                    pass
-            page.update()
+            self._refresh_episodes()
 
             try:
-                page.pop_dialog()
+                self.page.pop_dialog()
             except Exception:
                 pass
-            page.run_task(play_episode_external, anime_session, episode_session)
+            self.page.run_task(
+                self._play_episode_external, anime_session, episode_session
+            )
 
         buttons = []
         for src in sources:
@@ -268,110 +303,99 @@ async def main(page: ft.Page):
                 ft.Button(
                     content=ft.Text("Cancel"),
                     on_click=lambda e: (
-                        setattr(page, "dialog_open", False),
-                        page.pop_dialog(),
+                        setattr(self.page, "dialog_open", False),
+                        self.page.pop_dialog(),
                     ),
                 )
             ],
             modal=True,
         )
-        page.dialog_open = True
-        page.show_dialog(dlg)
+        self.page.dialog_open = True
+        self.page.show_dialog(dlg)
 
-    async def play_episode_external(anime_session: str, episode_session: str):
+    async def _play_episode_external(self, anime_session: str, episode_session: str):
         if not state.selected_source:
             return
 
         kwik_url = state.selected_source.url
 
-        if USE_EXTERNAL_PLAYER:
-            if not kwik_url.startswith("http"):
-                return
-            encoded_m3u8 = (
-                base64.urlsafe_b64encode(kwik_url.encode()).decode().rstrip("=")
-            )
-            deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_m3u8}"
+        if not kwik_url.startswith("http"):
+            return
 
-            try:
-                await asyncio.wait_for(
-                    ft.UrlLauncher().launch_url(deep_link), timeout=1.0
-                )
-            except asyncio.TimeoutError:
-                pass
-            except Exception:
-                show_ktv_install_dialog(page)
-        else:
-            loading_dlg = ft.AlertDialog(
-                modal=True,
-                content=ft.Container(
-                    padding=40,
-                    content=ft.Column(
-                        [
-                            ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4),
-                            ft.Container(height=16),
-                            ft.Text(
-                                "Resolving stream...",
-                                size=14,
-                                color=ft.Colors.ON_SURFACE,
-                            ),
-                        ],
-                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
+        loading_dlg = ft.AlertDialog(
+            modal=True,
+            content=ft.Container(
+                padding=40,
+                content=ft.Column(
+                    [
+                        ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4),
+                        ft.Container(height=16),
+                        ft.Text(
+                            "Resolving stream...",
+                            size=14,
+                            color=ft.Colors.ON_SURFACE,
+                        ),
+                    ],
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
-                bgcolor=ft.Colors.SURFACE,
-            )
-            page.dialog_open = True
-            page.show_dialog(loading_dlg)
-            page.update()
+            ),
+            bgcolor=ft.Colors.SURFACE,
+        )
+        self.page.dialog_open = True
+        self.page.show_dialog(loading_dlg)
+        self.page.update()
 
-            m3u8_url = kwik.resolve(kwik_url)
-            page.dialog_open = False
-            try:
-                page.pop_dialog()
-            except Exception:
-                pass
+        m3u8_url = await self.kwik.resolve(kwik_url)
+        self.page.dialog_open = False
+        try:
+            self.page.pop_dialog()
+        except Exception:
+            pass
 
-            if not m3u8_url:
-                page.snack_bar = ft.SnackBar(
-                    ft.Text("Failed to resolve stream."),
-                    bgcolor=AppColors.ERROR,
-                )
-                page.snack_bar.open = True
-                page.update()
-                return
+        if not m3u8_url:
+            self._show_snackbar("Failed to resolve stream.", AppColors.ERROR)
+            return
 
-            state.playing_url = m3u8_url
-            state.player_referer = kwik_url
-            await navigate("/player")
+        encoded = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
+        deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded}"
 
-    async def route_change(e: ft.RouteChangeEvent | None = None):
-        route = page.route
+        try:
+            await asyncio.wait_for(ft.UrlLauncher().launch_url(deep_link), timeout=1.0)
+        except asyncio.TimeoutError:
+            pass
+        except Exception:
+            show_ktv_install_dialog(self.page)
+
+    async def route_change(self, e: ft.RouteChangeEvent | None = None):
+        route = self.page.route
         parsed = urllib.parse.urlparse(route)
 
         if parsed.path in ["/", "/home", "/search"]:
-            page.views.clear()
+            self.page.views.clear()
 
         if parsed.path in ["/", "/home"]:
-            page.views.append(
+            self.page.views.append(
                 build_home_view(
-                    page_obj=page,
-                    on_load_latest=load_latest,
-                    on_select_anime=lambda a: page.run_task(
-                        navigate, f"/anime?session={a}"
+                    page_obj=self.page,
+                    on_load_latest=self.load_latest,
+                    on_select_anime=lambda a: self.page.run_task(
+                        self.navigate, f"/anime?session={a}"
                     ),
-                    on_search_click=lambda: page.run_task(navigate, "/search"),
+                    on_search_click=lambda: self.page.run_task(
+                        self.navigate, "/search"
+                    ),
                 )
             )
 
         elif parsed.path == "/search":
-            page.views.append(
+            self.page.views.append(
                 build_search_view(
-                    page_obj=page,
-                    on_search=load_search,
-                    on_select_anime=lambda a: page.run_task(
-                        navigate, f"/anime?session={a.session}"
+                    page_obj=self.page,
+                    on_search=self.load_search,
+                    on_select_anime=lambda a: self.page.run_task(
+                        self.navigate, f"/anime?session={a.session}"
                     ),
-                    on_back=lambda: page.run_task(navigate, "/home"),
+                    on_back=lambda: self.page.run_task(self.navigate, "/home"),
                 )
             )
 
@@ -380,42 +404,71 @@ async def main(page: ft.Page):
             session = params.get("session", [None])[0]
             if session:
                 state.episodes_page = 1
-                page.views.append(
+                self.page.views.append(
                     build_anime_detail_view(
-                        page_obj=page,
+                        page_obj=self.page,
                         anime_session=session,
-                        on_load_episodes=load_episodes,
-                        on_play=play_episode,
+                        on_load_episodes=self.load_episodes,
+                        on_play=self.play_episode,
                     )
                 )
-                page.run_task(load_episodes, session, 1)
+                self.page.run_task(self.load_episodes, session, 1)
 
-        elif parsed.path == "/player":
-            headers = (
-                {"Referer": state.player_referer} if state.player_referer else None
+        self.page.update()
+
+    def view_pop(self, e: ft.ViewPopEvent):
+        if len(self.page.views) > 1:
+            self.page.views.pop()
+            if self.page.views:
+                self.page.route = self.page.views[-1].route
+            self.page.update()
+
+    def _update_home_grid(self):
+        if hasattr(self.page, "update_home_grid"):
+            self.page.update_home_grid()
+        else:
+            self.page.update()
+
+    def _refresh_search_results(self):
+        if hasattr(self.page, "refresh_search_results"):
+            self.page.refresh_search_results()
+        else:
+            self.page.update()
+
+    def _refresh_episodes(self):
+        if hasattr(self.page, "refresh_episodes"):
+            self.page.refresh_episodes()
+        else:
+            self.page.update()
+
+    def _show_snackbar(self, message: str, color: str):
+        try:
+            self.page.snack_bar = ft.SnackBar(
+                ft.Text(message),
+                bgcolor=color,
             )
-            page.views.append(
-                build_player_view(
-                    page_obj=page,
-                    m3u8_url=state.playing_url,
-                    title="",
-                    http_headers=headers,
-                )
-            )
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception:
+            pass
 
-        page.update()
+    async def cleanup(self):
+        if self.scraper:
+            await self.scraper.close()
+        if self.kwik:
+            await self.kwik.close()
+        if self.cache:
+            await self.cache.close()
 
-    def view_pop(e: ft.ViewPopEvent):
-        if len(page.views) > 1:
-            page.views.pop()
-            if page.views:
-                page.route = page.views[-1].route
-            page.update()
 
-    page.on_route_change = route_change
-    page.on_view_pop = view_pop
+async def main(page: ft.Page):
+    controller = AppController(page)
+    await controller.init()
 
-    await route_change()
+    page.on_route_change = controller.route_change
+    page.on_view_pop = controller.view_pop
+
+    await controller.route_change()
 
 
 if __name__ == "__main__":

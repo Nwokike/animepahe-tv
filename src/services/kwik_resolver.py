@@ -42,16 +42,22 @@ def _dean_unpack(html_text: str) -> list[str]:
 
 class KwikResolver:
     def __init__(self):
-        self.client = httpx.Client(timeout=15, follow_redirects=True)
+        self._client: httpx.AsyncClient | None = None
 
-    def resolve(self, kwik_url: str) -> str | None:
-        m3u8 = self._resolve_dean(kwik_url)
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=15, follow_redirects=True)
+        return self._client
+
+    async def resolve(self, kwik_url: str) -> str | None:
+        m3u8 = await self._resolve_dean(kwik_url)
         if m3u8:
             return m3u8
-        return self._resolve_direct_scan(kwik_url)
+        return await self._resolve_direct_scan(kwik_url)
 
-    def _resolve_dean(self, kwik_url: str) -> str | None:
-        resp = self.client.get(
+    async def _resolve_dean(self, kwik_url: str) -> str | None:
+        client = self._get_client()
+        resp = await client.get(
             kwik_url,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -62,12 +68,13 @@ class KwikResolver:
             return None
         urls = _dean_unpack(resp.text)
         for url in urls:
-            if self._verify(url, kwik_url):
+            if await self._verify(url, kwik_url):
                 return url
         return None
 
-    def _resolve_direct_scan(self, kwik_url: str) -> str | None:
-        resp = self.client.get(
+    async def _resolve_direct_scan(self, kwik_url: str) -> str | None:
+        client = self._get_client()
+        resp = await client.get(
             kwik_url,
             headers={
                 "User-Agent": "Mozilla/5.0",
@@ -78,13 +85,14 @@ class KwikResolver:
             return None
         urls = M3U8_PATTERN.findall(resp.text)
         for url in urls:
-            if self._verify(url, kwik_url):
+            if await self._verify(url, kwik_url):
                 return url
         return None
 
-    def _verify(self, url: str, referer: str) -> bool:
+    async def _verify(self, url: str, referer: str) -> bool:
         try:
-            resp = self.client.head(
+            client = self._get_client()
+            resp = await client.head(
                 url,
                 headers={"User-Agent": "Mozilla/5.0", "Referer": referer},
                 timeout=5,
@@ -95,5 +103,6 @@ class KwikResolver:
         except httpx.RequestError:
             return False
 
-    def close(self):
-        self.client.close()
+    async def close(self):
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()

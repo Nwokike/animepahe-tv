@@ -1,18 +1,28 @@
 import httpx
 
+
 BASE = "https://animepahe.com"
 
 
 class DDoSSolver:
     def __init__(self, timeout: int = 15):
-        self.client = httpx.Client(timeout=timeout, follow_redirects=True)
+        self._client: httpx.AsyncClient | None = None
         self._solved = False
+        self._timeout = timeout
 
-    def solve(self) -> bool:
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout, follow_redirects=True
+            )
+        return self._client
+
+    async def solve(self) -> bool:
         if self._solved:
             return True
         try:
-            self.client.get(
+            client = self._get_client()
+            resp = await client.get(
                 f"{BASE}/",
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -21,9 +31,9 @@ class DDoSSolver:
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 },
             )
-            ddgid = self.client.cookies.get("__ddgid_")
+            ddgid = resp.cookies.get("__ddgid_")
             if ddgid:
-                self.client.get(
+                await client.get(
                     f"{BASE}/.well-known/ddos-guard/id/{ddgid}",
                     headers={
                         "User-Agent": "Mozilla/5.0",
@@ -37,7 +47,7 @@ class DDoSSolver:
             pass
         return False
 
-    def get(
+    async def get(
         self,
         url: str,
         headers: dict | None = None,
@@ -45,11 +55,13 @@ class DDoSSolver:
         **kwargs,
     ) -> httpx.Response:
         if not self._solved:
-            self.solve()
+            await self.solve()
+        client = self._get_client()
         merged = {"User-Agent": "Mozilla/5.0"}
         if headers:
             merged.update(headers)
-        return self.client.get(url, headers=merged, params=params, **kwargs)
+        return await client.get(url, headers=merged, params=params, **kwargs)
 
-    def close(self):
-        self.client.close()
+    async def close(self):
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()

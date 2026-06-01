@@ -38,8 +38,7 @@ class AppColors:
         if page.theme_mode == ft.ThemeMode.DARK:
             return True
         try:
-            surface = page.dark_theme.color_scheme.surface
-            return surface and str(surface).lower().startswith(("#0", "#1"))
+            return page.platform_brightness == ft.Brightness.DARK
         except Exception:
             return True
 
@@ -62,8 +61,7 @@ class AppColors:
         if page.theme_mode == ft.ThemeMode.DARK:
             return AppColors.DARK_SURFACE_VARIANT
         try:
-            surface = page.dark_theme.color_scheme.surface
-            is_dark = surface and str(surface).lower().startswith(("#0", "#1"))
+            is_dark = page.platform_brightness == ft.Brightness.DARK
             return (
                 AppColors.DARK_SURFACE_VARIANT
                 if is_dark

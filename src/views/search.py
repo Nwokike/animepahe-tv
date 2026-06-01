@@ -1,6 +1,13 @@
+import asyncio
 import flet as ft
 from core.theme import AppColors
 from core.state import state
+from core.constants import (
+    LBL_SEARCH_HINT,
+    LBL_NO_RESULTS,
+    LBL_SEARCH_EMPTY,
+    MAX_SEARCH_QUERY_LENGTH,
+)
 
 
 def build_search_view(
@@ -10,8 +17,42 @@ def build_search_view(
     on_back: callable,
 ) -> ft.View:
 
+    search_spinner = ft.ProgressRing(
+        color=AppColors.PRIMARY, stroke_width=3, width=20, height=20, visible=False
+    )
+    _debounce_task: asyncio.Task | None = None
+
+    def _cancel_debounce():
+        nonlocal _debounce_task
+        if _debounce_task and not _debounce_task.done():
+            _debounce_task.cancel()
+
+    def on_search_change(e):
+        query = e.control.value.strip() if e.control.value else ""
+        if not query:
+            return
+        _cancel_debounce()
+        nonlocal _debounce_task
+        _debounce_task = asyncio.create_task(_delayed_search(query))
+
+    async def _delayed_search(query: str):
+        await asyncio.sleep(0.5)
+        if query and not state.is_loading:
+            page_obj.run_task(on_search, query)
+
+    def do_search(query: str):
+        _cancel_debounce()
+        if not query or state.is_loading:
+            return
+        if len(query) > MAX_SEARCH_QUERY_LENGTH:
+            query = query[:MAX_SEARCH_QUERY_LENGTH]
+        search_btn.disabled = True
+        search_spinner.visible = True
+        page_obj.update()
+        page_obj.run_task(on_search, query)
+
     search_field = ft.TextField(
-        hint_text="Search for anime...",
+        hint_text=LBL_SEARCH_HINT,
         color=ft.Colors.ON_SURFACE,
         bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
         border_color=ft.Colors.TRANSPARENT,
@@ -19,7 +60,8 @@ def build_search_view(
         prefix_icon=ft.Icons.SEARCH_ROUNDED,
         content_padding=20,
         text_size=16,
-        on_submit=lambda e: page_obj.run_task(on_search, e.data.strip()),
+        on_submit=lambda e: do_search(e.control.value.strip()),
+        on_change=lambda e: on_search_change(e),
         focused_border_color=AppColors.PRIMARY,
         focused_bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
     )
@@ -158,6 +200,8 @@ def build_search_view(
 
     def refresh_results():
         results_grid.controls.clear()
+        search_btn.disabled = False
+        search_spinner.visible = False
         if state.is_loading:
             loading_indicator.visible = True
             empty_state.visible = False
@@ -167,13 +211,11 @@ def build_search_view(
             empty_state.visible = True
             results_grid.visible = False
             if state.search_query:
-                empty_state.content.controls[
-                    1
-                ].value = f"No results found for '{state.search_query}'"
+                empty_state.content.controls[1].value = LBL_NO_RESULTS.format(
+                    query=state.search_query
+                )
             else:
-                empty_state.content.controls[
-                    1
-                ].value = "Search for an anime to get started."
+                empty_state.content.controls[1].value = LBL_SEARCH_EMPTY
         else:
             loading_indicator.visible = False
             empty_state.visible = False
@@ -183,6 +225,15 @@ def build_search_view(
         page_obj.update()
 
     page_obj.refresh_search_results = refresh_results
+
+    search_btn = ft.Container(
+        content=ft.Icon(ft.Icons.SEARCH_ROUNDED, color=ft.Colors.PRIMARY),
+        padding=10,
+        border_radius=10,
+        ink=True,
+        on_click=lambda _=None: do_search(search_field.value),
+    )
+    search_btn.tab_index = 2
 
     loading_indicator = ft.Container(
         alignment=ft.Alignment.CENTER,
@@ -201,7 +252,7 @@ def build_search_view(
                     color=ft.Colors.ON_SURFACE_VARIANT,
                 ),
                 ft.Text(
-                    "Search for an anime to get started.",
+                    LBL_SEARCH_EMPTY,
                     size=16,
                     color=ft.Colors.ON_SURFACE_VARIANT,
                 ),
@@ -243,7 +294,10 @@ def build_search_view(
                     spacing=12,
                 ),
                 ft.Container(height=8),
-                search_field,
+                ft.Row(
+                    [search_field, search_btn, search_spinner],
+                    spacing=8,
+                ),
             ],
             spacing=0,
         ),

@@ -2,6 +2,7 @@ import flet as ft
 import asyncio
 from core.state import state, LatestRelease
 from core.theme import AppColors
+from core.constants import APP_NAME, LBL_PREVIOUS, LBL_NEXT, LBL_PAGE
 
 
 def build_home_view(
@@ -110,6 +111,10 @@ def build_home_view(
         )
         return wrapper
 
+    loading_spinner = ft.ProgressRing(
+        color=AppColors.PRIMARY, stroke_width=3, width=20, height=20, visible=False
+    )
+
     def load_page(page_num: int):
         state.is_loading = True
         state.latest_page = page_num
@@ -118,75 +123,108 @@ def build_home_view(
         page_obj.run_task(on_load_latest, page_num)
 
     def on_next_page(e):
+        next_btn.disabled = True
+        loading_spinner.visible = True
+        page_obj.update()
         load_page(state.latest_page + 1)
 
     def on_prev_page(e):
         if state.latest_page > 1:
+            prev_btn.disabled = True
+            loading_spinner.visible = True
+            page_obj.update()
             load_page(state.latest_page - 1)
+
+    prev_btn = ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(
+                    ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                ft.Text("Previous", color=ft.Colors.ON_SURFACE_VARIANT),
+            ],
+            spacing=8,
+        ),
+        padding=ft.Padding(15, 10, 15, 10),
+        border_radius=10,
+        border=ft.Border.all(1.5, AppColors.PRIMARY),
+        ink=True,
+        on_click=on_prev_page,
+    )
+    prev_btn.tab_index = 3
+
+    next_btn = ft.Container(
+        content=ft.Row(
+            [
+                ft.Text("Next", color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Icon(
+                    ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+            ],
+            spacing=8,
+        ),
+        padding=ft.Padding(15, 10, 15, 10),
+        border_radius=10,
+        border=ft.Border.all(1.5, AppColors.PRIMARY),
+        ink=True,
+        on_click=on_next_page,
+    )
+    next_btn.tab_index = 4
 
     def update_grid():
         latest_grid.controls.clear()
         for i, r in enumerate(state.latest_releases):
             latest_grid.controls.append(build_card(r, i))
 
-        prev_btn = ft.Container(
-            content=ft.Row(
-                [
-                    ft.Icon(
-                        ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
-                        color=ft.Colors.ON_SURFACE
-                        if state.latest_page > 1
-                        else ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                    ft.Text(
-                        "Previous",
-                        color=ft.Colors.ON_SURFACE
-                        if state.latest_page > 1
-                        else ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                ],
-                spacing=8,
-            ),
-            padding=ft.Padding(15, 10, 15, 10),
-            border_radius=10,
-            border=ft.Border.all(1.5, AppColors.PRIMARY),
-            ink=True,
-            on_click=on_prev_page if state.latest_page > 1 else None,
+        prev_btn.content = ft.Row(
+            [
+                ft.Icon(
+                    ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
+                    color=ft.Colors.ON_SURFACE
+                    if state.latest_page > 1
+                    else ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                ft.Text(
+                    LBL_PREVIOUS,
+                    color=ft.Colors.ON_SURFACE
+                    if state.latest_page > 1
+                    else ft.Colors.ON_SURFACE_VARIANT,
+                ),
+            ],
+            spacing=8,
         )
+        prev_btn.disabled = state.latest_page <= 1
         num_cards = len(state.latest_releases)
         prev_btn.tab_index = num_cards + 3
 
-        next_btn = ft.Container(
-            content=ft.Row(
-                [
-                    ft.Text(
-                        "Next",
-                        color=ft.Colors.ON_SURFACE
-                        if state.latest_has_more
-                        else ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                    ft.Icon(
-                        ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
-                        color=ft.Colors.ON_SURFACE
-                        if state.latest_has_more
-                        else ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                ],
-                spacing=8,
-            ),
-            padding=ft.Padding(15, 10, 15, 10),
-            border_radius=10,
-            border=ft.Border.all(1.5, AppColors.PRIMARY),
-            ink=True,
-            on_click=on_next_page if state.latest_has_more else None,
+        next_btn.content = ft.Row(
+            [
+                ft.Text(
+                    LBL_NEXT,
+                    color=ft.Colors.ON_SURFACE
+                    if state.latest_has_more
+                    else ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                ft.Icon(
+                    ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                    color=ft.Colors.ON_SURFACE
+                    if state.latest_has_more
+                    else ft.Colors.ON_SURFACE_VARIANT,
+                ),
+            ],
+            spacing=8,
         )
+        next_btn.disabled = not state.latest_has_more
         next_btn.tab_index = num_cards + 4
 
         nav_row = ft.Row(
             controls=[
                 prev_btn,
+                loading_spinner,
                 ft.Text(
-                    f"Page {state.latest_page}",
+                    f"{LBL_PAGE} {state.latest_page}",
                     color=ft.Colors.ON_SURFACE,
                     weight=ft.FontWeight.W_500,
                 ),
@@ -259,7 +297,7 @@ def build_home_view(
                 ft.Row(
                     controls=[
                         ft.Image(src="icon.png", width=32, height=32, fit="contain"),
-                        ft.Text("AnimePahe TV", size=24, weight=ft.FontWeight.BOLD),
+                        ft.Text(APP_NAME, size=24, weight=ft.FontWeight.BOLD),
                     ],
                     spacing=12,
                 ),
@@ -313,23 +351,8 @@ def build_home_view(
             try:
                 await asyncio.wait_for(
                     ft.UrlLauncher().launch_url(
-                        "mailto:nwokikeonyeka@gmail.com?subject=AnimePahe%20TV%20Support%20and%20Feedback"
+                        "mailto:kalerosemary7@gmail.com?subject=AnimePahe%20TV%20Support%20and%20Feedback"
                     ),
-                    timeout=1.0,
-                )
-            except Exception:
-                pass
-            page_obj.update()
-
-        async def open_telegram(e):
-            page_obj.dialog_open = False
-            try:
-                page_obj.pop_dialog()
-            except Exception:
-                pass
-            try:
-                await asyncio.wait_for(
-                    ft.UrlLauncher().launch_url("https://t.me/aham_bu_onyeka"),
                     timeout=1.0,
                 )
             except Exception:
@@ -351,7 +374,7 @@ def build_home_view(
                 [
                     ft.Text(
                         "We would love to hear your suggestions, feature requests, or bug reports. "
-                        "Our contact channels are completely safe and secure.",
+                        "We value your feedback.",
                         size=13,
                     ),
                 ],
@@ -362,11 +385,6 @@ def build_home_view(
                 ft.Button(
                     content=ft.Text("Send Email"),
                     on_click=lambda e: page_obj.run_task(open_email, e),
-                    style=local_button_style(),
-                ),
-                ft.Button(
-                    content=ft.Text("Telegram Chat"),
-                    on_click=lambda e: page_obj.run_task(open_telegram, e),
                     style=local_button_style(),
                 ),
             ],

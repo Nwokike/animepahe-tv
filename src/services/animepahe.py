@@ -1,4 +1,5 @@
 import re
+import time
 import httpx
 from bs4 import BeautifulSoup
 from core.state import Anime, Episode, Source, LatestRelease
@@ -10,9 +11,28 @@ BASE = "https://animepahe.com"
 class AnimePaheScraper:
     def __init__(self):
         self.ddos = DDoSSolver()
+        self._mem_cache: dict = {}
+        self._mem_ttl: dict = {}
 
-    def latest_releases(self, page: int = 1) -> tuple[list[LatestRelease], bool]:
-        resp = self.ddos.get(
+    def _get_mem(self, key: str, ttl: int = 300):
+        if key in self._mem_cache and key in self._mem_ttl:
+            if time.time() < self._mem_ttl[key]:
+                return self._mem_cache[key]
+            del self._mem_cache[key]
+            del self._mem_ttl[key]
+        return None
+
+    def _set_mem(self, key: str, value, ttl: int = 300):
+        self._mem_cache[key] = value
+        self._mem_ttl[key] = time.time() + ttl
+
+    async def latest_releases(self, page: int = 1) -> tuple[list[LatestRelease], bool]:
+        cache_key = f"latest_{page}"
+        cached = self._get_mem(cache_key, ttl=300)
+        if cached:
+            return cached
+
+        resp = await self.ddos.get(
             f"{BASE}/api",
             params={"m": "airing", "page": page},
             headers={"Accept": "application/json"},
@@ -38,16 +58,28 @@ class AnimePaheScraper:
                 )
             )
         has_more = data.get("current_page", 1) < data.get("last_page", 1)
-        return results, has_more
+        result = (results, has_more)
+        self._set_mem(cache_key, result, ttl=300)
+        return result
 
-    def search(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
-        results, has_more = self._search_api(query, page)
+    async def search(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
+        cache_key = f"search_{query}_{page}"
+        cached = self._get_mem(cache_key, ttl=600)
+        if cached:
+            return cached
+
+        results, has_more = await self._search_api(query, page)
         if results:
-            return results, has_more
-        return self._search_html(query, page)
+            result = (results, has_more)
+            self._set_mem(cache_key, result, ttl=600)
+            return result
+        results, has_more = await self._search_html(query, page)
+        result = (results, has_more)
+        self._set_mem(cache_key, result, ttl=600)
+        return result
 
-    def _search_api(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
-        resp = self.ddos.get(
+    async def _search_api(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
+        resp = await self.ddos.get(
             f"{BASE}/api",
             params={"m": "search", "q": query, "page": page},
             headers={"Accept": "application/json"},
@@ -77,8 +109,8 @@ class AnimePaheScraper:
         has_more = data.get("current_page", 1) < data.get("last_page", 1)
         return results, has_more
 
-    def _search_html(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
-        resp = self.ddos.get(f"{BASE}/", params={"search": query, "page": page})
+    async def _search_html(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
+        resp = await self.ddos.get(f"{BASE}/", params={"search": query, "page": page})
         if resp.status_code != 200:
             return [], False
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -100,16 +132,28 @@ class AnimePaheScraper:
             )
         return results, bool(soup.select(".pagination .next"))
 
-    def episodes(self, anime_session: str, page: int = 1) -> tuple[list[Episode], bool]:
-        results, has_more = self._episodes_api(anime_session, page)
-        if results:
-            return results, has_more
-        return self._episodes_html(anime_session, page)
-
-    def _episodes_api(
+    async def episodes(
         self, anime_session: str, page: int = 1
     ) -> tuple[list[Episode], bool]:
-        resp = self.ddos.get(
+        cache_key = f"episodes_{anime_session}_{page}"
+        cached = self._get_mem(cache_key, ttl=600)
+        if cached:
+            return cached
+
+        results, has_more = await self._episodes_api(anime_session, page)
+        if results:
+            result = (results, has_more)
+            self._set_mem(cache_key, result, ttl=600)
+            return result
+        results, has_more = await self._episodes_html(anime_session, page)
+        result = (results, has_more)
+        self._set_mem(cache_key, result, ttl=600)
+        return result
+
+    async def _episodes_api(
+        self, anime_session: str, page: int = 1
+    ) -> tuple[list[Episode], bool]:
+        resp = await self.ddos.get(
             f"{BASE}/api",
             params={
                 "m": "release",
@@ -144,21 +188,29 @@ class AnimePaheScraper:
         has_more = data.get("current_page", 1) < data.get("last_page", 1)
         return results, has_more
 
-    def _episodes_html(
+    async def _episodes_html(
         self, anime_session: str, page: int = 1
     ) -> tuple[list[Episode], bool]:
         return [], False
 
-    def sources(self, anime_session: str, episode_session: str) -> list[Source]:
-        results = self._sources_data_src(anime_session, episode_session)
-        if results:
-            return results
-        return self._sources_regex(anime_session, episode_session)
+    async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
+        cache_key = f"sources_{anime_session}_{episode_session}"
+        cached = self._get_mem(cache_key, ttl=300)
+        if cached:
+            return cached
 
-    def _sources_data_src(
+        results = await self._sources_data_src(anime_session, episode_session)
+        if results:
+            self._set_mem(cache_key, results, ttl=300)
+            return results
+        results = await self._sources_regex(anime_session, episode_session)
+        self._set_mem(cache_key, results, ttl=300)
+        return results
+
+    async def _sources_data_src(
         self, anime_session: str, episode_session: str
     ) -> list[Source]:
-        resp = self.ddos.get(f"{BASE}/play/{anime_session}/{episode_session}")
+        resp = await self.ddos.get(f"{BASE}/play/{anime_session}/{episode_session}")
         if resp.status_code != 200:
             return []
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -178,8 +230,10 @@ class AnimePaheScraper:
                 )
         return sources
 
-    def _sources_regex(self, anime_session: str, episode_session: str) -> list[Source]:
-        resp = self.ddos.get(f"{BASE}/play/{anime_session}/{episode_session}")
+    async def _sources_regex(
+        self, anime_session: str, episode_session: str
+    ) -> list[Source]:
+        resp = await self.ddos.get(f"{BASE}/play/{anime_session}/{episode_session}")
         if resp.status_code != 200:
             return []
         urls = re.findall(r"https?://kwik\.[a-z]+/(?:e|f|d)/[A-Za-z0-9_-]+", resp.text)
@@ -191,5 +245,9 @@ class AnimePaheScraper:
                 sources.append(Source(url=url, resolution=0, audio="jpn", fansub=""))
         return sources
 
-    def close(self):
-        self.ddos.close()
+    def clear_cache(self):
+        self._mem_cache.clear()
+        self._mem_ttl.clear()
+
+    async def close(self):
+        await self.ddos.close()
