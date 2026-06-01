@@ -251,9 +251,14 @@ class AppController:
 
         try:
             sources = await self.scraper.sources(anime_session, episode_session)
-        except Exception:
+        except Exception as ex:
+            print(f"[DEBUG] sources() failed: {ex}")
             self._show_snackbar(ERR_LOAD_EPISODE, AppColors.ERROR)
             return
+
+        print(f"[DEBUG] sources returned {len(sources)} items:")
+        for s in sources:
+            print(f"  -> {s.resolution}p | audio={s.audio} | url={s.url}")
 
         if not sources:
             self._show_snackbar(ERR_NO_STREAM, AppColors.ERROR)
@@ -315,11 +320,14 @@ class AppController:
 
     async def _play_episode_external(self, anime_session: str, episode_session: str):
         if not state.selected_source:
+            print("[DEBUG] No selected source")
             return
 
         kwik_url = state.selected_source.url
+        print(f"[DEBUG] kwik_url = {kwik_url}")
 
         if not kwik_url.startswith("http"):
+            print("[DEBUG] kwik_url does not start with http")
             return
 
         loading_dlg = ft.AlertDialog(
@@ -346,6 +354,7 @@ class AppController:
         self.page.update()
 
         m3u8_url = await self.kwik.resolve(kwik_url)
+        print(f"[DEBUG] Resolved m3u8_url = {m3u8_url}")
         self.page.dialog_open = False
         try:
             self.page.pop_dialog()
@@ -353,17 +362,21 @@ class AppController:
             pass
 
         if not m3u8_url:
+            print("[DEBUG] m3u8_url is None — resolve failed")
             self._show_snackbar("Failed to resolve stream.", AppColors.ERROR)
             return
 
         encoded = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
         deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded}"
+        print(f"[DEBUG] deep_link = {deep_link}")
 
         try:
             await asyncio.wait_for(ft.UrlLauncher().launch_url(deep_link), timeout=1.0)
         except asyncio.TimeoutError:
+            print("[DEBUG] KTV launched (TimeoutError is expected success)")
             pass
-        except Exception:
+        except Exception as ex:
+            print(f"[DEBUG] KTV launch failed: {ex}")
             show_ktv_install_dialog(self.page)
 
     async def route_change(self, e: ft.RouteChangeEvent | None = None):

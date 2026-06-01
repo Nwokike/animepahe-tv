@@ -50,12 +50,42 @@ class KwikResolver:
         return self._client
 
     async def resolve(self, kwik_url: str) -> str | None:
+        print(f"[KWIK] resolve({kwik_url})")
         m3u8 = await self._resolve_dean(kwik_url)
         if m3u8:
+            print(f"[KWIK] dean resolved: {m3u8}")
             return m3u8
-        return await self._resolve_direct_scan(kwik_url)
+        print("[KWIK] dean returned None, trying direct scan")
+        m3u8 = await self._resolve_direct_scan(kwik_url)
+        if m3u8:
+            print(f"[KWIK] direct scan resolved: {m3u8}")
+        else:
+            print("[KWIK] direct scan also returned None")
+        return m3u8
 
     async def _resolve_dean(self, kwik_url: str) -> str | None:
+        client = self._get_client()
+        print(f"[KWIK] fetching {kwik_url}")
+        resp = await client.get(
+            kwik_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": kwik_url,
+            },
+        )
+        print(f"[KWIK] status={resp.status_code}, len={len(resp.text)}")
+        if resp.status_code != 200:
+            return None
+        urls = _dean_unpack(resp.text)
+        print(f"[KWIK] dean unpack found {len(urls)} urls: {urls}")
+        for url in urls:
+            if await self._verify(url, kwik_url):
+                print(f"[KWIK] verify OK: {url}")
+                return url
+            print(f"[KWIK] verify FAILED: {url}")
+        return None
+
+    async def _resolve_direct_scan(self, kwik_url: str) -> str | None:
         client = self._get_client()
         resp = await client.get(
             kwik_url,
@@ -64,29 +94,16 @@ class KwikResolver:
                 "Referer": kwik_url,
             },
         )
-        if resp.status_code != 200:
-            return None
-        urls = _dean_unpack(resp.text)
-        for url in urls:
-            if await self._verify(url, kwik_url):
-                return url
-        return None
-
-    async def _resolve_direct_scan(self, kwik_url: str) -> str | None:
-        client = self._get_client()
-        resp = await client.get(
-            kwik_url,
-            headers={
-                "User-Agent": "Mozilla/5.0",
-                "Referer": kwik_url,
-            },
-        )
+        print(f"[KWIK] direct_scan status={resp.status_code}, len={len(resp.text)}")
         if resp.status_code != 200:
             return None
         urls = M3U8_PATTERN.findall(resp.text)
+        print(f"[KWIK] direct_scan found {len(urls)} urls: {urls}")
         for url in urls:
             if await self._verify(url, kwik_url):
+                print(f"[KWIK] direct_scan verify OK: {url}")
                 return url
+            print(f"[KWIK] direct_scan verify FAILED: {url}")
         return None
 
     async def _verify(self, url: str, referer: str) -> bool:
@@ -94,13 +111,15 @@ class KwikResolver:
             client = self._get_client()
             resp = await client.head(
                 url,
-                headers={"User-Agent": "Mozilla/5.0", "Referer": referer},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Referer": referer},
                 timeout=5,
             )
-            return resp.status_code == 200 and "mpegurl" in resp.headers.get(
-                "content-type", ""
-            )
-        except httpx.RequestError:
+            ct = resp.headers.get("content-type", "")
+            result = resp.status_code == 200 and "mpegurl" in ct
+            print(f"[KWIK] verify HEAD {url} -> {resp.status_code} ct={ct} result={result}")
+            return result
+        except httpx.RequestError as ex:
+            print(f"[KWIK] verify HEAD {url} -> RequestError: {ex}")
             return False
 
     async def close(self):
