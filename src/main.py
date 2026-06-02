@@ -1,33 +1,34 @@
-import flet as ft
 import asyncio
 import base64
 import urllib.parse
 
-from core.theme import AppTheme, AppColors
-from core.state import state
+import flet as ft
+
 from core.config import (
+    KTV_DEEP_LINK_SCHEME,
     KTV_PLAY_STORE_URL,
     KTV_UPTODOWN_URL,
-    KTV_DEEP_LINK_SCHEME,
 )
-from core.focus_manager import FocusManager
 from core.constants import (
     APP_NAME,
+    ERR_LOAD_EPISODE,
     ERR_NETWORK,
     ERR_NO_STREAM,
-    ERR_LOAD_EPISODE,
-    LBL_INSTALL_PLAYER_TITLE,
-    LBL_INSTALL_PLAYER_BODY,
-    LBL_NOT_NOW,
     LBL_DOWNLOAD_UPTODOWN,
+    LBL_INSTALL_PLAYER_BODY,
+    LBL_INSTALL_PLAYER_TITLE,
+    LBL_NOT_NOW,
 )
+from core.focus_manager import FocusManager
+from core.state import state
+from core.theme import AppColors, AppTheme
 from services.animepahe import AnimePaheScraper
-from services.kwik_resolver import KwikResolver
 from services.cache import Cache
+from services.kwik_resolver import KwikResolver
 from services.update_service import UpdateService
+from views.anime_detail import build_anime_detail_view
 from views.home import build_home_view
 from views.search import build_search_view
-from views.anime_detail import build_anime_detail_view
 
 
 def _theme_button_style():
@@ -395,9 +396,20 @@ class AppController:
                 )
             )
 
+        info_text = ft.Text(
+            "Tip: If the player does not start, try again. Make sure you already have the player installed.",
+            size=12,
+            color=ft.Colors.ON_SURFACE_VARIANT,
+            italic=True,
+        )
+        content_col = ft.Column(
+            [info_text, ft.ListView(controls=buttons, spacing=10)],
+            spacing=10,
+        )
+
         dlg = ft.AlertDialog(
             title=ft.Text("Select Quality & Audio", weight=ft.FontWeight.BOLD),
-            content=ft.ListView(controls=buttons, spacing=10),
+            content=content_col,
             actions=[
                 ft.Button(
                     content=ft.Text("Cancel"),
