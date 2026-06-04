@@ -504,13 +504,16 @@ class AppController:
             italic=True,
         )
         content_col = ft.Column(
-            [info_text, ft.ListView(controls=buttons, spacing=10)],
+            [info_text, ft.ListView(controls=buttons, spacing=10, expand=True)],
             spacing=10,
         )
 
         dlg = ft.AlertDialog(
             title=ft.Text("Select Quality & Audio", weight=ft.FontWeight.BOLD),
-            content=content_col,
+            content=ft.Container(
+                content=content_col,
+                height=min(400, 60 * len(buttons) + 80) if buttons else 200,
+            ),
             actions=[
                 ft.Button(
                     content=ft.Text("Cancel"),
