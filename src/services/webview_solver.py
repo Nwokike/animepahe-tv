@@ -124,8 +124,29 @@ class WebViewSolver:
     async def _solve_mobile(page: ft.Page, url: str) -> tuple[str, str]:
         from flet_webview import WebView, JavaScriptMode, WebViewConsoleMessageEvent
 
+        # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
+        _cookie_manager = None
+        try:
+            from jnius import autoclass
+            CookieManager = autoclass("android.webkit.CookieManager")
+            _cookie_manager = CookieManager.getInstance()
+            logger.info("Mobile solver: pyjnius CookieManager initialized")
+        except Exception as ex:
+            logger.warning(
+                "Mobile solver: pyjnius not available, fallback to document.cookie: %s", ex
+            )
+
         loop = asyncio.get_running_loop()
         result_future = loop.create_future()
+
+        async def _android_cookies(current_url: str) -> str:
+            if _cookie_manager is None:
+                return ""
+            try:
+                return _cookie_manager.getCookie(current_url) or ""
+            except Exception as ex:
+                logger.error("CookieManager.getCookie error: %s", ex)
+                return ""
 
         async def _try_resolve(cookie_str: str):
             if "cf_clearance" in cookie_str:
@@ -145,17 +166,12 @@ class WebViewSolver:
 
         async def on_url_change(e):
             logger.info("WebView URL changed to: %s", e.data)
-            try:
-                await webview.run_javascript(
-                    "document.title = 'COOKIE:' + (document.cookie || '')"
-                )
-                title = (await webview.get_title()) or ""
-                if title.startswith("COOKIE:"):
-                    await _try_resolve(title[7:])
-            except Exception as ex:
-                logger.error("on_url_change handler error: %s", ex)
+            # When we land on animepahe.com, try native cookie reader immediately
+            if _cookie_manager and "animepahe" in e.data:
+                cookies = await _android_cookies(e.data)
+                if cookies:
+                    await _try_resolve(cookies)
 
-        # URL in constructor so the WebView actually loads something
         webview = WebView(
             url=url,
             expand=True,
@@ -164,7 +180,6 @@ class WebViewSolver:
         )
 
         async def poll_cookies():
-            # Immediately try to enable JS (before Cloudflare challenge loads)
             try:
                 await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
                 logger.info("WebView JS mode set to UNRESTRICTED")
@@ -174,6 +189,21 @@ class WebViewSolver:
             reloaded = False
 
             while not result_future.done():
+                current_url = ""
+                try:
+                    current_url = (await webview.get_current_url()) or ""
+                except Exception:
+                    pass
+
+                # Primary: read native cookies via pyjnius (captures HttpOnly)
+                if current_url and _cookie_manager:
+                    cookies = await _android_cookies(current_url)
+                    if cookies:
+                        await _try_resolve(cookies)
+                        if result_future.done():
+                            break
+
+                # Fallback: document.cookie (won't read HttpOnly but keep for safety)
                 try:
                     await webview.run_javascript(
                         "document.title = 'COOKIE:' + (document.cookie || '')"
@@ -184,11 +214,10 @@ class WebViewSolver:
                     await asyncio.sleep(1.0)
                     continue
 
-                # If we see "Enable JavaScript", the first load was too fast.
-                # Enable JS (it takes effect now) and reload so Cloudflare sees
-                # a JS-capable browser on the second attempt.
                 if not reloaded and "enable javascript" in title.lower():
-                    logger.warning("Detected 'Enable JavaScript' error, reloading with JS enabled...")
+                    logger.warning(
+                        "Detected 'Enable JavaScript' error, reloading with JS enabled..."
+                    )
                     try:
                         await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
                         await webview.reload()
@@ -209,7 +238,7 @@ class WebViewSolver:
                     )
                 except Exception:
                     pass
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.5)
 
         polling_task = asyncio.create_task(poll_cookies())
 

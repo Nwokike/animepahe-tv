@@ -22,6 +22,7 @@ path = "src"
 
 [tool.flet.android]
 bundle_id = "com.animepahe.tv"
+dependencies = ["pyjnius"]
 
 [tool.flet.android.permission]
 "android.permission.INTERNET" = true
