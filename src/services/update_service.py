@@ -24,7 +24,7 @@ class UpdateService:
                     server_build = app_config.get("build_number", 0)
                     if server_build > CURRENT_BUILD_NUMBER:
                         return {
-                            "version": app_config.get("version", "1.0.0"),
+                            "version": app_config.get("version", "1.0.1"),
                             "release_notes": app_config.get("release_notes", ""),
                             "apk_url": app_config.get("update_url", ""),
                             "mandatory": app_config.get("mandatory", False),
