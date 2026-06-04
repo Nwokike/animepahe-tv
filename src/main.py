@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import logging
 import urllib.parse
 
 import flet as ft
@@ -29,6 +30,8 @@ from services.update_service import UpdateService
 from views.anime_detail import build_anime_detail_view
 from views.home import build_home_view
 from views.search import build_search_view
+
+logger = logging.getLogger(__name__)
 
 
 def _theme_button_style():
@@ -214,13 +217,17 @@ class AppController:
         self.focus_manager.set_back_handler(self._handle_global_back)
 
         self.update_service = UpdateService()
+        self.page._show_update_dialog = lambda data: show_update_dialog(self.page, data)
         self.page.run_task(self._check_for_updates_bg)
 
     async def _check_for_updates_bg(self):
         await asyncio.sleep(2.0)
         update_data = await self.update_service.check_for_update()
         if update_data:
-            show_update_dialog(self.page, update_data)
+            state.update_available = True
+            state.update_data = update_data
+            if hasattr(self.page, "on_update_found"):
+                self.page.on_update_found(update_data)
 
     def _show_error_snackbar(self):
         try:
@@ -284,9 +291,16 @@ class AppController:
 
             try:
                 results, has_more = await self.scraper.latest_releases(page_num)
+                logger.info(
+                    "load_latest page=%d got %d items, has_more=%s",
+                    page_num,
+                    len(results),
+                    has_more,
+                )
                 state.latest_releases = results
                 state.latest_has_more = has_more
-            except Exception:
+            except Exception as ex:
+                logger.error("load_latest page=%d failed: %s", page_num, ex)
                 state.latest_releases = []
                 state.latest_has_more = False
             finally:
@@ -308,9 +322,16 @@ class AppController:
 
             try:
                 results, has_more = await self.scraper.search(query, 1)
+                logger.info(
+                    "load_search q=%s got %d items, has_more=%s",
+                    query,
+                    len(results),
+                    has_more,
+                )
                 state.search_results = results
                 state.search_has_more = has_more
-            except Exception:
+            except Exception as ex:
+                logger.error("load_search q=%s failed: %s", query, ex)
                 state.search_results = []
                 state.search_has_more = False
             finally:
@@ -332,9 +353,22 @@ class AppController:
                 episodes, has_more = await self.scraper.episodes(
                     anime_session, page_num
                 )
+                logger.info(
+                    "load_episodes session=%s page=%d got %d items, has_more=%s",
+                    anime_session,
+                    page_num,
+                    len(episodes),
+                    has_more,
+                )
                 state.episodes = episodes
                 state.episodes_has_more = has_more
-            except Exception:
+            except Exception as ex:
+                logger.error(
+                    "load_episodes session=%s page=%d failed: %s",
+                    anime_session,
+                    page_num,
+                    ex,
+                )
                 state.episodes = []
                 state.episodes_has_more = False
             finally:

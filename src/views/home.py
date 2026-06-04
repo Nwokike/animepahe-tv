@@ -2,7 +2,8 @@ import flet as ft
 import asyncio
 from core.state import state, LatestRelease
 from core.theme import AppColors
-from core.constants import APP_NAME, LBL_PREVIOUS, LBL_NEXT, LBL_PAGE
+from core.config import WORKER_BASE_URL
+from core.constants import APP_NAME, APP_VERSION, LBL_PREVIOUS, LBL_NEXT, LBL_PAGE
 
 
 def build_home_view(
@@ -288,7 +289,60 @@ def build_home_view(
         ink=True,
         on_click=handle_theme_toggle,
     )
-    theme_btn.tab_index = 2
+
+    def _update_version_btn(update_data):
+        version_btn.content = ft.Row(
+            [
+                ft.Text(
+                    "Update Available!",
+                    size=11,
+                    weight=ft.FontWeight.BOLD,
+                    color=AppColors.PRIMARY,
+                ),
+                ft.Container(
+                    width=6,
+                    height=6,
+                    border_radius=3,
+                    bgcolor=AppColors.PRIMARY,
+                ),
+            ],
+            spacing=4,
+            alignment=ft.MainAxisAlignment.CENTER,
+        )
+        version_btn.bgcolor = ft.Colors.with_opacity(0.15, AppColors.PRIMARY)
+        version_btn.border = ft.Border.all(1.5, AppColors.PRIMARY)
+        version_btn.on_click = lambda e: (
+            page_obj._show_update_dialog(update_data)
+            if hasattr(page_obj, "_show_update_dialog")
+            else None
+        )
+        version_btn.update()
+
+    page_obj.on_update_found = _update_version_btn
+
+    version_btn = ft.Container(
+        content=ft.Text(
+            f"v{APP_VERSION}",
+            size=11,
+            color=ft.Colors.ON_SURFACE_VARIANT,
+        ),
+        padding=ft.Padding(8, 6, 8, 6),
+        border_radius=6,
+        border=ft.Border.all(
+            1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT)
+        ),
+        ink=True,
+        on_click=lambda e: (
+            page_obj._show_update_dialog(state.update_data)
+            if state.update_available
+            and state.update_data
+            and hasattr(page_obj, "_show_update_dialog")
+            else None
+        ),
+    )
+    version_btn.tab_index = 2
+
+    theme_btn.tab_index = 3
 
     header = ft.Container(
         padding=ft.Padding.only(left=24, right=24, top=24, bottom=8),
@@ -302,7 +356,7 @@ def build_home_view(
                     spacing=12,
                 ),
                 ft.Row(
-                    controls=[search_btn, theme_btn],
+                    controls=[search_btn, version_btn, theme_btn],
                 ),
             ],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -408,7 +462,7 @@ def build_home_view(
             badge_text = "Watch Movies"
 
             def on_click_action(_):
-                page_obj.run_task(launch_url_async, "https://nkiritv.github.io/")
+                page_obj.run_task(launch_url_async, f"{WORKER_BASE_URL}/movies")
         elif slide_idx == 1:
             logo_src = "socolive_logo.png"
             title = "Socolive TV"
@@ -416,7 +470,7 @@ def build_home_view(
             badge_text = "Live Sports"
 
             def on_click_action(_):
-                page_obj.run_task(launch_url_async, "https://soco-live.github.io/")
+                page_obj.run_task(launch_url_async, f"{WORKER_BASE_URL}/sports")
         else:
             logo_src = None
             title = "Contact Support & Send Feedback"

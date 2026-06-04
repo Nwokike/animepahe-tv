@@ -1,5 +1,8 @@
+import logging
 import re
 import httpx
+
+logger = logging.getLogger(__name__)
 
 ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 KWIK_PATTERN = re.compile(
@@ -50,22 +53,22 @@ class KwikResolver:
         return self._client
 
     async def resolve(self, kwik_url: str) -> str | None:
-        print(f"[KWIK] resolve({kwik_url})")
+        logger.info("resolve(%s)", kwik_url)
         m3u8 = await self._resolve_dean(kwik_url)
         if m3u8:
-            print(f"[KWIK] dean resolved: {m3u8}")
+            logger.info("dean resolved: %s", m3u8)
             return m3u8
-        print("[KWIK] dean returned None, trying direct scan")
+        logger.info("dean returned None, trying direct scan")
         m3u8 = await self._resolve_direct_scan(kwik_url)
         if m3u8:
-            print(f"[KWIK] direct scan resolved: {m3u8}")
+            logger.info("direct scan resolved: %s", m3u8)
         else:
-            print("[KWIK] direct scan also returned None")
+            logger.info("direct scan also returned None")
         return m3u8
 
     async def _resolve_dean(self, kwik_url: str) -> str | None:
         client = self._get_client()
-        print(f"[KWIK] fetching {kwik_url}")
+        logger.info("fetching %s", kwik_url)
         resp = await client.get(
             kwik_url,
             headers={
@@ -73,16 +76,16 @@ class KwikResolver:
                 "Referer": kwik_url,
             },
         )
-        print(f"[KWIK] status={resp.status_code}, len={len(resp.text)}")
+        logger.info("status=%s, len=%s", resp.status_code, len(resp.text))
         if resp.status_code != 200:
             return None
         urls = _dean_unpack(resp.text)
-        print(f"[KWIK] dean unpack found {len(urls)} urls: {urls}")
+        logger.info("dean unpack found %d urls: %s", len(urls), urls)
         for url in urls:
             if await self._verify(url, kwik_url):
-                print(f"[KWIK] verify OK: {url}")
+                logger.info("verify OK: %s", url)
                 return url
-            print(f"[KWIK] verify FAILED: {url}")
+            logger.info("verify FAILED: %s", url)
         return None
 
     async def _resolve_direct_scan(self, kwik_url: str) -> str | None:
@@ -94,16 +97,16 @@ class KwikResolver:
                 "Referer": kwik_url,
             },
         )
-        print(f"[KWIK] direct_scan status={resp.status_code}, len={len(resp.text)}")
+        logger.info("direct_scan status=%s, len=%s", resp.status_code, len(resp.text))
         if resp.status_code != 200:
             return None
         urls = M3U8_PATTERN.findall(resp.text)
-        print(f"[KWIK] direct_scan found {len(urls)} urls: {urls}")
+        logger.info("direct_scan found %d urls: %s", len(urls), urls)
         for url in urls:
             if await self._verify(url, kwik_url):
-                print(f"[KWIK] direct_scan verify OK: {url}")
+                logger.info("direct_scan verify OK: %s", url)
                 return url
-            print(f"[KWIK] direct_scan verify FAILED: {url}")
+            logger.info("direct_scan verify FAILED: %s", url)
         return None
 
     async def _verify(self, url: str, referer: str) -> bool:
@@ -119,12 +122,16 @@ class KwikResolver:
             )
             ct = resp.headers.get("content-type", "")
             result = resp.status_code == 200 and "mpegurl" in ct
-            print(
-                f"[KWIK] verify HEAD {url} -> {resp.status_code} ct={ct} result={result}"
+            logger.info(
+                "verify HEAD %s -> %s ct=%s result=%s",
+                url,
+                resp.status_code,
+                ct,
+                result,
             )
             return result
         except httpx.RequestError as ex:
-            print(f"[KWIK] verify HEAD {url} -> RequestError: {ex}")
+            logger.info("verify HEAD %s -> RequestError: %s", url, ex)
             return False
 
     async def close(self):

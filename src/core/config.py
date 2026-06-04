@@ -17,3 +17,6 @@ EXTERNAL_PLAYER_NAMES = [
     "MX Player",
     "YTV Player",
 ]
+
+# Cloudflare Worker for dynamic redirects and update checks
+WORKER_BASE_URL = "https://tv.kalerosemary7.workers.dev"

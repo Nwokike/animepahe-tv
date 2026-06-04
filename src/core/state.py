@@ -66,10 +66,13 @@ class AppState:
     current_episode_session: str = ""
     player_error: str | None = None
     cache: object | None = None
+    update_available: bool = False
+    update_data: dict | None = None
 
     def __init__(self):
         self.search_results = []
         self.episodes = []
+        self.update_data = None
 
 
 state = AppState()
