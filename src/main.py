@@ -212,6 +212,7 @@ class AppController:
 
         state.scraper = self.scraper
         state.cache = self.cache
+        state.page = self.page
 
         self.focus_manager = FocusManager(self.page)
         self.focus_manager.set_back_handler(self._handle_global_back)
@@ -606,4 +607,8 @@ async def main(page: ft.Page):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
     ft.run(main, assets_dir="assets")
