@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 BASE = "https://animepahe.com"
 
+
 class DDoSSolver:
     def __init__(self, timeout: int = 15):
         self._client: httpx.AsyncClient | None = None
@@ -30,7 +31,7 @@ class DDoSSolver:
             logger.debug("DDoS already solved")
             return True
         logger.info("DDoS attempting to solve challenge")
-        
+
         # 1. Resolve redirect BASE domain
         client = self._get_client()
         try:
@@ -45,7 +46,9 @@ class DDoSSolver:
         # 2. Trigger WebViewSolver
         page = getattr(state, "page", None)
         if page is None:
-            logger.error("DDoS state.page is not set, cannot solve Cloudflare challenge")
+            logger.error(
+                "DDoS state.page is not set, cannot solve Cloudflare challenge"
+            )
             return False
 
         try:
@@ -67,7 +70,7 @@ class DDoSSolver:
         **kwargs,
     ) -> httpx.Response:
         logger.debug("DDoS GET %s", url)
-        
+
         # Check if URL references hardcoded animepahe.com, rewrite to resolved base url
         if "animepahe.com" in url:
             if not self._solved:
@@ -85,27 +88,32 @@ class DDoSSolver:
             merged["Cookie"] = self._cookies_str
         if headers:
             merged.update(headers)
-            
+
         logger.info("Outbound request to %s with headers: %s", url, merged)
 
         resp = await client.get(url, headers=merged, params=params, **kwargs)
         logger.debug(
             "DDoS GET %s -> status=%s len=%s", url, resp.status_code, len(resp.text)
         )
-        
+
         # Detect expired cf_clearance cookie or if we hit Cloudflare challenge screen
-        if resp.status_code == 403 and ("challenges.cloudflare.com" in resp.text or "cf-challenge" in resp.text):
+        if resp.status_code == 403 and (
+            "challenges.cloudflare.com" in resp.text or "cf-challenge" in resp.text
+        ):
             logger.warning("DDoS detected Cloudflare challenge (403), re-solving...")
             self._solved = False
             await self.solve()
-            
+
             # Re-build headers and retry once
             merged["User-Agent"] = self._user_agent
             if self._cookies_str:
                 merged["Cookie"] = self._cookies_str
             resp = await client.get(url, headers=merged, params=params, **kwargs)
             logger.debug(
-                "DDoS RETRIED GET %s -> status=%s len=%s", url, resp.status_code, len(resp.text)
+                "DDoS RETRIED GET %s -> status=%s len=%s",
+                url,
+                resp.status_code,
+                len(resp.text),
             )
 
         return resp

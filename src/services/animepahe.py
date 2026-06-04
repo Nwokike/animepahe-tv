@@ -30,7 +30,9 @@ class AnimePaheScraper:
                     ct = resp.headers.get("content-type", "image/jpeg")
                     return f"data:{ct};base64,{encoded}"
                 else:
-                    logger.warning("Failed to proxy image %s: status=%d", url, resp.status_code)
+                    logger.warning(
+                        "Failed to proxy image %s: status=%d", url, resp.status_code
+                    )
             except Exception as ex:
                 logger.error("Error proxying image %s: %s", url, ex)
         return url
@@ -93,15 +95,22 @@ class AnimePaheScraper:
             )
             return [], False
 
+        # Resolve snapshots to base64 in parallel to bypass client-side Cloudflare blocks
+        tasks = [
+            self._get_image_base64(item.get("snapshot", ""))
+            for item in data.get("data", [])
+        ]
+        snapshots = await asyncio.gather(*tasks)
+
         results = []
-        for item in data.get("data", []):
+        for i, item in enumerate(data.get("data", [])):
             results.append(
                 LatestRelease(
                     anime_id=item.get("anime_id", 0),
                     anime_title=item.get("anime_title", ""),
                     anime_session=item.get("anime_session", ""),
                     episode=item.get("episode", 0),
-                    snapshot=item.get("snapshot", ""),
+                    snapshot=snapshots[i],
                     session=item.get("session", ""),
                     created_at=item.get("created_at", ""),
                 )
@@ -148,8 +157,15 @@ class AnimePaheScraper:
         except (ValueError, httpx.DecodingError) as ex:
             logger.error("SEARCH_API JSON decode failed: %s", ex)
             return [], False
+        # Resolve posters to base64 in parallel to bypass client-side Cloudflare blocks
+        tasks = [
+            self._get_image_base64(item.get("poster", ""))
+            for item in data.get("data", [])
+        ]
+        posters = await asyncio.gather(*tasks)
+
         results = []
-        for item in data.get("data", []):
+        for i, item in enumerate(data.get("data", [])):
             results.append(
                 Anime(
                     id=item.get("id", 0),
@@ -160,7 +176,7 @@ class AnimePaheScraper:
                     season=item.get("season", ""),
                     year=item.get("year", 0),
                     score=item.get("score", 0.0),
-                    poster=item.get("poster", ""),
+                    poster=posters[i],
                     session=item.get("session", ""),
                 )
             )
@@ -184,8 +200,14 @@ class AnimePaheScraper:
             logger.error("SEARCH_HTML fetch failed: %s", ex)
             return [], False
         soup = BeautifulSoup(resp.text, "html.parser")
+        cards = soup.select(".anime-card")
+
+        # Resolve posters to base64 in parallel to bypass client-side Cloudflare blocks
+        tasks = [self._get_image_base64(card.get("data-poster", "")) for card in cards]
+        posters = await asyncio.gather(*tasks)
+
         results = []
-        for card in soup.select(".anime-card"):
+        for i, card in enumerate(cards):
             results.append(
                 Anime(
                     id=0,
@@ -196,7 +218,7 @@ class AnimePaheScraper:
                     season=card.get("data-season", ""),
                     year=int(card.get("data-year", 0)),
                     score=float(card.get("data-score", 0)),
-                    poster=card.get("data-poster", ""),
+                    poster=posters[i],
                     session=card.get("data-session", ""),
                 )
             )
@@ -253,15 +275,22 @@ class AnimePaheScraper:
         except (ValueError, httpx.DecodingError) as ex:
             logger.error("EPISODES_API JSON decode failed: %s", ex)
             return [], False
+        # Resolve snapshots to base64 in parallel to bypass client-side Cloudflare blocks
+        tasks = [
+            self._get_image_base64(item.get("snapshot", ""))
+            for item in data.get("data", [])
+        ]
+        snapshots = await asyncio.gather(*tasks)
+
         results = []
-        for item in data.get("data", []):
+        for i, item in enumerate(data.get("data", [])):
             results.append(
                 Episode(
                     id=item.get("id", 0),
                     anime_id=item.get("anime_id", 0),
                     episode=item.get("episode", 0),
                     title=item.get("title", ""),
-                    snapshot=item.get("snapshot", ""),
+                    snapshot=snapshots[i],
                     disc=item.get("disc", ""),
                     audio=item.get("audio", ""),
                     duration=item.get("duration", ""),

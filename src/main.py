@@ -351,9 +351,75 @@ class AppController:
             self._refresh_episodes()
 
             try:
-                episodes, has_more = await self.scraper.episodes(
-                    anime_session, page_num
+                episodes_task = self.scraper.episodes(anime_session, page_num)
+
+                # Check if we need to resolve the poster concurrently
+                anime_in_search = next(
+                    (a for a in state.search_results if a.session == anime_session),
+                    None,
                 )
+                needs_poster_resolution = (
+                    not anime_in_search
+                    or "/snapshots/" in getattr(anime_in_search, "poster", "")
+                )
+
+                if needs_poster_resolution:
+                    title_to_search = ""
+                    if anime_in_search:
+                        title_to_search = anime_in_search.title
+                    else:
+                        lr = next(
+                            (
+                                a
+                                for a in state.latest_releases
+                                if a.anime_session == anime_session
+                            ),
+                            None,
+                        )
+                        if lr:
+                            title_to_search = lr.anime_title
+
+                    if title_to_search:
+
+                        async def resolve_poster_task():
+                            try:
+                                logger.info(
+                                    "Resolving real poster for %s...", title_to_search
+                                )
+                                search_results, _ = await self.scraper.search(
+                                    title_to_search, 1
+                                )
+                                matched = next(
+                                    (
+                                        a
+                                        for a in search_results
+                                        if a.session == anime_session
+                                    ),
+                                    None,
+                                )
+                                if matched:
+                                    state.search_results = [
+                                        a
+                                        for a in state.search_results
+                                        if a.session != anime_session
+                                    ]
+                                    state.search_results.append(matched)
+                                    logger.info("Resolved poster: %s", matched.poster)
+                            except Exception as ex:
+                                logger.error("Failed to resolve poster: %s", ex)
+
+                        results = await asyncio.gather(
+                            episodes_task, resolve_poster_task(), return_exceptions=True
+                        )
+                        ep_res = results[0]
+                        if isinstance(ep_res, Exception):
+                            raise ep_res
+                        episodes, has_more = ep_res
+                    else:
+                        episodes, has_more = await episodes_task
+                else:
+                    episodes, has_more = await episodes_task
+
                 logger.info(
                     "load_episodes session=%s page=%d got %d items, has_more=%s",
                     anime_session,
@@ -608,7 +674,6 @@ async def main(page: ft.Page):
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     )
     ft.run(main, assets_dir="assets")

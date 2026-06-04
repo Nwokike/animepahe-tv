@@ -21,11 +21,11 @@ dependencies = [
     { name = "flet" },
     { name = "flet-webview" },
     { name = "httpx" },
-    { name = "pywebview" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "pywebview" },
     { name = "ruff" },
 ]
 
@@ -36,11 +36,13 @@ requires-dist = [
     { name = "flet", specifier = "==0.85.0" },
     { name = "flet-webview", specifier = "==0.85.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pywebview", specifier = ">=6.2.1" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.15.13" }]
+dev = [
+    { name = "pywebview", specifier = ">=6.2.1" },
+    { name = "ruff", specifier = ">=0.15.13" },
+]
 
 [[package]]
 name = "anyio"

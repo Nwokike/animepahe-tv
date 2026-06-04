@@ -5,6 +5,7 @@ import webview
 
 captured_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
 
+
 def on_loaded():
     global captured_ua
     try:
@@ -13,6 +14,7 @@ def on_loaded():
             captured_ua = ua
     except Exception:
         pass
+
 
 def check_cookies(window):
     # Loop and check for cf_clearance cookie
@@ -28,31 +30,26 @@ def check_cookies(window):
                     cookie_strs.append(f"{key}={morsel.value}")
                     if key == "cf_clearance":
                         has_cf = True
-            
+
             if has_cf:
                 cookie_header = "; ".join(cookie_strs)
-                result = {
-                    "cookies": cookie_header,
-                    "user_agent": captured_ua
-                }
+                result = {"cookies": cookie_header, "user_agent": captured_ua}
                 print(json.dumps(result))
                 window.destroy()
                 return
         except Exception as e:
             print(f"[DEBUG] Error reading cookies: {e}", file=sys.stderr)
-            
+
     # If timeout or closed
     window.destroy()
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(1)
     url = sys.argv[1]
     window = webview.create_window(
-        'Cloudflare Turnstile Solver', 
-        url,
-        width=800,
-        height=600
+        "Cloudflare Turnstile Solver", url, width=800, height=600
     )
     window.events.loaded += on_loaded
     webview.start(check_cookies, window)

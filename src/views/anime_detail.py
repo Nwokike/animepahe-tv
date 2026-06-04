@@ -260,6 +260,49 @@ def build_anime_detail_view(
     next_btn.tab_index = 3
 
     def refresh_episodes():
+        # Update poster and background image if they changed
+        if anime:
+            real_anime = next(
+                (a for a in state.search_results if a.session == anime_session),
+                None,
+            )
+            if (
+                real_anime
+                and real_anime.poster
+                and "/snapshots/" not in real_anime.poster
+            ):
+                anime.poster = real_anime.poster
+                anime.year = real_anime.year
+                anime.type = real_anime.type
+                anime.status = real_anime.status
+                anime.episodes = real_anime.episodes
+                anime.score = real_anime.score
+
+                # Update background
+                bg_container.controls[0].src = anime.poster
+
+                # Update poster content
+                if isinstance(poster.content, ft.Image):
+                    poster.content.src = anime.poster
+                else:
+                    poster.content = ft.Image(
+                        src=anime.poster, fit="cover", border_radius=16
+                    )
+
+                # Update info text
+                parts = []
+                if anime.year:
+                    parts.append(str(anime.year))
+                if anime.type:
+                    parts.append(anime.type)
+                if anime.status:
+                    parts.append(anime.status)
+                if anime.episodes:
+                    parts.append(f"{anime.episodes} Episodes")
+                if anime.score:
+                    parts.append(f"\u2605 {anime.score:.1f}")
+                info_text.value = " \u2022 ".join(parts)
+
         episode_grid.controls.clear()
         prev_spinner.visible = False
         next_spinner.visible = False
