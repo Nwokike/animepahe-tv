@@ -1,6 +1,8 @@
 import logging
 import re
 import time
+import base64
+import asyncio
 import httpx
 from bs4 import BeautifulSoup
 from core.state import Anime, Episode, Source, LatestRelease
@@ -16,6 +18,22 @@ class AnimePaheScraper:
         self.ddos = DDoSSolver()
         self._mem_cache: dict = {}
         self._mem_ttl: dict = {}
+
+    async def _get_image_base64(self, url: str) -> str:
+        if not url:
+            return ""
+        if "animepahe" in url:
+            try:
+                resp = await self.ddos.get(url, headers={"Accept": "image/*"})
+                if resp.status_code == 200:
+                    encoded = base64.b64encode(resp.content).decode()
+                    ct = resp.headers.get("content-type", "image/jpeg")
+                    return f"data:{ct};base64,{encoded}"
+                else:
+                    logger.warning("Failed to proxy image %s: status=%d", url, resp.status_code)
+            except Exception as ex:
+                logger.error("Error proxying image %s: %s", url, ex)
+        return url
 
     def _get_mem(self, key: str, ttl: int = 300):
         if key in self._mem_cache and key in self._mem_ttl:

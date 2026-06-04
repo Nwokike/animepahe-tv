@@ -10,7 +10,6 @@ dependencies = [
     "flet==0.85.0",
     "flet-webview==0.85.0",
     "httpx>=0.28.1",
-    "pywebview>=6.2.1",
 ]
 
 [tool.flet]
@@ -36,5 +35,7 @@ bundle_id = "com.animepahe.tv"
 [dependency-groups]
 dev = [
     "ruff>=0.15.13",
+    "pywebview>=6.2.1",
 ]
+
 
