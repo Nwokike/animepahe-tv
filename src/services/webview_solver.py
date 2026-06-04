@@ -24,9 +24,10 @@ def _get_python_executable() -> str:
 class WebViewSolver:
     @staticmethod
     async def solve_challenge(page: ft.Page, url: str) -> tuple[str, str]:
-        # Check platform - Android, iOS, or macOS can run Flet native webview
+        # Check platform - Android, Android TV, iOS, or macOS can run Flet native webview
         is_mobile = page.platform in [
             ft.PagePlatform.ANDROID,
+            ft.PagePlatform.ANDROID_TV,
             ft.PagePlatform.IOS,
             ft.PagePlatform.MACOS,
         ]
