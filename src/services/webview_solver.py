@@ -127,13 +127,15 @@ class WebViewSolver:
         # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
         _cookie_manager = None
         try:
-            from jnius import autoclass
+            from jnius import autoclass  # type: ignore[import-not-found]
+
             CookieManager = autoclass("android.webkit.CookieManager")
             _cookie_manager = CookieManager.getInstance()
             logger.info("Mobile solver: pyjnius CookieManager initialized")
         except Exception as ex:
             logger.warning(
-                "Mobile solver: pyjnius not available, fallback to document.cookie: %s", ex
+                "Mobile solver: pyjnius not available, fallback to document.cookie: %s",
+                ex,
             )
 
         loop = asyncio.get_running_loop()
@@ -254,10 +256,14 @@ class WebViewSolver:
 
         dialog_content = ft.Column(
             [
-                ft.Text("Connecting securely to AnimePahe...", size=13),
-                ft.Container(height=8),
+                ft.Text(
+                    "Scroll down and verify you are human to continue.",
+                    size=14,
+                    weight=ft.FontWeight.W_500,
+                ),
+                ft.Container(height=4),
                 ft.Row(
-                    [loading_ring, ft.Text("Verifying...", size=14)],
+                    [loading_ring, ft.Text("Waiting for verification...", size=13)],
                     alignment=ft.MainAxisAlignment.CENTER,
                 ),
                 ft.Container(height=8),
