@@ -127,37 +127,85 @@ class WebViewSolver:
         loop = asyncio.get_running_loop()
         result_future = loop.create_future()
 
+        async def _try_resolve(cookie_str: str):
+            if "cf_clearance" in cookie_str:
+                logger.info("Mobile solver captured cf_clearance!")
+                ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                try:
+                    ua = (await webview.get_user_agent()) or ua
+                except Exception as ex:
+                    logger.error("Failed to get UA: %s", ex)
+                if not result_future.done():
+                    result_future.set_result((cookie_str, ua))
+
         async def on_console(e: WebViewConsoleMessageEvent):
             msg = e.message
             if msg.startswith("COOKIE:"):
-                cookie_str = msg[7:].strip()
-                if "cf_clearance" in cookie_str:
-                    logger.info("Mobile solver successfully captured cf_clearance!")
-                    try:
-                        ua = await webview.get_user_agent()
-                    except Exception as ex:
-                        logger.error("Failed to get UA: %s", ex)
-                        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    if not result_future.done():
-                        result_future.set_result((cookie_str, ua))
+                await _try_resolve(msg[7:].strip())
 
+        async def on_url_change(e):
+            logger.info("WebView URL changed to: %s", e.data)
+            try:
+                await webview.run_javascript(
+                    "document.title = 'COOKIE:' + (document.cookie || '')"
+                )
+                title = (await webview.get_title()) or ""
+                if title.startswith("COOKIE:"):
+                    await _try_resolve(title[7:])
+            except Exception as ex:
+                logger.error("on_url_change handler error: %s", ex)
+
+        # URL in constructor so the WebView actually loads something
         webview = WebView(
             url=url,
             expand=True,
             on_console_message=on_console,
+            on_url_change=on_url_change,
         )
 
         async def poll_cookies():
-            await asyncio.sleep(1.5)  # Wait for WebView to mount
+            # Immediately try to enable JS (before Cloudflare challenge loads)
             try:
                 await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
-            except Exception:
-                pass
+                logger.info("WebView JS mode set to UNRESTRICTED")
+            except Exception as ex:
+                logger.error("Error setting JS mode: %s", ex)
+
+            reloaded = False
 
             while not result_future.done():
                 try:
                     await webview.run_javascript(
-                        "console.log('COOKIE:' + document.cookie)"
+                        "document.title = 'COOKIE:' + (document.cookie || '')"
+                    )
+                    title = (await webview.get_title()) or ""
+                except Exception as ex:
+                    logger.error("Title poll error: %s", ex)
+                    await asyncio.sleep(1.0)
+                    continue
+
+                # If we see "Enable JavaScript", the first load was too fast.
+                # Enable JS (it takes effect now) and reload so Cloudflare sees
+                # a JS-capable browser on the second attempt.
+                if not reloaded and "enable javascript" in title.lower():
+                    logger.warning("Detected 'Enable JavaScript' error, reloading with JS enabled...")
+                    try:
+                        await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
+                        await webview.reload()
+                    except Exception as ex:
+                        logger.error("Reload error: %s", ex)
+                    reloaded = True
+                    await asyncio.sleep(2.0)
+                    continue
+
+                if title.startswith("COOKIE:"):
+                    await _try_resolve(title[7:])
+                    if result_future.done():
+                        break
+
+                try:
+                    await webview.run_javascript(
+                        "console.log('COOKIE:' + (document.cookie || ''))"
                     )
                 except Exception:
                     pass
