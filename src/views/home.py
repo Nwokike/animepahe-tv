@@ -3,7 +3,16 @@ import asyncio
 from core.state import state, LatestRelease
 from core.theme import AppColors
 from core.config import WORKER_BASE_URL
-from core.constants import APP_NAME, APP_VERSION, LBL_PREVIOUS, LBL_NEXT, LBL_PAGE
+from core.constants import (
+    APP_NAME,
+    APP_VERSION,
+    LBL_CF_BLOCKED_BODY,
+    LBL_CF_BLOCKED_TITLE,
+    LBL_CF_VERIFY_BUTTON,
+    LBL_PREVIOUS,
+    LBL_NEXT,
+    LBL_PAGE,
+)
 
 
 def build_home_view(
@@ -11,6 +20,7 @@ def build_home_view(
     on_load_latest,
     on_select_anime,
     on_search_click,
+    on_reverify=None,
     on_page_change: callable = None,
 ) -> ft.View:
 
@@ -244,6 +254,17 @@ def build_home_view(
                 color=ft.Colors.ON_SURFACE,
             ),
         )
+
+        if state.cf_blocked:
+            verify_overlay.visible = True
+            search_btn.opacity = 0.4
+            search_btn.ink = False
+            search_btn.on_click = None
+        else:
+            verify_overlay.visible = False
+            search_btn.opacity = 1.0
+            search_btn.ink = True
+            search_btn.on_click = lambda _: on_search_click()
 
         if state.is_loading and not state.latest_releases:
             scroll_content.controls = [
@@ -620,21 +641,91 @@ def build_home_view(
         ),
     )
 
+    verify_overlay_card = ft.Container(
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Icon(
+                        ft.Icons.SHIELD_ROUNDED,
+                        size=64,
+                        color=AppColors.PRIMARY,
+                    ),
+                    alignment=ft.Alignment.CENTER,
+                ),
+                ft.Container(height=8),
+                ft.Text(
+                    LBL_CF_BLOCKED_TITLE,
+                    size=20,
+                    weight=ft.FontWeight.BOLD,
+                    color=ft.Colors.ON_SURFACE,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=4),
+                ft.Text(
+                    LBL_CF_BLOCKED_BODY,
+                    size=13,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=20),
+                ft.FilledButton(
+                    LBL_CF_VERIFY_BUTTON,
+                    icon=ft.Icons.VERIFIED_ROUNDED,
+                    style=ft.ButtonStyle(
+                        bgcolor=AppColors.PRIMARY,
+                        color=ft.Colors.WHITE,
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                    ),
+                    on_click=lambda e: on_reverify() if on_reverify else None,
+                ),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            tight=True,
+        ),
+        padding=32,
+        width=320,
+        border_radius=20,
+        bgcolor=ft.Colors.SURFACE,
+        border=ft.Border.all(1, ft.Colors.OUTLINE),
+        shadow=ft.BoxShadow(
+            blur_radius=30,
+            color=ft.Colors.with_opacity(0.4, ft.Colors.BLACK),
+            offset=ft.Offset(0, 10),
+        ),
+    )
+
+    verify_overlay = ft.Container(
+        top=0,
+        bottom=0,
+        left=0,
+        right=0,
+        bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+        alignment=ft.Alignment.CENTER,
+        content=verify_overlay_card,
+        visible=False,
+    )
+
     view = ft.View(
         route="/home",
         controls=[
             ft.SafeArea(
-                ft.Column(
+                ft.Stack(
                     controls=[
-                        ft.Container(
-                            content=scrollable,
+                        ft.Column(
+                            controls=[
+                                ft.Container(
+                                    content=scrollable,
+                                    expand=True,
+                                    bgcolor=ft.Colors.SURFACE,
+                                ),
+                                banner_container,
+                            ],
                             expand=True,
-                            bgcolor=ft.Colors.SURFACE,
+                            spacing=0,
                         ),
-                        banner_container,
+                        verify_overlay,
                     ],
                     expand=True,
-                    spacing=0,
                 ),
                 expand=True,
             )

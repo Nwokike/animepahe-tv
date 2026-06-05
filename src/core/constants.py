@@ -27,4 +27,9 @@ LBL_INSTALL_PLAYER_BODY = (
 LBL_NOT_NOW = "Not now"
 LBL_DOWNLOAD_UPTODOWN = "Uptodown"
 
+LBL_CF_BLOCKED_TITLE = "Cloudflare Security Check"
+LBL_CF_BLOCKED_BODY = "Search and browsing are disabled until you verify."
+LBL_CF_VERIFY_BUTTON = "Verify You're Human"
+LBL_CF_BLOCKED_SEARCH = "Please verify you're human first."
+
 MAX_SEARCH_QUERY_LENGTH = 200

@@ -15,6 +15,7 @@ from core.constants import (
     ERR_LOAD_EPISODE,
     ERR_NETWORK,
     ERR_NO_STREAM,
+    LBL_CF_BLOCKED_SEARCH,
     LBL_DOWNLOAD_UPTODOWN,
     LBL_INSTALL_PLAYER_BODY,
     LBL_INSTALL_PLAYER_TITLE,
@@ -279,6 +280,21 @@ class AppController:
         self.page.run_task(self.load_episodes, session, 1)
         self.page.update()
 
+    def _on_search_click(self):
+        if state.cf_blocked:
+            self._show_snackbar(LBL_CF_BLOCKED_SEARCH, AppColors.WARNING)
+            return
+        self.page.run_task(self.navigate, "/search")
+
+    async def reverify(self):
+        state.cf_blocked = False
+        state.is_loading = True
+        self._update_home_grid()
+        await self.scraper.ddos.reset()
+        await self.scraper.ddos.solve()
+        self.scraper.clear_cache()
+        await self.load_latest(1)
+
     async def load_latest(self, page_num: int = 1):
         task_key = f"latest_{page_num}"
         lock = self._get_lock(task_key)
@@ -300,12 +316,16 @@ class AppController:
                 )
                 state.latest_releases = results
                 state.latest_has_more = has_more
+                if page_num == 1 and results:
+                    state.cf_blocked = False
             except Exception as ex:
                 logger.error("load_latest page=%d failed: %s", page_num, ex)
                 state.latest_releases = []
                 state.latest_has_more = False
             finally:
                 state.is_loading = False
+                if page_num == 1 and not state.latest_releases:
+                    state.cf_blocked = True
                 self._update_home_grid()
 
     async def load_search(self, query: str):
@@ -602,9 +622,8 @@ class AppController:
                     page_obj=self.page,
                     on_load_latest=self.load_latest,
                     on_select_anime=self._open_anime_detail,
-                    on_search_click=lambda: self.page.run_task(
-                        self.navigate, "/search"
-                    ),
+                    on_search_click=self._on_search_click,
+                    on_reverify=lambda: self.page.run_task(self.reverify),
                 )
             )
 

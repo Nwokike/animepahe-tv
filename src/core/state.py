@@ -66,6 +66,7 @@ class AppState:
     current_episode_session: str = ""
     player_error: str | None = None
     cache: object | None = None
+    cf_blocked: bool = False
     update_available: bool = False
     update_data: dict | None = None
 

@@ -118,6 +118,13 @@ class DDoSSolver:
 
         return resp
 
+    async def reset(self):
+        logger.info("DDoS resetting solver state")
+        self._solved = False
+        self._cookies_str = ""
+        await self.close()
+        self._client = None
+
     async def close(self):
         if self._client and not self._client.is_closed:
             logger.debug("DDoS closing client")
