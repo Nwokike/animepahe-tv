@@ -1,6 +1,6 @@
 APP_NAME = "AnimePahe TV"
 APP_TAGLINE = "Watch your favorite Anime series for free on TV"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 
 ERR_NETWORK = "Network error or stream unavailable."
 ERR_NO_STREAM = "Could not resolve stream."
