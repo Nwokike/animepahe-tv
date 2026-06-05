@@ -125,6 +125,16 @@ class WebViewSolver:
     async def _solve_mobile(page: ft.Page, url: str) -> tuple[str, str]:
         from flet_webview import WebView, JavaScriptMode, WebViewConsoleMessageEvent
 
+        # Force platform to ANDROID on Android TV so flet_webview methods work.
+        # flet_webview's _check_mobile_or_mac_platform() only allows ANDROID,
+        # IOS, and MACOS — ANDROID_TV is not recognized, causing all WebView
+        # method calls (set_javascript_mode, reload, run_javascript, etc.) to
+        # raise FletUnsupportedPlatformException.
+        original_platform = page.platform
+        if page.platform == ft.PagePlatform.ANDROID_TV:
+            logger.info("Mobile solver: overriding ANDROID_TV -> ANDROID for flet_webview compatibility")
+            page.platform = ft.PagePlatform.ANDROID
+
         # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
         _cookie_manager = None
         try:
@@ -301,4 +311,6 @@ class WebViewSolver:
                 page.pop_dialog()
             except Exception:
                 pass
+            # Restore the original platform if it was overridden
+            page.platform = original_platform
             page.update()
