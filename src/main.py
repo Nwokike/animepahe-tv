@@ -297,21 +297,88 @@ class AppController:
         await self.load_latest(1)
 
     async def _purge_all_data(self):
-        logger.info("Purging ALL app data (cache, cookies, storage)...")
+        logger.info("Purging ALL app data (nuclear wipe, preserving lib/)...")
         await self.scraper.ddos.reset()
         self.scraper.clear_cache()
         await self.cache.clear()
-        import shutil
-        import os
-        for folder in ("storage", ".flet", "keys", "scratch", "temp", "data"):
-            path = os.path.abspath(folder)
-            if os.path.exists(path):
+
+        if self.page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.ANDROID_TV):
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                context = PythonActivity.mActivity.getApplicationContext()
+                File = autoclass('java.io.File')
+
+                # 1. Clear Flet SharedPreferences
                 try:
-                    shutil.rmtree(path)
-                    logger.info("Removed folder: %s", path)
+                    await ft.SharedPreferences().clear()
+                    logger.info("Cleared Flet SharedPreferences")
                 except Exception as ex:
-                    logger.error("Failed to remove %s: %s", path, ex)
+                    logger.error("Failed to clear SharedPreferences: %s", ex)
+
+                # 2. Clear ALL SharedPreferences files (nuclear)
+                try:
+                    package_manager = context.getPackageManager()
+                    app_info = package_manager.getApplicationInfo(context.getPackageName(), 0)
+                    prefs_dir = File(app_info.dataDir, "shared_prefs")
+                    if prefs_dir.exists() and prefs_dir.isDirectory():
+                        for f in prefs_dir.listFiles():
+                            f.delete()
+                        logger.info("Cleared all SharedPreferences files")
+                except Exception as ex:
+                    logger.error("Failed to clear SharedPreferences files: %s", ex)
+
+                # 3. Delete all databases
+                for db in ("animepahe.db", "webview.db", "webviewCache.db"):
+                    try:
+                        context.deleteDatabase(db)
+                    except Exception:
+                        pass
+                logger.info("Deleted app databases")
+
+                # 4. Clear cache directories
+                for cache_dir in (context.getCacheDir(), context.getCodeCacheDir()):
+                    try:
+                        if cache_dir and cache_dir.exists():
+                            _delete_recursive(cache_dir)
+                    except Exception as ex:
+                        logger.error("Failed to clear cache dir: %s", ex)
+                logger.info("Cleared cache directories")
+
+                # 5. NUCLEAR: wipe entire app data dir EXCEPT lib/
+                app_root = context.getFilesDir().getParentFile()
+                for child in app_root.listFiles():
+                    name = child.getName()
+                    if name != "lib":
+                        try:
+                            _delete_recursive(child)
+                            logger.info("Nuclear wiped: %s", name)
+                        except Exception as ex:
+                            logger.error("Failed to wipe %s: %s", name, ex)
+                logger.info("Nuclear purge complete (lib/ preserved)")
+
+            except Exception as ex:
+                logger.error("Nuclear purge failed: %s", ex)
+        else:
+            # Fallback for non-Android: shutil cleanup
+            import shutil
+            import os
+            for folder in ("storage", ".flet", "keys", "scratch", "temp", "data"):
+                path = os.path.abspath(folder)
+                if os.path.exists(path):
+                    try:
+                        shutil.rmtree(path)
+                        logger.info("Removed folder: %s", path)
+                    except Exception as ex:
+                        logger.error("Failed to remove %s: %s", path, ex)
         logger.info("Purge complete")
+
+def _delete_recursive(file_obj):
+    """Recursively delete a File or directory."""
+    if file_obj.isDirectory():
+        for child in file_obj.listFiles():
+            _delete_recursive(child)
+    file_obj.delete()
 
     async def load_latest(self, page_num: int = 1):
         task_key = f"latest_{page_num}"
