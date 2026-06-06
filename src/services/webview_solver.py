@@ -185,11 +185,39 @@ class WebViewSolver:
                 if cookies:
                     await _try_resolve(cookies)
 
+        is_tv = original_platform == ft.PagePlatform.ANDROID_TV
+
+        async def on_page_ended(e):
+            logger.info("WebView page load ended: %s", e.data)
+            try:
+                await webview.disable_zoom()
+                logger.info("WebView zoom disabled")
+            except Exception as ex:
+                logger.error("Error disabling zoom: %s", ex)
+            try:
+                await webview.run_javascript("""
+                    (function() {
+                        let meta = document.querySelector('meta[name=viewport]');
+                        if (!meta) {
+                            meta = document.createElement('meta');
+                            meta.name = 'viewport';
+                            document.head.appendChild(meta);
+                        }
+                        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+                        document.body.style.transformOrigin = 'top left';
+                        document.body.style.transform = 'scale(0.85)';
+                    })();
+                """)
+                logger.info("Viewport meta + scale injected")
+            except Exception as ex:
+                logger.error("Error injecting viewport/scale: %s", ex)
+
         webview = WebView(
             url=url,
             expand=True,
             on_console_message=on_console,
             on_url_change=on_url_change,
+            on_page_ended=on_page_ended,
         )
 
         async def poll_cookies():
@@ -257,10 +285,13 @@ class WebViewSolver:
 
         loading_ring = ft.ProgressRing(color=ft.Colors.PRIMARY, stroke_width=4)
 
+        dialog_width = 600 if is_tv else 360
+        dialog_height = 450 if is_tv else 280
+
         wv_container = ft.Container(
             content=webview,
-            width=360,
-            height=280,
+            width=dialog_width,
+            height=dialog_height,
             border_radius=8,
             clip_behavior="antiAlias",
         )
@@ -301,12 +332,38 @@ class WebViewSolver:
         page.show_dialog(dlg)
         page.update()
 
+        original_on_keyboard = page.on_keyboard_event
+        if is_tv:
+            async def handle_tv_keys(e: ft.KeyboardEvent):
+                key_map = {
+                    "ArrowUp": (0, -120),
+                    "ArrowDown": (0, 120),
+                    "ArrowLeft": (-120, 0),
+                    "ArrowRight": (120, 0),
+                }
+                if e.key in key_map:
+                    dx, dy = key_map[e.key]
+                    try:
+                        await webview.scroll_by(dx, dy)
+                    except Exception as ex:
+                        logger.error("TV scroll error: %s", ex)
+                    return
+                if original_on_keyboard:
+                    await original_on_keyboard(e)
+
+            page.on_keyboard_event = handle_tv_keys
+            page.update()
+
         try:
             cookies, ua = await result_future
             return cookies, ua
         finally:
             polling_task.cancel()
             page.dialog_open = False
+            if is_tv and original_on_keyboard is not None:
+                page.on_keyboard_event = original_on_keyboard
+            elif is_tv:
+                page.on_keyboard_event = None
             try:
                 page.pop_dialog()
             except Exception:
