@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import logging
+import os
+import shutil
 import urllib.parse
 
 import flet as ft
@@ -290,10 +292,26 @@ class AppController:
         state.cf_blocked = False
         state.is_loading = True
         self._update_home_grid()
-        await self.scraper.ddos.reset()
+        await self._purge_all_data()
         await self.scraper.ddos.solve()
-        self.scraper.clear_cache()
         await self.load_latest(1)
+
+    async def _purge_all_data(self):
+        logger.info("Purging ALL app data (cache, cookies, storage)...")
+        await self.scraper.ddos.reset()
+        self.scraper.clear_cache()
+        await self.cache.clear()
+        import shutil
+        import os
+        for folder in ("storage", ".flet", "keys", "scratch", "temp", "data"):
+            path = os.path.abspath(folder)
+            if os.path.exists(path):
+                try:
+                    shutil.rmtree(path)
+                    logger.info("Removed folder: %s", path)
+                except Exception as ex:
+                    logger.error("Failed to remove %s: %s", path, ex)
+        logger.info("Purge complete")
 
     async def load_latest(self, page_num: int = 1):
         task_key = f"latest_{page_num}"
