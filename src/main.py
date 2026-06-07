@@ -300,6 +300,7 @@ class AppController:
         self.scraper.clear_cache()
         await self.cache.clear()
 
+        nuclear_succeeded = False
         if self.page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.ANDROID_TV):
             try:
                 from jnius import autoclass
@@ -341,7 +342,7 @@ class AppController:
                 for cache_dir in (context.getCacheDir(), context.getCodeCacheDir()):
                     try:
                         if cache_dir and cache_dir.exists():
-                            _delete_recursive(cache_dir)
+                            AppController._delete_recursive(cache_dir)
                     except Exception as ex:
                         logger.error("Failed to clear cache dir: %s", ex)
                 logger.info("Cleared cache directories")
@@ -352,16 +353,20 @@ class AppController:
                     name = child.getName()
                     if name != "lib":
                         try:
-                            _delete_recursive(child)
+                            AppController._delete_recursive(child)
                             logger.info("Nuclear wiped: %s", name)
                         except Exception as ex:
                             logger.error("Failed to wipe %s: %s", name, ex)
                 logger.info("Nuclear purge complete (lib/ preserved)")
+                nuclear_succeeded = True
 
+            except ImportError:
+                logger.warning("jnius not available, falling back to shutil cleanup")
             except Exception as ex:
                 logger.error("Nuclear purge failed: %s", ex)
-        else:
-            # Fallback for non-Android: shutil cleanup
+
+        if not nuclear_succeeded:
+            # Fallback for non-Android or jnius unavailable: shutil cleanup
             import shutil
             import os
 
@@ -373,6 +378,17 @@ class AppController:
                         logger.info("Removed folder: %s", path)
                     except Exception as ex:
                         logger.error("Failed to remove %s: %s", path, ex)
+
+            # Also delete any database files in current directory
+            for db_file in ("animepahe.db", "webview.db", "webviewCache.db"):
+                db_path = os.path.abspath(db_file)
+                if os.path.exists(db_path):
+                    try:
+                        os.remove(db_path)
+                        logger.info("Removed database: %s", db_path)
+                    except Exception as ex:
+                        logger.error("Failed to remove database %s: %s", db_path, ex)
+
         logger.info("Purge complete")
 
     @staticmethod
