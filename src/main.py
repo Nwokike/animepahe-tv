@@ -375,13 +375,13 @@ class AppController:
                         logger.error("Failed to remove %s: %s", path, ex)
         logger.info("Purge complete")
 
-
-def _delete_recursive(file_obj):
-    """Recursively delete a File or directory."""
-    if file_obj.isDirectory():
-        for child in file_obj.listFiles():
-            _delete_recursive(child)
-    file_obj.delete()
+    @staticmethod
+    def _delete_recursive(file_obj):
+        """Recursively delete a File or directory."""
+        if file_obj.isDirectory():
+            for child in file_obj.listFiles():
+                AppController._delete_recursive(child)
+        file_obj.delete()
 
     async def load_latest(self, page_num: int = 1):
         task_key = f"latest_{page_num}"
