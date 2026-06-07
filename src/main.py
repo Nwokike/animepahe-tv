@@ -1,8 +1,6 @@
 import asyncio
 import base64
 import logging
-import os
-import shutil
 import urllib.parse
 
 import flet as ft
@@ -305,9 +303,10 @@ class AppController:
         if self.page.platform in (ft.PagePlatform.ANDROID, ft.PagePlatform.ANDROID_TV):
             try:
                 from jnius import autoclass
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+
+                PythonActivity = autoclass("org.kivy.android.PythonActivity")
                 context = PythonActivity.mActivity.getApplicationContext()
-                File = autoclass('java.io.File')
+                File = autoclass("java.io.File")
 
                 # 1. Clear Flet SharedPreferences
                 try:
@@ -319,7 +318,9 @@ class AppController:
                 # 2. Clear ALL SharedPreferences files (nuclear)
                 try:
                     package_manager = context.getPackageManager()
-                    app_info = package_manager.getApplicationInfo(context.getPackageName(), 0)
+                    app_info = package_manager.getApplicationInfo(
+                        context.getPackageName(), 0
+                    )
                     prefs_dir = File(app_info.dataDir, "shared_prefs")
                     if prefs_dir.exists() and prefs_dir.isDirectory():
                         for f in prefs_dir.listFiles():
@@ -363,6 +364,7 @@ class AppController:
             # Fallback for non-Android: shutil cleanup
             import shutil
             import os
+
             for folder in ("storage", ".flet", "keys", "scratch", "temp", "data"):
                 path = os.path.abspath(folder)
                 if os.path.exists(path):
@@ -372,6 +374,7 @@ class AppController:
                     except Exception as ex:
                         logger.error("Failed to remove %s: %s", path, ex)
         logger.info("Purge complete")
+
 
 def _delete_recursive(file_obj):
     """Recursively delete a File or directory."""

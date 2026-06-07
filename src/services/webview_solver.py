@@ -132,7 +132,9 @@ class WebViewSolver:
         # raise FletUnsupportedPlatformException.
         original_platform = page.platform
         if page.platform == ft.PagePlatform.ANDROID_TV:
-            logger.info("Mobile solver: overriding ANDROID_TV -> ANDROID for flet_webview compatibility")
+            logger.info(
+                "Mobile solver: overriding ANDROID_TV -> ANDROID for flet_webview compatibility"
+            )
             page.platform = ft.PagePlatform.ANDROID
 
         # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
@@ -334,6 +336,7 @@ class WebViewSolver:
 
         original_on_keyboard = page.on_keyboard_event
         if is_tv:
+
             async def handle_tv_keys(e: ft.KeyboardEvent):
                 key_map = {
                     "ArrowUp": (0, -120),
