@@ -61,6 +61,25 @@ class AnimePaheScraper:
                 headers={"Accept": "application/json"},
             )
             logger.info("FETCH status=%s len=%s", resp.status_code, len(resp.text))
+
+            # The /api endpoint always returns JSON. A 200 with HTML content
+            # (or an empty body) means we actually received a Cloudflare
+            # interstitial that slipped past the status-based detection — e.g.
+            # a challenge page served with HTTP 200. Returning None here lets
+            # the caller fall through to its empty-handling path, which is the
+            # right behaviour (the self-healing path in ddos_solver will have
+            # already re-solved on the next request).
+            body_start = resp.text.lstrip()[:1]
+            is_html_or_empty = body_start not in ("{", "[")
+            if is_html_or_empty:
+                logger.warning(
+                    "FETCH got non-JSON response (likely Cloudflare interstitial), "
+                    "treating as no data. status=%s body start: %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                return None
+
             if resp.status_code == 200:
                 logger.debug("FETCH SUCCESS — first 200 chars: %s", resp.text[:200])
                 return resp
