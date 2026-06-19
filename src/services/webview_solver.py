@@ -191,28 +191,17 @@ class WebViewSolver:
 
         async def on_page_ended(e):
             logger.info("WebView page load ended: %s", e.data)
+            # NOTE: we intentionally do NOT inject viewport/scale CSS or mutate
+            # document.title here. Cloudflare's Turnstile challenge is a JS app
+            # that watches the DOM; mutating it (body transform, viewport meta,
+            # title) trips its integrity checks and causes the page to reload
+            # itself — the reload loop seen on Android TV. We only disable zoom
+            # via the official API, which does not disturb the page.
             try:
                 await webview.disable_zoom()
                 logger.info("WebView zoom disabled")
             except Exception as ex:
                 logger.error("Error disabling zoom: %s", ex)
-            try:
-                await webview.run_javascript("""
-                    (function() {
-                        let meta = document.querySelector('meta[name=viewport]');
-                        if (!meta) {
-                            meta = document.createElement('meta');
-                            meta.name = 'viewport';
-                            document.head.appendChild(meta);
-                        }
-                        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-                        document.body.style.transformOrigin = 'top left';
-                        document.body.style.transform = 'scale(0.85)';
-                    })();
-                """)
-                logger.info("Viewport meta + scale injected")
-            except Exception as ex:
-                logger.error("Error injecting viewport/scale: %s", ex)
 
         webview = WebView(
             url=url,
@@ -229,8 +218,6 @@ class WebViewSolver:
             except Exception as ex:
                 logger.error("Error setting JS mode: %s", ex)
 
-            reloaded = False
-
             while not result_future.done():
                 current_url = ""
                 try:
@@ -238,7 +225,10 @@ class WebViewSolver:
                 except Exception:
                     pass
 
-                # Primary: read native cookies via pyjnius (captures HttpOnly)
+                # Primary (and on Android, the ONLY path that works for
+                # cf_clearance): read native cookies via pyjnius. cf_clearance is
+                # an HttpOnly cookie, so document.cookie can NEVER see it — the
+                # native CookieManager is the real capture path on every device.
                 if current_url and _cookie_manager:
                     cookies = await _android_cookies(current_url)
                     if cookies:
@@ -246,42 +236,24 @@ class WebViewSolver:
                         if result_future.done():
                             break
 
-                # Fallback: document.cookie (won't read HttpOnly but keep for safety)
-                try:
-                    await webview.run_javascript(
-                        "document.title = 'COOKIE:' + (document.cookie || '')"
-                    )
-                    title = (await webview.get_title()) or ""
-                except Exception as ex:
-                    logger.error("Title poll error: %s", ex)
-                    await asyncio.sleep(1.0)
-                    continue
-
-                if not reloaded and "enable javascript" in title.lower():
-                    logger.warning(
-                        "Detected 'Enable JavaScript' error, reloading with JS enabled..."
-                    )
+                # Last-resort fallback ONLY when pyjnius is unavailable
+                # (should not happen on Android, but kept defensively). Uses a
+                # single READ-ONLY console.log — we deliberately avoid mutating
+                # document.title, which previously disturbed the Cloudflare
+                # challenge and caused the reload loop on Android TV.
+                if _cookie_manager is None:
                     try:
-                        await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
-                        await webview.reload()
-                    except Exception as ex:
-                        logger.error("Reload error: %s", ex)
-                    reloaded = True
-                    await asyncio.sleep(2.0)
-                    continue
+                        await webview.run_javascript(
+                            "console.log('COOKIE:' + (document.cookie || ''))"
+                        )
+                    except Exception:
+                        pass
 
-                if title.startswith("COOKIE:"):
-                    await _try_resolve(title[7:])
-                    if result_future.done():
-                        break
-
-                try:
-                    await webview.run_javascript(
-                        "console.log('COOKIE:' + (document.cookie || ''))"
-                    )
-                except Exception:
-                    pass
-                await asyncio.sleep(0.5)
+                # Poll every 1.5s instead of 0.5s. Native cookie reads are cheap
+                # and non-intrusive, so the longer interval does not slow down
+                # detection meaningfully — but it stops starving the Cloudflare
+                # challenge JS of CPU on low-power TV hardware (the slowness).
+                await asyncio.sleep(1.5)
 
         polling_task = asyncio.create_task(poll_cookies())
 
