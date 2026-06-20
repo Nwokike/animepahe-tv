@@ -3,7 +3,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-CURRENT_BUILD_NUMBER = 6
+CURRENT_BUILD_NUMBER = 7
 CONFIG_URL = "https://tv.kalerosemary7.workers.dev/config"
 APP_KEY = "animepahe"
 
