@@ -1,6 +1,6 @@
 import logging
 from urllib.parse import urlparse
-import httpx
+from curl_cffi.requests import AsyncSession, Response
 from core.state import state
 from services.webview_solver import WebViewSolver
 
@@ -50,18 +50,19 @@ def _looks_like_cf_challenge(text: str, status_code: int) -> bool:
 
 class DDoSSolver:
     def __init__(self, timeout: int = 15):
-        self._client: httpx.AsyncClient | None = None
+        self._client: AsyncSession | None = None
         self._solved = False
         self._timeout = timeout
         self._base_url = "https://animepahe.com"
         self._cookies_str = ""
         self._user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-    def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            logger.debug("DDoS creating new httpx client")
-            self._client = httpx.AsyncClient(
-                timeout=self._timeout, follow_redirects=True
+    def _get_client(self) -> AsyncSession:
+        if self._client is None:
+            logger.debug("DDoS creating new curl_cffi session")
+            self._client = AsyncSession(
+                timeout=self._timeout,
+                impersonate="chrome",
             )
         return self._client
 
@@ -107,7 +108,7 @@ class DDoSSolver:
         # 1. Resolve redirect BASE domain
         client = self._get_client()
         try:
-            resp = await client.get("https://animepahe.com", follow_redirects=True)
+            resp = await client.get("https://animepahe.com", allow_redirects=True)
             parsed = urlparse(str(resp.url))
             self._base_url = f"{parsed.scheme}://{parsed.netloc}"
             logger.info("DDoS dynamically resolved base URL: %s", self._base_url)
@@ -137,12 +138,12 @@ class DDoSSolver:
     async def _request(
         self,
         method: str,
-        client: httpx.AsyncClient,
+        client: AsyncSession,
         url: str,
         headers: dict,
         params: dict | None,
         **kwargs,
-    ) -> httpx.Response:
+    ) -> Response:
         if method == "GET":
             return await client.get(url, headers=headers, params=params, **kwargs)
         return await client.request(
@@ -155,7 +156,7 @@ class DDoSSolver:
         headers: dict | None = None,
         params: dict | None = None,
         **kwargs,
-    ) -> httpx.Response:
+    ) -> Response:
         logger.debug("DDoS GET %s", url)
 
         # Check if URL references hardcoded animepahe.com, rewrite to resolved base url
@@ -231,6 +232,7 @@ class DDoSSolver:
         self._client = None
 
     async def close(self):
-        if self._client and not self._client.is_closed:
-            logger.debug("DDoS closing client")
-            await self._client.aclose()
+        if self._client:
+            logger.debug("DDoS closing session")
+            await self._client.close()
+            self._client = None

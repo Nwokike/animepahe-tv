@@ -28,9 +28,9 @@ export default {
           "update_url": `${origin}/sports`
         },
         "animepahe": {
-          "version": "1.0.6",
-          "build_number": 7,
-          "release_notes": "Fixes Cloudflare 'zero items' / stuck loading by auto-detecting expired checks and re-verifying silently. Fixes the 'Verify' button crash — it now safely clears the stale check instead of wiping app data. Fixes the Android TV reload loop and slowness in the verification page.",
+          "version": "1.0.7",
+          "build_number": 8,
+          "release_notes": "Migrated HTTP client from httpx to curl-cffi for Cloudflare TLS fingerprint compatibility on Linux. Replaced httpx dependency with curl-cffi ; added PyQt6-WebEngine + qtpy as dev dependencies for desktop CAPTCHA solver.",
           "mandatory": false,
           "update_url": `${origin}/anime`
         },

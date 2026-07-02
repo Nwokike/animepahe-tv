@@ -1,6 +1,6 @@
 import logging
 import re
-import httpx
+from curl_cffi.requests import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +45,11 @@ def _dean_unpack(html_text: str) -> list[str]:
 
 class KwikResolver:
     def __init__(self):
-        self._client: httpx.AsyncClient | None = None
+        self._client: AsyncSession | None = None
 
-    def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=15, follow_redirects=True)
+    def _get_client(self) -> AsyncSession:
+        if self._client is None:
+            self._client = AsyncSession(timeout=15)
         return self._client
 
     async def resolve(self, kwik_url: str) -> str | None:
@@ -130,10 +130,10 @@ class KwikResolver:
                 result,
             )
             return result
-        except httpx.RequestError as ex:
+        except Exception as ex:
             logger.info("verify HEAD %s -> RequestError: %s", url, ex)
             return False
 
     async def close(self):
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
+        if self._client:
+            await self._client.close()

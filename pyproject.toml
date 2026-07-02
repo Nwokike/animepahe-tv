@@ -1,21 +1,21 @@
 [project]
 name = "animepahe-tv"
-version = "1.0.6"
+version = "1.0.7"
 description = "Lightweight client-side Android TV / mobile / desktop app for streaming anime from AnimePahe."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
     "beautifulsoup4>=4.12.0",
+    "curl-cffi>=0.15.0",
     "flet==0.85.0",
     "flet-webview==0.85.0",
-    "httpx>=0.28.1",
 ]
 
 [tool.flet]
 org = "com.animepahe"
 product = "AnimePahe TV"
-build_number = 7
+build_number = 8
 
 [tool.flet.app]
 path = "src"
@@ -37,6 +37,8 @@ dependencies = ["pyjnius"]
 dev = [
     "ruff>=0.15.13",
     "pywebview>=6.2.1",
+    "qtpy>=2.4.3",
+    "pyqt6-webengine>=6.11.0",
 ]
 
 

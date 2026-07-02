@@ -3,7 +3,6 @@ import re
 import time
 import base64
 import asyncio
-import httpx
 from bs4 import BeautifulSoup
 from core.state import Anime, Episode, Source, LatestRelease
 from services.ddos_solver import DDoSSolver
@@ -52,7 +51,8 @@ class AnimePaheScraper:
         self._mem_cache[key] = value
         self._mem_ttl[key] = time.time() + ttl
 
-    async def _fetch_api(self, params: dict) -> httpx.Response | None:
+    async def _fetch_api(self, params: dict):
+        """Fetch from animepahe API. Returns response on success, None on failure."""
         logger.info("FETCH params=%s", params)
         try:
             resp = await self.ddos.get(
@@ -108,7 +108,7 @@ class AnimePaheScraper:
         try:
             data = resp.json()
             logger.info("LATEST got JSON keys=%s", list(data.keys()))
-        except (ValueError, httpx.DecodingError) as ex:
+        except ValueError as ex:
             logger.error(
                 "LATEST JSON decode failed: %s — body start: %s", ex, resp.text[:300]
             )
@@ -173,7 +173,7 @@ class AnimePaheScraper:
                 list(data.keys()),
                 len(data.get("data", [])),
             )
-        except (ValueError, httpx.DecodingError) as ex:
+        except ValueError as ex:
             logger.error("SEARCH_API JSON decode failed: %s", ex)
             return [], False
         # Resolve posters to base64 in parallel to bypass client-side Cloudflare blocks
@@ -291,7 +291,7 @@ class AnimePaheScraper:
                 list(data.keys()),
                 len(data.get("data", [])),
             )
-        except (ValueError, httpx.DecodingError) as ex:
+        except ValueError as ex:
             logger.error("EPISODES_API JSON decode failed: %s", ex)
             return [], False
         # Resolve snapshots to base64 in parallel to bypass client-side Cloudflare blocks

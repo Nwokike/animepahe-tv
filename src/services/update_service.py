@@ -1,9 +1,9 @@
-import httpx
 import logging
+from curl_cffi.requests import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-CURRENT_BUILD_NUMBER = 7
+CURRENT_BUILD_NUMBER = 8
 CONFIG_URL = "https://tv.kalerosemary7.workers.dev/config"
 APP_KEY = "animepahe"
 
@@ -14,7 +14,7 @@ class UpdateService:
 
     async def check_for_update(self) -> dict | None:
         try:
-            async with httpx.AsyncClient(timeout=3.0, follow_redirects=True) as client:
+            async with AsyncSession(timeout=3.0) as client:
                 resp = await client.get(self.config_url)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -24,7 +24,7 @@ class UpdateService:
                     server_build = app_config.get("build_number", 0)
                     if server_build > CURRENT_BUILD_NUMBER:
                         return {
-                            "version": app_config.get("version", "1.0.6"),
+                            "version": app_config.get("version", "1.0.7"),
                             "release_notes": app_config.get("release_notes", ""),
                             "apk_url": app_config.get("update_url", ""),
                             "mandatory": app_config.get("mandatory", False),

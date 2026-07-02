@@ -22,11 +22,16 @@ def check_cookies(window):
         time.sleep(1.0)
         try:
             cookies = window.get_cookies()
+            print(f"[DEBUG] Cookie jar has {len(cookies)} entries", file=sys.stderr)
             cookie_strs = []
             has_cf = False
             for c in cookies:
                 # Each c is a SimpleCookie from http.cookies
                 for key, morsel in c.items():
+                    print(
+                        f"[DEBUG] Found cookie: {key}={morsel.value[:50] if len(morsel.value) > 50 else morsel.value}",
+                        file=sys.stderr,
+                    )
                     cookie_strs.append(f"{key}={morsel.value}")
                     if key == "cf_clearance":
                         has_cf = True
@@ -34,6 +39,10 @@ def check_cookies(window):
             if has_cf:
                 cookie_header = "; ".join(cookie_strs)
                 result = {"cookies": cookie_header, "user_agent": captured_ua}
+                print(
+                    f"[DEBUG] Returning cf_clearance cookie, header length: {len(cookie_header)}",
+                    file=sys.stderr,
+                )
                 print(json.dumps(result))
                 window.destroy()
                 return
