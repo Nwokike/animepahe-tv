@@ -30,7 +30,7 @@ export default {
         "animepahe": {
           "version": "1.0.7",
           "build_number": 8,
-          "release_notes": "Migrated HTTP client from httpx to curl-cffi for Cloudflare TLS fingerprint compatibility on Linux. Replaced httpx dependency with curl-cffi ; added PyQt6-WebEngine + qtpy as dev dependencies for desktop CAPTCHA solver.",
+          "release_notes": "Migrated HTTP client from httpx to primp for Cloudflare TLS fingerprint compatibility on Linux. Replaced httpx dependency with primp ; added PyQt6-WebEngine + qtpy as dev dependencies for desktop CAPTCHA solver.",
           "mandatory": false,
           "update_url": `${origin}/anime`
         },
