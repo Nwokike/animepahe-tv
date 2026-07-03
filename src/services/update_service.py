@@ -1,5 +1,5 @@
 import logging
-from curl_cffi.requests import AsyncSession
+import primp
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ class UpdateService:
 
     async def check_for_update(self) -> dict | None:
         try:
-            async with AsyncSession(timeout=3.0) as client:
+            async with primp.AsyncClient(timeout=3.0) as client:
                 resp = await client.get(self.config_url)
                 if resp.status_code == 200:
                     data = resp.json()

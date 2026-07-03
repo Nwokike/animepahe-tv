@@ -1,6 +1,6 @@
 import logging
 from urllib.parse import urlparse
-from curl_cffi.requests import AsyncSession, Response
+import primp
 from core.state import state
 from services.webview_solver import WebViewSolver
 
@@ -50,17 +50,17 @@ def _looks_like_cf_challenge(text: str, status_code: int) -> bool:
 
 class DDoSSolver:
     def __init__(self, timeout: int = 15):
-        self._client: AsyncSession | None = None
+        self._client: primp.AsyncClient | None = None
         self._solved = False
         self._timeout = timeout
         self._base_url = "https://animepahe.com"
         self._cookies_str = ""
         self._user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-    def _get_client(self) -> AsyncSession:
+    def _get_client(self) -> primp.AsyncClient:
         if self._client is None:
-            logger.debug("DDoS creating new curl_cffi session")
-            self._client = AsyncSession(
+            logger.debug("DDoS creating new primp session")
+            self._client = primp.AsyncClient(
                 timeout=self._timeout,
                 impersonate="chrome",
             )
@@ -108,7 +108,7 @@ class DDoSSolver:
         # 1. Resolve redirect BASE domain
         client = self._get_client()
         try:
-            resp = await client.get("https://animepahe.com", allow_redirects=True)
+            resp = await client.get("https://animepahe.com", follow_redirects=True)
             parsed = urlparse(str(resp.url))
             self._base_url = f"{parsed.scheme}://{parsed.netloc}"
             logger.info("DDoS dynamically resolved base URL: %s", self._base_url)
@@ -138,12 +138,12 @@ class DDoSSolver:
     async def _request(
         self,
         method: str,
-        client: AsyncSession,
+        client: primp.AsyncClient,
         url: str,
         headers: dict,
         params: dict | None,
         **kwargs,
-    ) -> Response:
+    ) -> primp.AsyncResponse:
         if method == "GET":
             return await client.get(url, headers=headers, params=params, **kwargs)
         return await client.request(
@@ -156,7 +156,7 @@ class DDoSSolver:
         headers: dict | None = None,
         params: dict | None = None,
         **kwargs,
-    ) -> Response:
+    ) -> primp.AsyncResponse:
         logger.debug("DDoS GET %s", url)
 
         # Check if URL references hardcoded animepahe.com, rewrite to resolved base url
@@ -234,5 +234,7 @@ class DDoSSolver:
     async def close(self):
         if self._client:
             logger.debug("DDoS closing session")
-            await self._client.close()
+            # primp's AsyncClient has no public close() method; use __aexit__
+            # to release the underlying connection pool.
+            await self._client.__aexit__(None, None, None)
             self._client = None

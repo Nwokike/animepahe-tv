@@ -105,7 +105,9 @@ def build_search_view(
             f"\u2605 {anime.score:.1f}" if anime.score else "",
             size=12,
             weight=ft.FontWeight.BOLD,
-            color=AppColors.SUCCESS if anime.score >= 7.5 else AppColors.WARNING,
+            color=AppColors.SUCCESS
+            if anime.score is not None and anime.score >= 7.5
+            else AppColors.WARNING,
         )
 
         play_badge = ft.Container(

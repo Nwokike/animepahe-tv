@@ -1,6 +1,6 @@
 import logging
 import re
-from curl_cffi.requests import AsyncSession
+import primp
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +45,11 @@ def _dean_unpack(html_text: str) -> list[str]:
 
 class KwikResolver:
     def __init__(self):
-        self._client: AsyncSession | None = None
+        self._client: primp.AsyncClient | None = None
 
-    def _get_client(self) -> AsyncSession:
+    def _get_client(self) -> primp.AsyncClient:
         if self._client is None:
-            self._client = AsyncSession(timeout=15)
+            self._client = primp.AsyncClient(timeout=15, impersonate="chrome")
         return self._client
 
     async def resolve(self, kwik_url: str) -> str | None:
@@ -136,4 +136,5 @@ class KwikResolver:
 
     async def close(self):
         if self._client:
-            await self._client.close()
+            await self._client.__aexit__(None, None, None)
+            self._client = None
