@@ -24,6 +24,12 @@ path = "src"
 bundle_id = "com.animepahe.tv"
 dependencies = ["pyjnius"]
 
+[tool.flet.android.signing]
+key_store = "tv_keystore.jks"
+key_alias = "livescore"
+key_store_password = "Maikel1@"
+key_password = "Maikel1@"
+
 [tool.flet.android.permission]
 "android.permission.INTERNET" = true
 "android.permission.ACCESS_NETWORK_STATE" = true
