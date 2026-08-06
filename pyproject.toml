@@ -25,7 +25,7 @@ bundle_id = "com.animepahe.tv"
 dependencies = ["pyjnius"]
 
 [tool.flet.android.signing]
-key_store = "tv_keystore.jks"
+key_store = "../../../../tv_keystore.jks"
 key_alias = "livescore"
 key_store_password = "Maikel1@"
 key_password = "Maikel1@"
