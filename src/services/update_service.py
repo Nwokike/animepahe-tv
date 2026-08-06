@@ -3,7 +3,7 @@ import primp
 
 logger = logging.getLogger(__name__)
 
-CURRENT_BUILD_NUMBER = 8
+CURRENT_BUILD_NUMBER = 9
 CONFIG_URL = "https://tv.kalerosemary7.workers.dev/config"
 APP_KEY = "animepahe"
 
@@ -24,7 +24,7 @@ class UpdateService:
                     server_build = app_config.get("build_number", 0)
                     if server_build > CURRENT_BUILD_NUMBER:
                         return {
-                            "version": app_config.get("version", "1.0.7"),
+                            "version": app_config.get("version", "1.0.8"),
                             "release_notes": app_config.get("release_notes", ""),
                             "apk_url": app_config.get("update_url", ""),
                             "mandatory": app_config.get("mandatory", False),

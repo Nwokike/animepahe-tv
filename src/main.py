@@ -620,8 +620,37 @@ class AppController:
             self._show_snackbar("Failed to resolve stream.", AppColors.ERROR)
             return
 
-        encoded = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
-        deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded}"
+        # Look up anime title from state (same lookup as anime_detail.py)
+        anime = next(
+            (a for a in state.search_results if a.session == anime_session), None
+        )
+        if not anime:
+            lr = next(
+                (a for a in state.latest_releases if a.anime_session == anime_session),
+                None,
+            )
+            anime_title = lr.anime_title if lr else "Anime"
+        else:
+            anime_title = anime.title
+
+        # Look up episode number
+        episode = next(
+            (e for e in state.episodes if e.session == episode_session), None
+        )
+        ep_num = episode.episode if episode else None
+
+        # Build title with episode and quality
+        res = state.selected_source.resolution if state.selected_source else ""
+        parts = [anime_title]
+        if ep_num:
+            parts.append(f"Episode {ep_num}")
+        if res:
+            parts.append(f"({res}p)")
+        title_str = " - ".join(parts)
+
+        encoded_url = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
+        encoded_title = urllib.parse.quote(title_str)
+        deep_link = f"{KTV_DEEP_LINK_SCHEME}{encoded_url}&title={encoded_title}"
         print(f"[DEBUG] deep_link = {deep_link}")
 
         try:
