@@ -28,9 +28,9 @@ export default {
           "update_url": `${origin}/sports`
         },
         "animepahe": {
-          "version": "1.0.7",
-          "build_number": 8,
-          "release_notes": "Migrated HTTP client from httpx to primp for Cloudflare TLS fingerprint compatibility on Linux. Replaced httpx dependency with primp ; added PyQt6-WebEngine + qtpy as dev dependencies for desktop CAPTCHA solver.",
+          "version": "1.0.8",
+          "build_number": 9,
+          "release_notes": "Fixed video playback — anime title and episode now display correctly in Player. Deep link updated to pass full title (anime name + episode + quality).",
           "mandatory": false,
           "update_url": `${origin}/anime`
         },
