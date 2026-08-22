@@ -14,7 +14,7 @@ export default {
     }
 
     if (path === "/movies") {
-      return Response.redirect("https://nkiritv.github.io", 302);
+      return Response.redirect("https://nkiri-tv.github.io", 302);
     }
 
     // 2. THE BACKGROUND UPDATE CHECK (Flet app calls this silently)
