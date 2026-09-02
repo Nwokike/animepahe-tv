@@ -10,11 +10,11 @@ export default {
     }
 
     if (path === "/anime") {
-      return Response.redirect("https://animepahetv.github.io", 302);
+      return Response.redirect("https://github.com/soco-live/animepahe-releases", 302);
     }
 
     if (path === "/movies") {
-      return Response.redirect("https://nkiri-tv.github.io", 302);
+      return Response.redirect("https://github.com/soco-live/nkiri-releases", 302);
     }
 
     // 2. THE BACKGROUND UPDATE CHECK (Flet app calls this silently)
