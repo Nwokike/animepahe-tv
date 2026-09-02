@@ -48,7 +48,7 @@ jobs:
             echo "RELEASE_NAME=Automated Build (${SHORT_SHA})" >> $GITHUB_OUTPUT
             echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
           fi
-      - name: Create GitHub Release Placeholder
+      - name: Create GitHub Release Placeholder (private)
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
@@ -60,6 +60,20 @@ jobs:
             Automated multi-platform build generated from commit `${{ github.sha }}`.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Public Release Placeholder
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: soco-live/animepahe-releases
+          tag_name: ${{ steps.tag_info.outputs.TAG_NAME }}
+          name: ${{ steps.tag_info.outputs.RELEASE_NAME }}
+          prerelease: ${{ steps.tag_info.outputs.IS_PRERELEASE }}
+          make_latest: true
+          body: |
+            Automated build from `soco-live/animepahe-tv@${{ github.sha }}`.
+            Keep source private — this repo only hosts public APKs.
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
 
   # ─── 1. Android APK (universal) ───────────────────────────
   build-apk:
@@ -83,7 +97,7 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v
-      - name: Upload directly to GitHub Release
+      - name: Upload to Private Release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
@@ -91,6 +105,15 @@ jobs:
           files: build/apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload to Public Release Repo
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: soco-live/animepahe-releases
+          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
+          files: build/apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
 
   # ─── 2. Android APK (split per ABI) ───────────────────────
   build-apk-split:
@@ -114,7 +137,7 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
-      - name: Upload directly to GitHub Release
+      - name: Upload to Private Release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
@@ -122,3 +145,12 @@ jobs:
           files: build/apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload to Public Release Repo
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: soco-live/animepahe-releases
+          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
+          files: build/apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
