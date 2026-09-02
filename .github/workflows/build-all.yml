@@ -65,6 +65,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           repository: soco-live/animepahe-releases
+          token: ${{ secrets.RELEASE_PAT }}
           tag_name: ${{ steps.tag_info.outputs.TAG_NAME }}
           name: ${{ steps.tag_info.outputs.RELEASE_NAME }}
           prerelease: ${{ steps.tag_info.outputs.IS_PRERELEASE }}
@@ -110,6 +111,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           repository: soco-live/animepahe-releases
+          token: ${{ secrets.RELEASE_PAT }}
           tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
           files: build/apk/*.apk
         env:
@@ -150,6 +152,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           repository: soco-live/animepahe-releases
+          token: ${{ secrets.RELEASE_PAT }}
           tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
           files: build/apk/*.apk
         env:
