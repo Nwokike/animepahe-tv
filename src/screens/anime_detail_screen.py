@@ -1,0 +1,237 @@
+"""Anime detail — backdrop, poster, metadata, episode grid.
+
+Craft carried from the original view: the blurred-poster backdrop (poster at
+30% + surface wash), 200x300 poster with shadow, responsive title, bullet
+metadata row, and 1.67 episode cards with the focus-ring border reserve.
+
+Data comes from the controller (Phase 1). Phase 2 makes this screen fetch
+its own anime by session — today it reads state.episodes like the old view.
+"""
+
+import flet as ft
+
+from core.theme import AppColors
+from state.app_state import AppStateCtx
+from state.controller_ctx import ControllerMethodsCtx
+
+
+def _episode_card(ep, on_play, anime_session: str, now_playing: bool) -> ft.Control:
+    image = (
+        ft.Image(src=ep.snapshot, fit=ft.BoxFit.COVER, expand=True)
+        if ep.snapshot
+        else ft.Container(bgcolor=AppColors.DARK_SURFACE_VARIANT)
+    )
+    content = ft.Stack(
+        [
+            image,
+            ft.Container(
+                gradient=ft.LinearGradient(
+                    begin=ft.Alignment.CENTER_LEFT,
+                    end=ft.Alignment.CENTER_RIGHT,
+                    colors=[
+                        ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
+                        ft.Colors.TRANSPARENT,
+                    ],
+                ),
+                expand=True,
+            ),
+            ft.Container(
+                padding=16,
+                alignment=ft.Alignment.CENTER_LEFT,
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            f"Episode {ep.episode}",
+                            color=ft.Colors.WHITE,
+                            weight=ft.FontWeight.BOLD,
+                            size=16,
+                        ),
+                        ft.Text(
+                            ep.duration or "24m",
+                            size=12,
+                            color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=4,
+                ),
+            ),
+            ft.Container(
+                alignment=ft.Alignment.CENTER_RIGHT,
+                padding=16,
+                content=ft.Icon(
+                    ft.Icons.EQUALIZER_ROUNDED
+                    if now_playing
+                    else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                    size=40,
+                    color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
+                ),
+            ),
+        ],
+        expand=True,
+    )
+    return ft.Container(
+        content=content,
+        border=ft.Border.all(4, ft.Colors.TRANSPARENT),
+        padding=4,
+        border_radius=16,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
+        animate_scale=300,
+        animate=300,
+        ink=True,
+        aspect_ratio=1.67,
+        on_click=lambda e: on_play(anime_session, ep.session),
+    )
+
+
+@ft.component
+def AnimeDetailScreen() -> ft.Control:
+    state = ft.use_context(AppStateCtx)
+    controller = ft.use_context(ControllerMethodsCtx)
+    _ = state.episodes_version
+
+    anime_session = state.current_anime_session
+    episodes = state.episodes
+
+    # Title/poster fall back to the first known release until the detail
+    # fetch fills them in (Phase 2 removes this synthesis entirely).
+    anime = None
+    for r in state.latest_releases:
+        if r.anime_session == anime_session:
+            anime = r
+            break
+
+    title = anime.anime_title if anime else "Loading..."
+    poster = anime.snapshot if anime else None
+
+    if not episodes and state.is_loading:
+        return ft.Container(
+            content=ft.ProgressRing(color=AppColors.PRIMARY),
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+        )
+
+    backdrop = ft.Stack(
+        [
+            ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True, opacity=0.3)
+            if poster
+            else ft.Container(bgcolor=AppColors.DARK_BG),
+            ft.Container(
+                expand=True,
+                bgcolor=ft.Colors.with_opacity(0.85, AppColors.DARK_BG),
+            ),
+        ],
+        expand=True,
+    )
+
+    poster_box = ft.Container(
+        width=200,
+        height=300,
+        border_radius=16,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        shadow=ft.BoxShadow(
+            spread_radius=2,
+            blur_radius=20,
+            color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK),
+            offset=ft.Offset(0, 10),
+        ),
+        content=ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True)
+        if poster
+        else ft.Container(
+            content=ft.Icon(ft.Icons.MOVIE_ROUNDED, size=64, color=AppColors.DARK_TEXT_DIM),
+            alignment=ft.Alignment.CENTER,
+            bgcolor=AppColors.DARK_SURFACE_VARIANT,
+        ),
+    )
+
+    now_playing = {
+        "anime": state.current_anime_session,
+        "episode": state.current_episode_session,
+    }
+
+    grid = ft.ResponsiveRow(
+        controls=[
+            ft.Container(
+                content=_episode_card(
+                    ep,
+                    controller.play_episode,
+                    anime_session,
+                    now_playing["anime"] == anime_session
+                    and now_playing["episode"] == ep.session,
+                ),
+                col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
+            )
+            for ep in episodes
+        ],
+        spacing=12,
+        run_spacing=12,
+    )
+
+    pager = ft.Row(
+        [
+            ft.OutlinedButton(
+                content="Prev",
+                on_click=lambda e: controller.load_episodes(anime_session, state.episodes_page - 1),
+                disabled=state.episodes_page <= 1,
+            ),
+            ft.Text(f"Page {state.episodes_page}", size=13, color=AppColors.DARK_TEXT_DIM),
+            ft.OutlinedButton(
+                content="Next",
+                on_click=lambda e: controller.load_episodes(anime_session, state.episodes_page + 1),
+                disabled=not state.episodes_has_more,
+            ),
+        ],
+        alignment=ft.MainAxisAlignment.CENTER,
+        spacing=16,
+    )
+
+    return ft.Stack(
+        [
+            backdrop,
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                poster_box,
+                                ft.Container(width=24),
+                                ft.Column(
+                                    [
+                                        ft.Text(
+                                            title,
+                                            size=28,
+                                            weight=ft.FontWeight.BOLD,
+                                            color=AppColors.DARK_TEXT,
+                                            max_lines=2,
+                                            overflow=ft.TextOverflow.ELLIPSIS,
+                                        ),
+                                    ],
+                                    expand=True,
+                                    alignment=ft.MainAxisAlignment.CENTER,
+                                ),
+                            ],
+                            alignment=ft.MainAxisAlignment.START,
+                        ),
+                        ft.Container(height=24),
+                        ft.Text(
+                            "Episodes",
+                            size=20,
+                            weight=ft.FontWeight.W_700,
+                            color=AppColors.DARK_TEXT,
+                        ),
+                        ft.Container(height=8),
+                        grid,
+                        pager,
+                        ft.Container(height=32),
+                    ],
+                    spacing=0,
+                    scroll=ft.ScrollMode.AUTO,
+                    expand=True,
+                ),
+                padding=ft.Padding.all(24),
+                expand=True,
+            ),
+        ],
+        expand=True,
+    )

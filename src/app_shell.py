@@ -14,6 +14,7 @@ both AdMob policy and TV focus design call out as wrong.
 import flet as ft
 
 from core.theme import AppColors
+from screens.anime_detail_screen import AnimeDetailScreen
 from screens.home_screen import HomeScreen
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -48,6 +49,7 @@ def _use_rail(page) -> bool:
 def AppShell() -> ft.Control:
     controller = ft.use_context(ControllerMethodsCtx)
     active_tab, set_active_tab = ft.use_state("Home")
+    active_view, set_active_view = ft.use_state("tabs")  # "tabs" | "anime"
 
     from flet import context as flet_context
 
@@ -56,24 +58,39 @@ def AppShell() -> ft.Control:
     except Exception:
         page = None
 
+    def _open_anime(session: str):
+        # Full-screen branch (Sherlock's results-view pattern): nav bar
+        # hides, an AppBar with a back button appears.
+        set_active_view("anime")
+        controller.load_episodes(session)
+
     # The controller drives navigation by mutating these closures in place
     # (identity must survive — see controller_ctx.py).
     controller.go_home = lambda: set_active_tab("Home")
     controller.open_search = lambda: set_active_tab("Browse")
     controller.open_downloads = lambda: set_active_tab("Downloads")
     controller.open_settings = lambda: set_active_tab("Settings")
+    controller.open_anime = _open_anime
+    controller.back = lambda: set_active_view("tabs")
 
     def _on_tab(name: str):
         set_active_tab(name)
 
-    if active_tab == "Home":
-        body = HomeScreen()
-    elif active_tab == "Browse":
-        body = _placeholder("Browse", "Search lands here — Phase 2.")
-    elif active_tab == "Downloads":
-        body = _placeholder("Downloads", "Your offline episodes will live here — Phase 4.")
+    if active_view == "anime":
+        body = AnimeDetailScreen()
+        chrome = _detail_appbar(controller)
+        show_nav = False
     else:
-        body = _placeholder("Settings", "Settings + activity terminal — Phase 5.")
+        if active_tab == "Home":
+            body = HomeScreen()
+        elif active_tab == "Browse":
+            body = _placeholder("Browse", "Search lands here — Phase 2.")
+        elif active_tab == "Downloads":
+            body = _placeholder("Downloads", "Your offline episodes will live here — Phase 4.")
+        else:
+            body = _placeholder("Settings", "Settings + activity terminal — Phase 5.")
+        chrome = None
+        show_nav = True
 
     destinations = [
         ft.NavigationRailDestination(icon=icon, label=label)
@@ -82,23 +99,30 @@ def AppShell() -> ft.Control:
     selected = _TABS.index(active_tab)
 
     if _use_rail(page):
-        return ft.Row(
+        rail_or_bar = ft.NavigationRail(
+            destinations=destinations,
+            selected_index=selected,
+            on_change=lambda e: _on_tab(_TABS[e.control.selected_index]),
+            min_width=72,
+            bgcolor=AppColors.DARK_SURFACE,
+            use_indicator=True,
+            indicator_color=ft.Colors.with_opacity(0.15, AppColors.PRIMARY),
+        )
+        content = ft.Column(
             [
-                ft.NavigationRail(
-                    destinations=destinations,
-                    selected_index=selected,
-                    on_change=lambda e: _on_tab(_TABS[e.control.selected_index]),
-                    min_width=72,
-                    bgcolor=AppColors.DARK_SURFACE,
-                    use_indicator=True,
-                    indicator_color=ft.Colors.with_opacity(0.15, AppColors.PRIMARY),
-                ),
-                ft.VerticalDivider(width=1),
+                chrome if chrome is not None else ft.Container(width=0, height=0),
                 ft.Container(content=body, expand=True),
             ],
             spacing=0,
             expand=True,
         )
+        if show_nav:
+            return ft.Row(
+                [rail_or_bar, ft.VerticalDivider(width=1), content],
+                spacing=0,
+                expand=True,
+            )
+        return ft.Column([content], spacing=0, expand=True)
 
     return ft.Column(
         [
@@ -111,6 +135,19 @@ def AppShell() -> ft.Control:
         ],
         spacing=0,
         expand=True,
+    )
+
+
+def _detail_appbar(controller) -> ft.Control:
+    return ft.AppBar(
+        leading=ft.IconButton(
+            icon=ft.Icons.ARROW_BACK_ROUNDED,
+            on_click=lambda e: controller.back(),
+            tooltip="Back",
+        ),
+        title=ft.Text("Anime", weight=ft.FontWeight.W_600),
+        bgcolor=ft.Colors.TRANSPARENT,
+        center_title=False,
     )
 
 

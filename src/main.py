@@ -128,6 +128,45 @@ class AppController:
             logger.error("retry_cloudflare failed: %s", ex)
         await self.load_latest(1)
 
+    async def load_episodes(self, anime_session: str, page_num: int = 1):
+        lock = self._get_lock(f"episodes_{anime_session}")
+        if lock.locked():
+            return
+
+        async with lock:
+            state.is_loading = True
+            state.current_anime_session = anime_session
+            state.episodes_page = page_num
+            state.episodes_version += 1
+
+            try:
+                episodes, has_more = await self.scraper.episodes(anime_session, page_num)
+                logger.info(
+                    "load_episodes session=%s page=%d got %d",
+                    anime_session,
+                    page_num,
+                    len(episodes),
+                )
+                state.episodes = episodes
+                state.episodes_has_more = has_more
+                state.cf_blocked = False
+            except Exception as ex:
+                logger.error("load_episodes session=%s failed: %s", anime_session, ex)
+                state.episodes = []
+                state.episodes_has_more = False
+            finally:
+                state.is_loading = False
+                state.episodes_version += 1
+
+    async def play_episode(self, anime_session: str, episode_session: str):
+        # Phase 3 replaces this with the in-app flet-video player (quality
+        # selector, resume, next/prev). Phase 1 wires the screen to the
+        # controller so the flow exists end to end.
+        state.current_anime_session = anime_session
+        state.current_episode_session = episode_session
+        state.episodes_version += 1
+        logger.info("play_episode %s/%s (player lands in Phase 3)", anime_session, episode_session)
+
 
 async def main(page: ft.Page):
     controller = AppController(page)
@@ -139,6 +178,12 @@ async def main(page: ft.Page):
     )
     methods.retry_cloudflare = lambda: spawn(
         controller.retry_cloudflare(), name="retry-cf"
+    )
+    methods.load_episodes = lambda session, page_num=1: spawn(
+        controller.load_episodes(session, page_num), name="load-episodes"
+    )
+    methods.play_episode = lambda anime_session, episode_session: spawn(
+        controller.play_episode(anime_session, episode_session), name="play-episode"
     )
 
     page.render(lambda: ControllerMethodsCtx(methods, lambda: AppShell()))
