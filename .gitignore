@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+dist/
+*.egg-info/
+build/
+*.db
+*.db-wal
+*.db-shm
+.flet/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+/data/
+/temp/
+scratch/
+storage/
+*.pyc
+keys/
+# Signing — never commit keystores
+*.jks
+*.keystore
