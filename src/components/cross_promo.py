@@ -30,13 +30,6 @@ PROMO_APPS = (
         "logo": "socolive_logo.png",
         "url": "https://tv.kalerosemary7.workers.dev/sports",
     },
-    {
-        "name": "Kiri Research",
-        "tagline": "All our apps & tools",
-        "badge": "Explore",
-        "logo": None,
-        "url": "https://tv.kalerosemary7.workers.dev/",
-    },
 )
 
 ROTATE_SECONDS = 8
@@ -185,62 +178,3 @@ def PromoHero() -> ft.Control:
     )
 
 
-@ft.component
-def PromoShelf() -> ft.Control:
-    """"More from us" — horizontal row of same-size focusable cards."""
-    return ft.Column(
-        [
-            ft.Text(
-                "More from Kiri",
-                size=13,
-                weight=ft.FontWeight.W_700,
-                color=AppColors.DARK_TEXT_DIM,
-            ),
-            ft.Row(
-                [
-                    ft.Container(
-                        content=ft.Column(
-                            [
-                                ft.Container(
-                                    content=ft.Image(
-                                        src=app["logo"],
-                                        width=36,
-                                        height=36,
-                                        fit="contain",
-                                    )
-                                    if app["logo"]
-                                    else ft.Icon(
-                                        ft.Icons.APPS_ROUNDED,
-                                        size=24,
-                                        color=AppColors.PRIMARY,
-                                    ),
-                                    border_radius=8,
-                                    alignment=ft.Alignment.CENTER,
-                                ),
-                                ft.Text(
-                                    app["name"].replace(" TV", ""),
-                                    size=11,
-                                    weight=ft.FontWeight.W_600,
-                                    color=AppColors.DARK_TEXT,
-                                    max_lines=1,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                ),
-                            ],
-                            spacing=6,
-                            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
-                        width=96,
-                        padding=12,
-                        border_radius=12,
-                        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
-                        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.WHITE)),
-                        ink=True,
-                        on_click=_open_url(app["url"]),
-                    )
-                    for app in PROMO_APPS
-                ],
-                spacing=8,
-            ),
-        ],
-        spacing=8,
-    )

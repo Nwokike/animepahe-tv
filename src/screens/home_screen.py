@@ -8,7 +8,7 @@ the same line: icon + wordmark left, actions right.
 
 import flet as ft
 
-from components.cross_promo import PromoHero, PromoShelf
+from components.cross_promo import PromoHero
 from core.constants import APP_NAME, APP_VERSION
 from core.theme import AppColors
 from state.app_state import AppStateCtx
@@ -354,8 +354,6 @@ def HomeScreen() -> ft.Control:
                         ),
                         grid,
                         pager,
-                        ft.Container(height=16),
-                        PromoShelf(),
                         ft.Container(height=32),
                     ],
                     spacing=16,
