@@ -130,3 +130,23 @@ async def test_corrupt_file_recovers_empty(tmp_path, monkeypatch):
 
 def teardown_module():
     shutil.rmtree(_TMP, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+async def test_position_resume_rules(store):
+    await store.save_position("ep1", 120.0, 1440.0)
+    entry = await store.get_position("ep1")
+    assert entry == {"position": 120.0, "duration": 1440.0}
+
+    # Under the minimum: not resumable.
+    await store.save_position("ep2", 1.5, 1440.0)
+    assert await store.get_position("ep2") is None
+
+    # Watched to (nearly) the end: the row is dropped, not just skipped.
+    await store.save_position("ep3", 1439.0, 1440.0)
+    assert await store.get_position("ep3") is None
+    positions = await store.section("positions", {})
+    assert "ep3" not in positions
+
+    # Unknown episode: None.
+    assert await store.get_position("nope") is None

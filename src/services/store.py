@@ -142,3 +142,46 @@ class JsonStore:
         if anime_session in entries:
             entries.pop(anime_session, None)
             await self.put_section("continue_watching", entries)
+
+    # ------------------------------------------------------------------
+    # Playback positions (keyed by episode session)
+    # ------------------------------------------------------------------
+
+    RESUME_MIN_SECONDS = 3
+    RESUME_END_SKIP_SECONDS = 5
+
+    async def get_position(self, episode_session: str) -> dict | None:
+        positions = await self.section("positions", {})
+        if not isinstance(positions, dict):
+            return None
+        entry = positions.get(episode_session)
+        if not isinstance(entry, dict):
+            return None
+        try:
+            position = float(entry.get("position", 0))
+            duration = float(entry.get("duration", 0)) or None
+        except (TypeError, ValueError):
+            return None
+        # Skip resume if finished (within 5s of the end) or barely started.
+        if position <= self.RESUME_MIN_SECONDS:
+            return None
+        if duration is not None and position >= duration - self.RESUME_END_SKIP_SECONDS:
+            return None
+        return {"position": position, "duration": duration}
+
+    async def save_position(self, episode_session: str, position: float, duration: float | None) -> None:
+        if not episode_session:
+            return
+        positions = await self.section("positions", {})
+        if not isinstance(positions, dict):
+            positions = {}
+        # An episode watched to (nearly) the end is not resumable — drop it.
+        if duration and position >= duration - self.RESUME_END_SKIP_SECONDS:
+            positions.pop(episode_session, None)
+        else:
+            positions[episode_session] = {
+                "position": round(float(position), 2),
+                "duration": round(float(duration), 2) if duration else None,
+                "timestamp": time.time(),
+            }
+        await self.put_section("positions", positions)
