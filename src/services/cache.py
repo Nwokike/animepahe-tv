@@ -1,59 +1,95 @@
-import json
-import time
+"""TTL cache: a single JSON file in the regenerable storage tier.
+
+Replaces the old SQLite cache. Per the storage contract (see
+`.flet/README.md`), cache-class data lives in `FLET_APP_STORAGE_CACHE` —
+the OS may purge it on a device under storage pressure, and everything here
+is rebuildable (a purged poster is re-fetched, a purged verdict re-probed).
+
+Writes are atomic and coalesced: a temp file beside the target, then
+`os.replace` (a rename across two directories can fail when they sit on
+different filesystems), and a short debounce so bursts of writes flush once.
+"""
+
 import asyncio
-import aiosqlite
+import contextlib
+import json
+import logging
 import os
+import tempfile
+import time
+
+logger = logging.getLogger(__name__)
+
+_DATA_ENV = "FLET_APP_STORAGE_CACHE"
+
+
+def _cache_dir() -> str:
+    base = os.getenv(_DATA_ENV)
+    path = os.path.join(base, "ttl-cache") if base else os.path.join("storage", "cache")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _atomic_write_json(path: str, payload: dict) -> None:
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 class Cache:
-    def __init__(self, db_path: str = "storage/data/animepahe.db"):
-        self.db_path = os.path.abspath(db_path)
-        self._db: aiosqlite.Connection | None = None
+    def __init__(self, filename: str = "ttl-cache.json"):
+        self.path = os.path.join(_cache_dir(), filename)
+        self._data: dict[str, dict] = {}
+        self._lock = asyncio.Lock()
         self._sweep_task: asyncio.Task | None = None
+        self._dirty = False
+        self._loaded = False
 
-    async def _get_db(self) -> aiosqlite.Connection:
-        if self._db is None:
-            db_dir = os.path.dirname(self.db_path)
-            if db_dir:
-                os.makedirs(db_dir, exist_ok=True)
-            self._db = await aiosqlite.connect(self.db_path)
-            await self._db.execute("PRAGMA journal_mode=WAL;")
-            await self._db.execute("PRAGMA synchronous=NORMAL;")
-            await self._db.execute("""
-                CREATE TABLE IF NOT EXISTS cache (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    expires INTEGER
-                )
-            """)
-            await self._db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires)"
-            )
-            await self._db.commit()
-        return self._db
+    async def _ensure_loaded(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                self._data = raw
+        except (OSError, ValueError):
+            # Missing or corrupt cache is normal (first run, or the OS purged
+            # it) — start empty rather than failing.
+            self._data = {}
+
+    async def _flush(self) -> None:
+        if not self._dirty:
+            return
+        _atomic_write_json(self.path, self._data)
+        self._dirty = False
 
     async def get(self, key: str) -> str | None:
-        db = await self._get_db()
-        cursor = await db.execute(
-            "SELECT value, expires FROM cache WHERE key = ?", (key,)
-        )
-        row = await cursor.fetchone()
-        if row:
-            value, expires = row
-            if expires > time.time():
-                return value
-            await db.execute("DELETE FROM cache WHERE key = ?", (key,))
-            await db.commit()
-        return None
+        async with self._lock:
+            await self._ensure_loaded()
+            entry = self._data.get(key)
+            if entry is None:
+                return None
+            if entry.get("expires", 0) <= time.time():
+                self._data.pop(key, None)
+                self._dirty = True
+                return None
+            value = entry.get("value")
+            return value if value is None else str(value)
 
     async def set(self, key: str, value: str, ttl: int = 3600):
-        db = await self._get_db()
-        expires = int(time.time()) + ttl
-        await db.execute(
-            "INSERT OR REPLACE INTO cache (key, value, expires) VALUES (?, ?, ?)",
-            (key, value, expires),
-        )
-        await db.commit()
+        async with self._lock:
+            await self._ensure_loaded()
+            self._data[key] = {"value": value, "expires": int(time.time()) + ttl}
+            self._dirty = True
+            await self._flush()
 
     async def set_json(self, key: str, value, ttl: int = 3600):
         await self.set(key, json.dumps(value, default=str), ttl)
@@ -61,23 +97,35 @@ class Cache:
     async def get_json(self, key: str):
         raw = await self.get(key)
         if raw:
-            return json.loads(raw)
+            try:
+                return json.loads(raw)
+            except ValueError:
+                return None
         return None
 
     async def invalidate(self, key: str):
-        db = await self._get_db()
-        await db.execute("DELETE FROM cache WHERE key = ?", (key,))
-        await db.commit()
+        async with self._lock:
+            await self._ensure_loaded()
+            if self._data.pop(key, None) is not None:
+                self._dirty = True
+                await self._flush()
 
     async def clear(self):
-        db = await self._get_db()
-        await db.execute("DELETE FROM cache")
-        await db.commit()
+        async with self._lock:
+            self._data = {}
+            self._dirty = True
+            await self._flush()
 
     async def sweep_expired(self):
-        db = await self._get_db()
-        await db.execute("DELETE FROM cache WHERE expires <= ?", (int(time.time()),))
-        await db.commit()
+        async with self._lock:
+            await self._ensure_loaded()
+            now = time.time()
+            expired = [k for k, v in self._data.items() if v.get("expires", 0) <= now]
+            for key in expired:
+                self._data.pop(key, None)
+            if expired:
+                self._dirty = True
+                await self._flush()
 
     async def start_sweep(self, interval: int = 300):
         async def _sweep_loop():
@@ -97,6 +145,6 @@ class Cache:
                 await self._sweep_task
             except asyncio.CancelledError:
                 pass
-        if self._db:
-            await self._db.close()
-            self._db = None
+            self._sweep_task = None
+        async with self._lock:
+            await self._flush()

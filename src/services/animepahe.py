@@ -3,7 +3,7 @@ import re
 import time
 import base64
 import asyncio
-from bs4 import BeautifulSoup
+from core.html_extract import extract_anime_cards, extract_data_src_elements
 from core.state import Anime, Episode, Source, LatestRelease
 from services.ddos_solver import DDoSSolver
 
@@ -218,8 +218,7 @@ class AnimePaheScraper:
         except Exception as ex:
             logger.error("SEARCH_HTML fetch failed: %s", ex)
             return [], False
-        soup = BeautifulSoup(resp.text, "html.parser")
-        cards = soup.select(".anime-card")
+        cards, has_next = extract_anime_cards(resp.text)
 
         # Resolve posters to base64 in parallel to bypass client-side Cloudflare blocks
         tasks = [self._get_image_base64(card.get("data-poster", "")) for card in cards]
@@ -241,7 +240,7 @@ class AnimePaheScraper:
                     session=card.get("data-session", ""),
                 )
             )
-        has_more = bool(soup.select(".pagination .next"))
+        has_more = has_next
         logger.info(
             "SEARCH_HTML parsed %d results, has_more=%s", len(results), has_more
         )
@@ -364,9 +363,8 @@ class AnimePaheScraper:
         except Exception as ex:
             logger.error("SOURCES_DATA_SRC fetch failed: %s", ex)
             return []
-        soup = BeautifulSoup(resp.text, "html.parser")
         sources = []
-        for el in soup.select("[data-src]"):
+        for el in extract_data_src_elements(resp.text):
             src = el.get("data-src", "").strip()
             if "kwik" in src.lower():
                 sources.append(
