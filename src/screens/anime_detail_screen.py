@@ -40,11 +40,32 @@ def _episode_card(ep, on_play, anime_session: str, now_playing: bool) -> ft.Cont
                 alignment=ft.Alignment.CENTER_LEFT,
                 content=ft.Column(
                     [
-                        ft.Text(
-                            f"Episode {ep.episode}",
-                            color=ft.Colors.WHITE,
-                            weight=ft.FontWeight.BOLD,
-                            size=16,
+                        ft.Row(
+                            [
+                                ft.Text(
+                                    f"Episode {ep.episode}",
+                                    color=ft.Colors.WHITE,
+                                    weight=ft.FontWeight.BOLD,
+                                    size=16,
+                                ),
+                                ft.Container(width=6),
+                                ft.Container(
+                                    content=ft.Text(
+                                        "Filler",
+                                        size=9,
+                                        weight=ft.FontWeight.W_700,
+                                        color=AppColors.WARNING,
+                                    ),
+                                    padding=ft.Padding.symmetric(horizontal=5, vertical=1),
+                                    border_radius=4,
+                                    border=ft.Border.all(
+                                        1, ft.Colors.with_opacity(0.4, AppColors.WARNING)
+                                    ),
+                                    visible=bool(ep.filler),
+                                ),
+                            ],
+                            spacing=4,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         ft.Text(
                             ep.duration or "24m",
@@ -94,16 +115,12 @@ def AnimeDetailScreen() -> ft.Control:
     anime_session = state.current_anime_session
     episodes = state.episodes
 
-    # Title/poster fall back to the first known release until the detail
-    # fetch fills them in (Phase 2 removes this synthesis entirely).
-    anime = None
-    for r in state.latest_releases:
-        if r.anime_session == anime_session:
-            anime = r
-            break
-
-    title = anime.anime_title if anime else "Loading..."
-    poster = anime.snapshot if anime else None
+    # Title/poster come from the controller's resolution chain (in-memory
+    # → Continue Watching store → nothing for a cold link). Phase 3 adds a
+    # metadata endpoint that removes the last fallback.
+    anime = state.selected_anime or {}
+    title = anime.get("title") or "Loading..."
+    poster = anime.get("poster")
 
     if not episodes and state.is_loading:
         return ft.Container(

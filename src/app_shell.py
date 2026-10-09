@@ -16,6 +16,7 @@ import flet as ft
 from core.theme import AppColors
 from screens.anime_detail_screen import AnimeDetailScreen
 from screens.home_screen import HomeScreen
+from screens.search_screen import SearchScreen
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -84,7 +85,7 @@ def AppShell() -> ft.Control:
         if active_tab == "Home":
             body = HomeScreen()
         elif active_tab == "Browse":
-            body = _placeholder("Browse", "Search lands here — Phase 2.")
+            body = SearchScreen()
         elif active_tab == "Downloads":
             body = _placeholder("Downloads", "Your offline episodes will live here — Phase 4.")
         else:

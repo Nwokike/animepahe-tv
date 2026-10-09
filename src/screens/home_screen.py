@@ -156,11 +156,81 @@ def _theme_cycle(page) -> tuple[str, object]:
     return icon, nxt
 
 
+def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
+    """Continue Watching shelf — newest first, capped."""
+    if not entries:
+        return None
+    cards = []
+    for record in list(entries.values())[:20]:
+        poster = record.get("poster")
+        total = record.get("total_episodes") or 0
+        progress = f"Ep {record.get('episode_num', '?')}"
+        if total:
+            progress += f" · of {total}"
+        cards.append(
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Container(
+                            content=ft.Image(
+                                src=poster, fit=ft.BoxFit.COVER, expand=True
+                            )
+                            if poster
+                            else ft.Container(
+                                content=ft.Icon(
+                                    ft.Icons.MOVIE_ROUNDED,
+                                    size=32,
+                                    color=AppColors.DARK_TEXT_DIM,
+                                ),
+                                alignment=ft.Alignment.CENTER,
+                                bgcolor=AppColors.DARK_SURFACE_VARIANT,
+                            ),
+                            width=120,
+                            height=68,
+                            border_radius=8,
+                            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                        ),
+                        ft.Text(
+                            record.get("title", ""),
+                            size=12,
+                            weight=ft.FontWeight.W_600,
+                            color=AppColors.DARK_TEXT,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(progress, size=11, color=AppColors.PRIMARY),
+                    ],
+                    spacing=6,
+                    width=120,
+                ),
+                padding=4,
+                border=ft.Border.all(4, ft.Colors.TRANSPARENT),
+                border_radius=12,
+                ink=True,
+                animate=200,
+                on_click=lambda e, s=record["anime_session"]: on_open(s),
+            )
+        )
+    return ft.Column(
+        [
+            ft.Text(
+                "Continue Watching",
+                size=16,
+                weight=ft.FontWeight.W_700,
+                color=AppColors.DARK_TEXT,
+            ),
+            ft.Row(controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO),
+        ],
+        spacing=8,
+    )
+
+
 @ft.component
 def HomeScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.latest_version  # re-render trigger, bumped by the controller
+    _ = state.continue_version
 
     from flet import context as flet_context
 
@@ -274,6 +344,8 @@ def HomeScreen() -> ft.Control:
                 content=ft.Column(
                     [
                         PromoHero(),
+                        _continue_watching_row(state.continue_watching, controller.open_anime)
+                        or ft.Container(width=0, height=0),
                         ft.Text(
                             "Recent Episodes",
                             size=18,

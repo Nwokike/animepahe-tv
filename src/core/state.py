@@ -75,6 +75,14 @@ class AppState:
     latest_version: int = 0
     search_version: int = 0
     episodes_version: int = 0
+    continue_version: int = 0
+
+    # Search + continue watching (durable store-backed)
+    search_history: list[str] = []
+    search_error: str | None = None
+    search_page: int = 1
+    continue_watching: dict = {}
+    selected_anime: dict | None = None
 
     def __init__(self):
         self.search_results = []

@@ -18,6 +18,7 @@ from core.theme import AppColors, AppTheme
 from services.animepahe import AnimePaheScraper
 from services.cache import Cache
 from services.kwik_resolver import KwikResolver
+from services.store import JsonStore
 from services.update_service import UpdateService
 from state.app_state import state
 from state.controller_ctx import ControllerMethods, ControllerMethodsCtx
@@ -49,15 +50,19 @@ class AppController:
         self.page.theme_mode = ft.ThemeMode.SYSTEM
 
         self.cache = Cache()
+        self.store = JsonStore()
         self.scraper = AnimePaheScraper()
         self.kwik = KwikResolver()
         self.update_service = UpdateService()
+        self._search_gen = 0
 
         await self.cache.start_sweep(interval=300)
 
         state.scraper = self.scraper
         state.cache = self.cache
         state.page = self.page
+        state.search_history = await self.store.get_search_history()
+        state.continue_watching = await self.store.get_continue_watching()
 
         spawn(self._check_for_updates_bg(), name="update-check")
 
@@ -160,12 +165,116 @@ class AppController:
 
     async def play_episode(self, anime_session: str, episode_session: str):
         # Phase 3 replaces this with the in-app flet-video player (quality
-        # selector, resume, next/prev). Phase 1 wires the screen to the
-        # controller so the flow exists end to end.
+        # selector, resume, next/prev). Phase 2 additionally records the
+        # Continue Watching entry here — the record is a controller-level
+        # composite because the anime's title/poster are not on the Episode.
         state.current_anime_session = anime_session
         state.current_episode_session = episode_session
         state.episodes_version += 1
-        logger.info("play_episode %s/%s (player lands in Phase 3)", anime_session, episode_session)
+
+        anime = await self._resolve_anime(anime_session)
+        ep = next((e for e in state.episodes if e.session == episode_session), None)
+        if anime and ep:
+            record = {
+                "anime_session": anime_session,
+                "anime_id": ep.anime_id,
+                "title": anime.get("title", ""),
+                "poster": anime.get("poster", ""),
+                "episode_num": ep.episode,
+                "episode_session": episode_session,
+                "total_episodes": anime.get("episodes", 0),
+            }
+            await self.store.record_watch(record)
+            state.continue_watching = await self.store.get_continue_watching()
+            state.continue_version += 1
+        logger.info(
+            "play_episode %s/%s (player lands in Phase 3)", anime_session, episode_session
+        )
+
+    async def _resolve_anime(self, anime_session: str) -> dict | None:
+        """Title/poster for an anime, cheapest source first.
+
+        Order: in-memory releases/search results → Continue Watching store →
+        (only then, for cold deep links) a title search. Episodes never need
+        this — they load by session — but the detail screen's header does.
+        """
+        for release in state.latest_releases:
+            if release.anime_session == anime_session:
+                return {
+                    "title": release.anime_title,
+                    "poster": release.snapshot,
+                    "episodes": 0,
+                }
+        for anime in state.search_results:
+            if anime.session == anime_session:
+                return {
+                    "title": anime.title,
+                    "poster": anime.poster,
+                    "episodes": anime.episodes,
+                }
+        entry = (await self.store.get_continue_watching()).get(anime_session)
+        if entry:
+            return {
+                "title": entry.get("title", ""),
+                "poster": entry.get("poster", ""),
+                "episodes": entry.get("total_episodes", 0),
+            }
+        # Cold link: the only case that pays a network round-trip. Reuse the
+        # episodes' anime_id? No — the API needs a title; use the newest
+        # episode snapshot as a poster and a generic title until Phase 3's
+        # metadata endpoint arrives.
+        return None
+
+    async def load_anime(self, anime_session: str):
+        """Open the detail screen: resolve the header, then load episodes."""
+        state.current_anime_session = anime_session
+        state.episodes_version += 1
+        anime = await self._resolve_anime(anime_session)
+        state.selected_anime = anime
+        await self.load_episodes(anime_session, 1)
+
+    async def load_search(self, query: str, page: int = 1):
+        if not query:
+            return
+        lock = self._get_lock("search")
+        async with lock:
+            # Generation counter: a slow response for an older query must
+            # never overwrite a newer one's results.
+            self._search_gen += 1
+            gen = self._search_gen
+
+            state.is_loading = True
+            state.search_query = query
+            state.search_page = page
+            state.search_error = None
+            state.search_version += 1
+
+            try:
+                results, has_more = await self.scraper.search(query, page)
+                if gen != self._search_gen:
+                    logger.info("load_search discarding stale response for %r", query)
+                    return
+                state.search_results = results
+                state.search_has_more = has_more
+                if page == 1:
+                    state.cf_blocked = False
+                    await self.store.add_search(query)
+                    state.search_history = await self.store.get_search_history()
+            except Exception as ex:
+                logger.error("load_search q=%r page=%d failed: %s", query, page, ex)
+                if gen == self._search_gen:
+                    state.search_results = []
+                    state.search_has_more = False
+                    state.search_error = str(ex)
+            finally:
+                if gen == self._search_gen:
+                    state.is_loading = False
+                    state.search_version += 1
+
+    async def clear_search_history(self):
+        await self.store.clear_search_history()
+        state.search_history = []
+        state.search_version += 1
 
 
 async def main(page: ft.Page):
@@ -182,8 +291,17 @@ async def main(page: ft.Page):
     methods.load_episodes = lambda session, page_num=1: spawn(
         controller.load_episodes(session, page_num), name="load-episodes"
     )
+    methods.load_anime = lambda session: spawn(
+        controller.load_anime(session), name="load-anime"
+    )
     methods.play_episode = lambda anime_session, episode_session: spawn(
         controller.play_episode(anime_session, episode_session), name="play-episode"
+    )
+    methods.load_search = lambda query, page=1: spawn(
+        controller.load_search(query, page), name="load-search"
+    )
+    methods.clear_search_history = lambda: spawn(
+        controller.clear_search_history(), name="clear-search-history"
     )
 
     page.render(lambda: ControllerMethodsCtx(methods, lambda: AppShell()))
