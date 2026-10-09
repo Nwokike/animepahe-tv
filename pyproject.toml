@@ -37,8 +37,16 @@ dependencies = ["pyjnius"]
 "android.hardware.touchscreen" = false
 
 [dependency-groups]
+# Desktop development only: third-party Flet extension controls (including
+# flet-webview-all) do not render under `flet run` — they are "unknown
+# control" until the app is built (flet-dev/flet#5168). Desktop dev therefore
+# solves Cloudflare through pywebview, exactly as before. Built apps use
+# flet-webview-all on every platform.
 dev = [
     "ruff>=0.15.13",
+    "pywebview>=6.2.1",
+    "qtpy>=2.4.3",
+    "pyqt6-webengine>=6.11.0",
 ]
 
 

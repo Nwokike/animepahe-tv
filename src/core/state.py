@@ -69,6 +69,12 @@ class AppState:
     cf_blocked: bool = False
     update_available: bool = False
     update_data: dict | None = None
+    # Version counters: bumped by the controller when a collection is
+    # replaced, so components re-render explicitly instead of relying on
+    # deep-diffing large lists.
+    latest_version: int = 0
+    search_version: int = 0
+    episodes_version: int = 0
 
     def __init__(self):
         self.search_results = []
