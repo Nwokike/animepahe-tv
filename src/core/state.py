@@ -91,6 +91,11 @@ class AppState:
     pending_playback: dict | None = None
     player_error: str | None = None
 
+    # Offline downloads (durable rows + throttled live progress)
+    downloads: dict = {}
+    download_progress: dict | None = None
+    downloads_version: int = 0
+
     def __init__(self):
         self.search_results = []
         self.episodes = []

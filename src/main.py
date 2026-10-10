@@ -8,6 +8,7 @@ place services are constructed.
 
 import asyncio
 import logging
+import os
 
 import flet as ft
 
@@ -55,6 +56,10 @@ class AppController:
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
         self._search_gen = 0
+        from services.downloads import DownloadManager
+
+        self.downloads = DownloadManager(store=self.store)
+        self.downloads.on_progress = self._on_download_progress
 
         await self.cache.start_sweep(interval=300)
 
@@ -63,6 +68,7 @@ class AppController:
         state.page = self.page
         state.search_history = await self.store.get_search_history()
         state.continue_watching = await self.store.get_continue_watching()
+        state.downloads = await self.store.get_downloads()
 
         spawn(self._check_for_updates_bg(), name="update-check")
 
@@ -312,6 +318,103 @@ class AppController:
             state.player_error = "Could not open a player for this episode."
             state.episodes_version += 1
 
+    # ------------------------------------------------------------------
+    # Downloads
+    # ------------------------------------------------------------------
+
+    async def download_episode(self, anime_session: str, episode_session: str):
+        rows = await self.store.get_downloads()
+        row = rows.get(episode_session)
+        if row and row.get("state") == "complete":
+            return
+        if episode_session in self.downloads.active_jobs:
+            return
+
+        anime = await self._resolve_anime(anime_session)
+        ep = next((e for e in state.episodes if e.session == episode_session), None)
+        try:
+            sources = await self.scraper.sources(anime_session, episode_session)
+        except Exception as ex:
+            logger.error("download: sources failed: %s", ex)
+            return
+        if not sources:
+            return
+        m3u8 = await self.kwik.resolve(sources[0].url)
+        if not m3u8:
+            return
+
+        metadata = {
+            "anime_session": anime_session,
+            "anime_id": ep.anime_id if ep else 0,
+            "title": (anime or {}).get("title", ""),
+            "poster": (anime or {}).get("poster", ""),
+            "episode_num": ep.episode if ep else 0,
+        }
+        row = dict(metadata)
+        row.update({"state": "partial"})
+        await self.store.save_download(episode_session, row)
+        state.downloads = rows | {episode_session: row}
+        state.downloads_version += 1
+
+        from components.player.immersive_player import KWIK_USER_AGENT
+
+        await self.downloads.start(
+            episode_session,
+            m3u8,
+            {
+                "User-Agent": KWIK_USER_AGENT,
+                "Referer": "https://kwik.cx/",
+            },
+            metadata,
+        )
+
+    async def cancel_download(self, episode_session: str):
+        self.downloads.cancel(episode_session)
+
+    async def delete_download(self, episode_session: str):
+        rows = await self.store.get_downloads()
+        row = rows.get(episode_session) or {}
+        anime_session = row.get("anime_session", "unknown")
+        job_dir = os.path.join(
+            self.downloads.downloads_dir, anime_session, episode_session
+        )
+        import shutil
+
+        shutil.rmtree(job_dir, ignore_errors=True)
+        await self.store.remove_download(episode_session)
+        rows.pop(episode_session, None)
+        state.downloads = rows
+        state.downloads_version += 1
+
+    async def play_downloaded(self, episode_session: str):
+        rows = await self.store.get_downloads()
+        row = rows.get(episode_session) or {}
+        playlist = row.get("playlist")
+        if not playlist or not os.path.exists(playlist):
+            state.player_error = "Downloaded file is missing."
+            state.episodes_version += 1
+            return
+        from components.player.immersive_player import KWIK_USER_AGENT
+
+        self._player_spec = {
+            "resource": playlist,
+            "variants": [],
+            "title": row.get("title", "AnimePahe"),
+            "episode_session": episode_session,
+            "anime_session": row.get("anime_session", ""),
+            "headers": {
+                "User-Agent": KWIK_USER_AGENT,
+                "Referer": "https://kwik.cx/",
+            },
+        }
+        state.player_open = True
+        state.episodes_version += 1
+
+    def _on_download_progress(self, episode_session: str, progress: dict):
+        state.download_progress = dict(state.download_progress or {})
+        state.download_progress[episode_session] = progress
+        state.downloads_version += 1
+
     async def _resolve_anime(self, anime_session: str) -> dict | None:
         """Title/poster for an anime, cheapest source first.
 
@@ -430,6 +533,18 @@ async def main(page: ft.Page):
     methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
     methods.play_adjacent = lambda delta: spawn(
         controller.play_adjacent(delta), name="play-adjacent"
+    )
+    methods.download_episode = lambda a, e: spawn(
+        controller.download_episode(a, e), name="download-episode"
+    )
+    methods.cancel_download = lambda e: spawn(
+        controller.cancel_download(e), name="cancel-download"
+    )
+    methods.delete_download = lambda e: spawn(
+        controller.delete_download(e), name="delete-download"
+    )
+    methods.play_downloaded = lambda e: spawn(
+        controller.play_downloaded(e), name="play-downloaded"
     )
 
     # The shell's player branch reaches the controller through this handle

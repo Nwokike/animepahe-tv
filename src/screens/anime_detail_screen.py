@@ -166,16 +166,41 @@ def AnimeDetailScreen() -> ft.Control:
         "anime": state.current_anime_session,
         "episode": state.current_episode_session,
     }
+    downloads = state.downloads or {}
+    download_progress = state.download_progress or {}
+
+    def _download_action(ep) -> ft.Control:
+        row = downloads.get(ep.session) or {}
+        if row.get("state") == "complete":
+            return ft.Icon(
+                ft.Icons.DOWNLOAD_DONE_ROUNDED,
+                size=18,
+                color=AppColors.SUCCESS,
+            )
+        if ep.session in download_progress:
+            return ft.ProgressRing(width=16, height=16, stroke_width=2)
+        return ft.IconButton(
+            icon=ft.Icons.DOWNLOAD_OUTLINE_ROUNDED,
+            icon_size=18,
+            tooltip="Download episode",
+            on_click=lambda e: controller.download_episode(anime_session, ep.session),
+        )
 
     grid = ft.ResponsiveRow(
         controls=[
             ft.Container(
-                content=_episode_card(
-                    ep,
-                    controller.play_episode,
-                    anime_session,
-                    now_playing["anime"] == anime_session
-                    and now_playing["episode"] == ep.session,
+                content=ft.Column(
+                    [
+                        _episode_card(
+                            ep,
+                            controller.play_episode,
+                            anime_session,
+                            now_playing["anime"] == anime_session
+                            and now_playing["episode"] == ep.session,
+                        ),
+                        _download_action(ep),
+                    ],
+                    spacing=2,
                 ),
                 col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
             )

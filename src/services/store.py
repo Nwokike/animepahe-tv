@@ -218,3 +218,38 @@ class JsonStore:
 
     async def clear_clearance(self) -> None:
         await self.put_section("clearance", None)
+
+    # ------------------------------------------------------------------
+    # Offline downloads (one row per episode; progress is throttled in
+    # memory by the DownloadManager, not flushed here per segment)
+    # ------------------------------------------------------------------
+
+    async def get_downloads(self) -> dict:
+        entries = await self.section("downloads", {})
+        return entries if isinstance(entries, dict) else {}
+
+    async def save_download(self, episode_session: str, row: dict) -> None:
+        entries = await self.get_downloads()
+        merged = dict(row)
+        merged.setdefault("updated_at", time.time())
+        entries[episode_session] = merged
+        await self.put_section("downloads", entries)
+
+    async def save_download_error(self, episode_session: str, message: str) -> None:
+        entries = await self.get_downloads()
+        row = dict(entries.get(episode_session) or {})
+        row.update(
+            {
+                "state": "partial",
+                "error": message,
+                "updated_at": time.time(),
+            }
+        )
+        entries[episode_session] = row
+        await self.put_section("downloads", entries)
+
+    async def remove_download(self, episode_session: str) -> None:
+        entries = await self.get_downloads()
+        if episode_session in entries:
+            entries.pop(episode_session, None)
+            await self.put_section("downloads", entries)

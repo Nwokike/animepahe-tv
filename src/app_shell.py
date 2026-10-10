@@ -15,6 +15,7 @@ import flet as ft
 
 from core.theme import AppColors
 from screens.anime_detail_screen import AnimeDetailScreen
+from screens.downloads_screen import DownloadsScreen
 from screens.home_screen import HomeScreen
 from screens.search_screen import SearchScreen
 from state.app_state import AppStateCtx
@@ -107,7 +108,7 @@ def AppShell() -> ft.Control:
         elif active_tab == "Browse":
             body = SearchScreen()
         elif active_tab == "Downloads":
-            body = _placeholder("Downloads", "Your offline episodes will live here — Phase 4.")
+            body = DownloadsScreen()
         else:
             body = _placeholder("Settings", "Settings + activity terminal — Phase 5.")
         chrome = None
