@@ -15,6 +15,7 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
+from core.constants import LBL_CF_BLOCKED_SEARCH
 from core.theme import AppColors
 from hooks.use_debounce import use_debounce
 from state.app_state import AppStateCtx
@@ -132,11 +133,32 @@ def SearchScreen() -> ft.Control:
 
     def _submit(e=None):
         q = query.strip()
-        if q:
-            controller.load_search(q, 1)
+        if not q:
+            return
+        # The original gated search behind the CF check too — a request
+        # while blocked would just fail and look like "no results".
+        if state.cf_blocked:
+            from core.notify import show_snack
+
+            show_snack(
+                page,
+                LBL_CF_BLOCKED_SEARCH,
+                bgcolor=AppColors.WARNING,
+            )
+            return
+        controller.load_search(q, 1)
 
     def _pick(q: str):
         set_query(q)
+        if state.cf_blocked:
+            from core.notify import show_snack
+
+            show_snack(
+                page,
+                LBL_CF_BLOCKED_SEARCH,
+                bgcolor=AppColors.WARNING,
+            )
+            return
         controller.load_search(q, 1)
 
     # Suggestions: recent history filtered by what has been typed (debounced).

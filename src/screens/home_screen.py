@@ -18,7 +18,13 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
-from core.constants import APP_NAME, APP_VERSION
+from core.constants import (
+    APP_NAME,
+    APP_VERSION,
+    LBL_CF_BLOCKED_BODY,
+    LBL_CF_BLOCKED_TITLE,
+    LBL_CF_VERIFY_BUTTON,
+)
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -149,14 +155,21 @@ def _version_pill(state, page) -> ft.Control:
 
 def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
     """Icon + wordmark left; search, version, theme right — the original line."""
-    action = lambda icon, tip, handler: ft.Container(
-        content=ft.Icon(icon, color=AppColors.DARK_TEXT, size=20),
-        padding=10,
-        border_radius=10,
-        ink=True,
-        tooltip=tip,
-        on_click=handler,
-    )
+    def action(icon, tip, handler, icon_color=None) -> ft.Control:
+        return ft.Container(
+            content=ft.Icon(
+                icon, color=icon_color or AppColors.DARK_TEXT, size=20
+            ),
+            padding=10,
+            border_radius=10,
+            ink=True,
+            tooltip=tip,
+            on_click=handler,
+        )
+
+    # The original dimmed the search action while the CF gate was up.
+    blocked = getattr(state, "cf_blocked", False)
+    search_color = AppColors.DARK_TEXT_MUTED if blocked else None
     return ft.Container(
         padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
         content=ft.Row(
@@ -176,7 +189,12 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
                 ft.Row(
                     [
                         _version_pill(state, page),
-                        action(ft.Icons.SEARCH_ROUNDED, "Search", lambda e: controller.open_search()),
+                        action(
+                            ft.Icons.SEARCH_ROUNDED,
+                            "Search",
+                            lambda e: controller.open_search(),
+                            icon_color=search_color,
+                        ),
                         action(
                             theme_icon,
                             "Switch theme",
@@ -279,6 +297,84 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
     )
 
 
+def _cf_overlay_card(controller) -> ft.Control:
+    """The SHIELD card the original showed over the live grid (not instead
+    of it — the scrim keeps the app's context visible)."""
+    return ft.Container(
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Icon(ft.Icons.SHIELD_ROUNDED, size=64, color=AppColors.PRIMARY),
+                    alignment=ft.Alignment.CENTER,
+                ),
+                ft.Container(height=8),
+                ft.Text(
+                    LBL_CF_BLOCKED_TITLE,
+                    size=20,
+                    weight=ft.FontWeight.BOLD,
+                    color=ft.Colors.ON_SURFACE,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=4),
+                ft.Text(
+                    LBL_CF_BLOCKED_BODY,
+                    size=13,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=20),
+                ft.FilledButton(
+                    content=LBL_CF_VERIFY_BUTTON,
+                    icon=ft.Icons.VERIFIED_ROUNDED,
+                    style=ft.ButtonStyle(
+                        bgcolor=AppColors.PRIMARY,
+                        color=ft.Colors.WHITE,
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                    ),
+                    on_click=lambda e: controller.retry_cloudflare(),
+                ),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=0,
+            tight=True,
+        ),
+        padding=32,
+        width=320,
+        border_radius=20,
+        bgcolor=ft.Colors.SURFACE,
+        border=ft.Border.all(1, ft.Colors.OUTLINE),
+        shadow=ft.BoxShadow(
+            blur_radius=30,
+            color=ft.Colors.with_opacity(0.4, ft.Colors.BLACK),
+            offset=ft.Offset(0, 10),
+        ),
+    )
+
+
+def _cf_gate(body: ft.Control, state, controller) -> ft.Control:
+    """Gate the live body behind the 60% scrim + SHIELD card.
+
+    The original 1.0.9 app kept the content behind the scrim instead of
+    replacing the screen, so the app never looks broken — just gated. This
+    used to swap the whole Home for a bare card, losing the header, grid
+    and Continue Watching shelf until verification succeeded.
+    """
+    if not getattr(state, "cf_blocked", False):
+        return body
+    return ft.Stack(
+        [
+            body,
+            ft.Container(
+                expand=True,
+                bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                alignment=ft.Alignment.CENTER,
+                content=_cf_overlay_card(controller),
+            ),
+        ],
+        expand=True,
+    )
+
+
 @ft.component
 def HomeScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
@@ -302,46 +398,6 @@ def HomeScreen() -> ft.Control:
         if page:
             page.theme_mode = next_mode
             page.update()
-
-    if state.cf_blocked:
-        return ft.Container(
-            content=ft.Column(
-                [
-                    ft.Container(
-                        content=ft.Icon(ft.Icons.SHIELD_ROUNDED, size=64, color=AppColors.PRIMARY),
-                        alignment=ft.Alignment.CENTER,
-                    ),
-                    ft.Text(
-                        "Cloudflare Security Check",
-                        size=20,
-                        weight=ft.FontWeight.BOLD,
-                        color=AppColors.DARK_TEXT,
-                        text_align=ft.TextAlign.CENTER,
-                    ),
-                    ft.Text(
-                        "Search and browsing are disabled until you verify.",
-                        size=13,
-                        color=AppColors.DARK_TEXT_DIM,
-                        text_align=ft.TextAlign.CENTER,
-                    ),
-                    ft.FilledButton(
-                        content="Verify You're Human",
-                        icon=ft.Icons.VERIFIED_ROUNDED,
-                        style=ft.ButtonStyle(bgcolor=AppColors.PRIMARY, color=ft.Colors.WHITE),
-                        on_click=lambda e: controller.retry_cloudflare(),
-                    ),
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=12,
-                tight=True,
-            ),
-            padding=32,
-            width=320,
-            border_radius=20,
-            bgcolor=AppColors.DARK_SURFACE,
-            border=ft.Border.all(1, AppColors.DARK_TEXT_MUTED),
-            alignment=ft.Alignment.CENTER,
-        )
 
     if state.is_loading and not state.latest_releases:
         return ft.Container(
@@ -420,4 +476,9 @@ def HomeScreen() -> ft.Control:
         expand=True,
         scroll=ft.ScrollMode.AUTO,
     )
+
+    if state.cf_blocked:
+        # The original kept the live grid behind a 60% scrim instead of
+        # replacing the screen — the app never looks broken, just gated.
+        return _cf_gate(body, state, controller)
     return body
