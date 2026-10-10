@@ -10,6 +10,7 @@ dependencies = [
     { name = "flet" },
     { name = "flet-video" },
     { name = "flet-webview-all" },
+    { name = "flet-yandex-ads" },
     { name = "primp" },
 ]
 
@@ -26,6 +27,7 @@ requires-dist = [
     { name = "flet", specifier = "==1.0.4" },
     { name = "flet-video", specifier = "==1.0.4" },
     { name = "flet-webview-all", specifier = ">=0.2.1" },
+    { name = "flet-yandex-ads", specifier = ">=0.1.0" },
     { name = "primp", specifier = ">=1.3.1" },
 ]
 
@@ -148,6 +150,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/41/6b/0308265555a924ad54636bfd71d6e657866385a9c2487a677a083aee1871/flet_webview_all-0.2.1.tar.gz", hash = "sha256:5add361f12c3bbc7a6d73d45386f9daef0d5005d0664840d4d57001e3fb53f0f", size = 18584, upload-time = "2026-09-18T13:36:28.451Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d8/94/99c974ff301043fe607649decff8cbc05320aee4a32fdd378ea11571ce1b/flet_webview_all-0.2.1-py3-none-any.whl", hash = "sha256:28372442ffe46d8801184465937452c8e84e727e21d49c34740e7568b865442e", size = 18433, upload-time = "2026-09-18T13:36:27.264Z" },
+]
+
+[[package]]
+name = "flet-yandex-ads"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flet" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/b4/e79766880232348249daad9bff666d727423d3a94814245424a221c2d0d4/flet_yandex_ads-0.1.0.tar.gz", hash = "sha256:c5625d0662dfa937953b6e4f4abd0080fff8fdcca22a2bdcd76af946e48eeb85", size = 15404, upload-time = "2026-10-09T15:10:59.906Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/ab/93ea3f5277fd2548f0c62112d052d5874d1c712b1954775eaa0a1add634c/flet_yandex_ads-0.1.0-py3-none-any.whl", hash = "sha256:a1c9c79ad382cc351aee9d5b75f9289b6966314eeb27e3768aab657b2ebdc4ac", size = 18447, upload-time = "2026-10-09T15:10:58.57Z" },
 ]
 
 [[package]]
