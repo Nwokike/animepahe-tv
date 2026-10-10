@@ -49,7 +49,7 @@ def card_button_style(
         padding=padding if padding is not None else ft.Padding.all(12),
         shape=ft.RoundedRectangleBorder(radius=radius),
         bgcolor=ft.Colors.TRANSPARENT,
-        color=AppColors.DARK_TEXT,
+        color=ft.Colors.ON_SURFACE,
         side={
             ft.ControlState.FOCUSED: ft.BorderSide(2.5, primary),
             ft.ControlState.HOVERED: ft.BorderSide(
@@ -57,10 +57,10 @@ def card_button_style(
             ),
             ft.ControlState.PRESSED: ft.BorderSide(2.5, primary),
             ft.ControlState.DISABLED: ft.BorderSide(
-                1.0, ft.Colors.with_opacity(0.12, AppColors.DARK_TEXT_DIM)
+                1.0, ft.Colors.with_opacity(0.12, ft.Colors.ON_SURFACE_VARIANT)
             ),
             ft.ControlState.DEFAULT: ft.BorderSide(
-                1.0, ft.Colors.with_opacity(0.15, AppColors.DARK_TEXT_DIM)
+                1.0, ft.Colors.with_opacity(0.15, ft.Colors.ON_SURFACE_VARIANT)
             ),
         },
         overlay_color={

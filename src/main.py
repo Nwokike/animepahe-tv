@@ -68,7 +68,6 @@ class AppController:
         self.page.theme.font_family = "Outfit"
         self.page.dark_theme.font_family = "Outfit"
         self.page.theme_mode = ft.ThemeMode.SYSTEM
-
         self.cache = Cache()
         self.store = JsonStore()
         self.scraper = AnimePaheScraper()
@@ -97,7 +96,40 @@ class AppController:
         state.continue_watching = await self.store.get_continue_watching()
         state.downloads = await self.store.get_downloads()
 
+        # Restore the theme choice before the first render so the shell
+        # never flashes the wrong mode.
+        await self._restore_theme_mode()
+
         spawn(self._check_for_updates_bg(), name="update-check")
+
+    async def _restore_theme_mode(self):
+        modes = {
+            "dark": ft.ThemeMode.DARK,
+            "light": ft.ThemeMode.LIGHT,
+            "system": ft.ThemeMode.SYSTEM,
+        }
+        try:
+            saved = await self.store.get_theme_mode()
+        except Exception as ex:
+            logger.warning("theme restore failed: %s", ex)
+            return
+        if saved in modes:
+            self.page.theme_mode = modes[saved]
+
+    async def save_theme_mode(self, mode: ft.ThemeMode):
+        try:
+            await self.store.save_theme_mode(self._theme_name(mode))
+        except Exception as ex:
+            logger.warning("theme save failed: %s", ex)
+
+    @staticmethod
+    def _theme_name(mode: ft.ThemeMode) -> str:
+        names = {
+            ft.ThemeMode.DARK: "dark",
+            ft.ThemeMode.LIGHT: "light",
+            ft.ThemeMode.SYSTEM: "system",
+        }
+        return names.get(mode, "system")
 
     async def _check_for_updates_bg(self):
         await asyncio.sleep(2.0)

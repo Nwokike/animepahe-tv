@@ -35,7 +35,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
     status = ft.Text(
         f"{percent:.0%}" if active else _fmt_size(row.get("size_bytes")),
         size=12,
-        color=AppColors.DARK_TEXT_DIM,
+        color=ft.Colors.ON_SURFACE_VARIANT,
     )
     trailing: list[ft.Control] = [status]
     if active:
@@ -87,7 +87,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
                     height=36,
                     border_radius=8,
                     alignment=ft.Alignment.CENTER,
-                    bgcolor=ft.Colors.with_opacity(0.08, AppColors.DARK_TEXT),
+                    bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
                 ),
                 ft.Column(
                     [
@@ -95,7 +95,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
                             f"Episode {row.get('episode_num', '?')}",
                             size=13,
                             weight=ft.FontWeight.W_600,
-                            color=AppColors.DARK_TEXT,
+                            color=ft.Colors.ON_SURFACE,
                         ),
                         ft.ProgressBar(value=percent, height=3)
                         if active
@@ -139,18 +139,18 @@ def DownloadsScreen() -> ft.Control:
                     ft.Icon(
                         ft.Icons.CLOUD_DOWNLOAD_ROUNDED,
                         size=64,
-                        color=AppColors.DARK_TEXT_DIM,
+                        color=ft.Colors.ON_SURFACE_VARIANT,
                     ),
                     ft.Text(
                         "Downloads appear here",
                         size=17,
                         weight=ft.FontWeight.W_600,
-                        color=AppColors.DARK_TEXT,
+                        color=ft.Colors.ON_SURFACE,
                     ),
                     ft.Text(
                         "Tap the download icon on any episode to save it for offline.",
                         size=13,
-                        color=AppColors.DARK_TEXT_DIM,
+                        color=ft.Colors.ON_SURFACE_VARIANT,
                         text_align=ft.TextAlign.CENTER,
                     ),
                 ],
@@ -184,7 +184,7 @@ def DownloadsScreen() -> ft.Control:
                     )
                     if group["poster"]
                     else ft.Icon(
-                        ft.Icons.MOVIE_ROUNDED, size=20, color=AppColors.DARK_TEXT_DIM
+                        ft.Icons.MOVIE_ROUNDED, size=20, color=ft.Colors.ON_SURFACE_VARIANT
                     ),
                     width=40,
                     height=40,
@@ -197,14 +197,14 @@ def DownloadsScreen() -> ft.Control:
                             group["title"],
                             size=15,
                             weight=ft.FontWeight.W_700,
-                            color=AppColors.DARK_TEXT,
+                            color=ft.Colors.ON_SURFACE,
                             max_lines=1,
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
                         ft.Text(
                             f"{len(rows)} episode{'s' if len(rows) != 1 else ''} · {_fmt_size(total_size)}",
                             size=11,
-                            color=AppColors.DARK_TEXT_DIM,
+                            color=ft.Colors.ON_SURFACE_VARIANT,
                         ),
                     ],
                     spacing=2,
@@ -227,8 +227,8 @@ def DownloadsScreen() -> ft.Control:
                 content=ft.Column([header, *episode_rows], spacing=4),
                 padding=ft.Padding.all(12),
                 border_radius=12,
-                bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
-                border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.WHITE)),
+                bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)),
             )
         )
 

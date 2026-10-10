@@ -72,20 +72,50 @@ class AppColors:
 
 
 class AppTheme:
+    # The surface-container roles must be pinned to the app's own palette:
+    # unspecified roles fall back to Material's baseline (purple-tinted),
+    # which would make light-mode cards disagree with the DARK_SURFACE
+    # family they replaced.
+    _DARK_SURFACE_ROLES = {
+        "surface": AppColors.DARK_BG,
+        "surface_bright": AppColors.DARK_SURFACE,
+        "surface_dim": AppColors.DARK_BG,
+        "surface_container_lowest": "#060A12",
+        "surface_container_low": AppColors.DARK_BG,
+        "surface_container": "#161F30",
+        "surface_container_high": AppColors.DARK_SURFACE,
+        "surface_container_highest": AppColors.DARK_SURFACE_VARIANT,
+        "on_surface": AppColors.DARK_TEXT,
+        "on_surface_variant": AppColors.DARK_TEXT_DIM,
+        "outline": AppColors.DARK_TEXT_MUTED,
+        "outline_variant": AppColors.DARK_TEXT_MUTED,
+    }
+    _LIGHT_SURFACE_ROLES = {
+        "surface": AppColors.LIGHT_BG,
+        "surface_bright": AppColors.LIGHT_SURFACE,
+        "surface_dim": AppColors.LIGHT_BG,
+        "surface_container_lowest": AppColors.LIGHT_SURFACE,
+        "surface_container_low": AppColors.LIGHT_SURFACE,
+        "surface_container": "#EDF1F7",
+        "surface_container_high": AppColors.LIGHT_SURFACE_VARIANT,
+        "surface_container_highest": "#E6ECF4",
+        "on_surface": AppColors.LIGHT_TEXT,
+        "on_surface_variant": AppColors.LIGHT_TEXT_DIM,
+        "outline": AppColors.LIGHT_TEXT_MUTED,
+        "outline_variant": "#CBD5E1",
+    }
+
     @staticmethod
     def get_dark_theme() -> ft.Theme:
         return ft.Theme(
             color_scheme=ft.ColorScheme(
                 primary=AppColors.PRIMARY,
                 secondary=AppColors.SECONDARY,
-                surface=AppColors.DARK_BG,
-                on_surface=AppColors.DARK_TEXT,
-                on_surface_variant=AppColors.DARK_TEXT_DIM,
                 error=AppColors.ERROR,
                 on_primary=ft.Colors.WHITE,
                 on_secondary=ft.Colors.WHITE,
-                outline=AppColors.DARK_TEXT_MUTED,
                 surface_tint=AppColors.TRANSPARENT,
+                **AppTheme._DARK_SURFACE_ROLES,
             ),
             focus_color=AppColors.PRIMARY,
             visual_density=ft.VisualDensity.COMFORTABLE,
@@ -97,14 +127,11 @@ class AppTheme:
             color_scheme=ft.ColorScheme(
                 primary=AppColors.PRIMARY,
                 secondary=AppColors.SECONDARY,
-                surface=AppColors.LIGHT_BG,
-                on_surface=AppColors.LIGHT_TEXT,
-                on_surface_variant=AppColors.LIGHT_TEXT_DIM,
                 error=AppColors.ERROR,
                 on_primary=ft.Colors.WHITE,
                 on_secondary=ft.Colors.WHITE,
-                outline=AppColors.LIGHT_TEXT_MUTED,
                 surface_tint=AppColors.TRANSPARENT,
+                **AppTheme._LIGHT_SURFACE_ROLES,
             ),
             focus_color=AppColors.PRIMARY,
             visual_density=ft.VisualDensity.COMFORTABLE,

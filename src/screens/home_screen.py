@@ -18,6 +18,7 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
+from components.pagination import pager as ft_pager
 from core.constants import (
     APP_NAME,
     APP_VERSION,
@@ -39,7 +40,7 @@ def _release_card(release, on_select, now_playing: bool, col: dict | None = None
     image = (
         ft.Image(src=release.snapshot, fit=ft.BoxFit.COVER, expand=True)
         if release.snapshot
-        else ft.Container(bgcolor=AppColors.DARK_SURFACE_VARIANT)
+        else ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH)
     )
     content = ft.Stack(
         [
@@ -143,12 +144,12 @@ def _version_pill(state, page) -> ft.Control:
             content=ft.Text(
                 f"v{APP_VERSION}",
                 size=11,
-                color=AppColors.DARK_TEXT_DIM,
+                color=ft.Colors.ON_SURFACE_VARIANT,
             ),
             padding=ft.Padding.symmetric(horizontal=8, vertical=6),
             border_radius=6,
             border=ft.Border.all(
-                1, ft.Colors.with_opacity(0.2, AppColors.DARK_TEXT_DIM)
+                1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT)
             ),
             tooltip="Version",
         )
@@ -158,7 +159,7 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
     def action(icon, tip, handler, icon_color=None) -> ft.Control:
         return ft.Container(
             content=ft.Icon(
-                icon, color=icon_color or AppColors.DARK_TEXT, size=20
+                icon, color=icon_color or ft.Colors.ON_SURFACE, size=20
             ),
             padding=10,
             border_radius=10,
@@ -169,7 +170,7 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
 
     # The original dimmed the search action while the CF gate was up.
     blocked = getattr(state, "cf_blocked", False)
-    search_color = AppColors.DARK_TEXT_MUTED if blocked else None
+    search_color = ft.Colors.OUTLINE if blocked else None
     return ft.Container(
         padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
         content=ft.Row(
@@ -181,7 +182,7 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
                             APP_NAME,
                             size=20,
                             weight=ft.FontWeight.W_800,
-                            color=AppColors.DARK_TEXT,
+                            color=ft.Colors.ON_SURFACE,
                         ),
                     ],
                     spacing=10,
@@ -244,10 +245,10 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
                         content=ft.Icon(
                             ft.Icons.MOVIE_ROUNDED,
                             size=32,
-                            color=AppColors.DARK_TEXT_DIM,
+                            color=ft.Colors.ON_SURFACE_VARIANT,
                         ),
                         alignment=ft.Alignment.CENTER,
-                        bgcolor=AppColors.DARK_SURFACE_VARIANT,
+                        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
                     ),
                     width=120,
                     height=68,
@@ -258,7 +259,7 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
                     record.get("title", ""),
                     size=12,
                     weight=ft.FontWeight.W_600,
-                    color=AppColors.DARK_TEXT,
+                    color=ft.Colors.ON_SURFACE,
                     max_lines=1,
                     overflow=ft.TextOverflow.ELLIPSIS,
                 ),
@@ -289,7 +290,7 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
                 "Continue Watching",
                 size=16,
                 weight=ft.FontWeight.W_700,
-                color=AppColors.DARK_TEXT,
+                color=ft.Colors.ON_SURFACE,
             ),
             ft.Row(controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO),
         ],
@@ -398,6 +399,12 @@ def HomeScreen() -> ft.Control:
         if page:
             page.theme_mode = next_mode
             page.update()
+            from core.tasks import spawn
+
+            spawn(
+                controller._app_controller.save_theme_mode(next_mode),
+                name="save-theme",
+            )
 
     if state.is_loading and not state.latest_releases:
         return ft.Container(
@@ -427,22 +434,12 @@ def HomeScreen() -> ft.Control:
         run_spacing=12,
     )
 
-    pager = ft.Row(
-        [
-            ft.OutlinedButton(
-                content="Prev",
-                on_click=lambda e: controller.load_latest(state.latest_page - 1),
-                disabled=state.latest_page <= 1,
-            ),
-            ft.Text(f"Page {state.latest_page}", size=13, color=AppColors.DARK_TEXT_DIM),
-            ft.OutlinedButton(
-                content="Next",
-                on_click=lambda e: controller.load_latest(state.latest_page + 1),
-                disabled=not state.latest_has_more,
-            ),
-        ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        spacing=16,
+    pager = ft_pager(
+        page=state.latest_page,
+        has_more=state.latest_has_more,
+        on_prev=lambda e: controller.load_latest(state.latest_page - 1),
+        on_next=lambda e: controller.load_latest(state.latest_page + 1),
+        is_loading=state.is_loading,
     )
 
     body = ft.Column(
@@ -459,7 +456,7 @@ def HomeScreen() -> ft.Control:
                             "Recent Episodes",
                             size=18,
                             weight=ft.FontWeight.W_700,
-                            color=AppColors.DARK_TEXT,
+                            color=ft.Colors.ON_SURFACE,
                         ),
                         grid,
                         pager,

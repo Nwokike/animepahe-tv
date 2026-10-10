@@ -220,6 +220,17 @@ class JsonStore:
         await self.put_section("clearance", None)
 
     # ------------------------------------------------------------------
+    # Theme mode (durable — the 3-way cycle must survive a restart)
+    # ------------------------------------------------------------------
+
+    async def get_theme_mode(self) -> str | None:
+        mode = await self.section("theme_mode", None)
+        return mode if isinstance(mode, str) else None
+
+    async def save_theme_mode(self, mode: str) -> None:
+        await self.put_section("theme_mode", mode)
+
+    # ------------------------------------------------------------------
     # Offline downloads (one row per episode; progress is throttled in
     # memory by the DownloadManager, not flushed here per segment)
     # ------------------------------------------------------------------

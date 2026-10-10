@@ -5,16 +5,26 @@ research supports: a hero card on Home plus an inline "More from us" shelf,
 both ordinary focusable nodes in D-pad order. Rotation pauses the moment
 anything gains focus (moving focus automatically is the cardinal TV sin) and
 never sits between content and navigation.
+
+The hero carries the original 1.0.9's three slides — the two apps plus a
+support slide. The hero itself is a flat ``FilledButton`` (a Container card
+can't receive D-pad focus in flet 1.0.4) with the shared card focus styling.
 """
 
 import asyncio
 
 import flet as ft
 
+from components.focus_styles import (
+    attach_focus_zoom,
+    card_button_style,
+    card_focus_scale,
+)
 from core.tasks import spawn
 from core.theme import AppColors
 
-# The developer's apps — same list the old rotating banner carried.
+# The developer's apps — same list the old rotating banner carried — plus
+# the support slide the 1.0.9 build had as its third hero item.
 PROMO_APPS = (
     {
         "name": "Nkiri TV",
@@ -29,6 +39,13 @@ PROMO_APPS = (
         "badge": "Live Sports",
         "logo": "socolive_logo.png",
         "url": "https://tv.kalerosemary7.workers.dev/sports",
+    },
+    {
+        "name": "Contact Support & Send Feedback",
+        "tagline": "Suggest features, report bugs, or request content",
+        "badge": "Contact Support",
+        "logo": None,
+        "url": None,  # -> the support dialog, not a browser launch
     },
 )
 
@@ -48,7 +65,7 @@ def _open_url(url: str):
 @ft.component
 def PromoHero() -> ft.Control:
     """One featured app, auto-rotating; any focus or click pins it."""
-    index, set_index = ft.use_state(0)
+    index, setindex = ft.use_state(0)
     pinned, set_pinned = ft.use_state(False)
 
     from flet import context as flet_context
@@ -62,7 +79,7 @@ def PromoHero() -> ft.Control:
         while True:
             await asyncio.sleep(ROTATE_SECONDS)
             if not pinned:
-                set_index(lambda i: (i + 1) % len(PROMO_APPS))
+                setindex(lambda i: (i + 1) % len(PROMO_APPS))
 
     ft.use_effect(lambda: spawn(_rotate(), name="promo-rotate"), [])
 
@@ -75,7 +92,11 @@ def PromoHero() -> ft.Control:
         )
         if app["logo"]
         else ft.Container(
-            content=ft.Icon(ft.Icons.APPS_ROUNDED, size=24, color=AppColors.PRIMARY),
+            content=ft.Icon(
+                ft.Icons.MARK_CHAT_UNREAD_ROUNDED,
+                size=24,
+                color=AppColors.PRIMARY,
+            ),
             width=40,
             height=40,
             border_radius=8,
@@ -86,95 +107,102 @@ def PromoHero() -> ft.Control:
 
     def _pin_and_open(e):
         set_pinned(True)
-        app = PROMO_APPS[index]
-        page.run_task(_open_url(app["url"]))
+        if app["url"]:
+            page.run_task(_open_url(app["url"]))
+        else:
+            from components.support_dialog import show_support_dialog
 
-    return ft.Container(
-        content=ft.Column(
-            [
-                ft.Row(
-                    [
-                        leading,
-                        ft.Column(
-                            [
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            app["name"],
-                                            size=15,
+            show_support_dialog(page)
+
+    def _pin_and_jump(i):
+        set_pinned(True)
+        setindex(i)
+
+    body = ft.Column(
+        [
+            ft.Row(
+                [
+                    leading,
+                    ft.Column(
+                        [
+                            ft.Row(
+                                [
+                                    ft.Text(
+                                        app["name"],
+                                        size=15,
+                                        weight=ft.FontWeight.W_700,
+                                        color=ft.Colors.ON_SURFACE,
+                                    ),
+                                    ft.Container(
+                                        content=ft.Text(
+                                            app["badge"],
+                                            size=9,
                                             weight=ft.FontWeight.W_700,
-                                            color=AppColors.DARK_TEXT,
+                                            color=AppColors.PRIMARY,
                                         ),
-                                        ft.Container(
-                                            content=ft.Text(
-                                                app["badge"],
-                                                size=9,
-                                                weight=ft.FontWeight.W_700,
-                                                color=AppColors.PRIMARY,
-                                            ),
-                                            padding=ft.Padding.symmetric(
-                                                horizontal=6, vertical=2
-                                            ),
-                                            border_radius=6,
-                                            border=ft.Border.all(
-                                                1,
-                                                ft.Colors.with_opacity(
-                                                    0.3, AppColors.PRIMARY
-                                                ),
+                                        padding=ft.Padding.symmetric(
+                                            horizontal=6, vertical=2
+                                        ),
+                                        border_radius=6,
+                                        border=ft.Border.all(
+                                            1,
+                                            ft.Colors.with_opacity(
+                                                0.3, AppColors.PRIMARY
                                             ),
                                         ),
-                                    ],
-                                    spacing=8,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                ft.Text(
-                                    app["tagline"],
-                                    size=11,
-                                    color=AppColors.DARK_TEXT_DIM,
-                                    max_lines=1,
-                                    overflow=ft.TextOverflow.ELLIPSIS,
-                                ),
-                            ],
-                            spacing=2,
-                            expand=True,
-                        ),
-                        ft.Icon(
-                            ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
-                            size=14,
-                            color=AppColors.DARK_TEXT_DIM,
-                        ),
-                    ],
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                # Rotation dots — also the manual selector (tap a dot to jump).
-                ft.Row(
-                    [
-                        ft.Container(
-                            width=10,
-                            height=10,
-                            border_radius=5,
-                            bgcolor=AppColors.PRIMARY
-                            if i == index
-                            else ft.Colors.with_opacity(0.2, AppColors.DARK_TEXT_DIM),
-                            ink=True,
-                            tooltip=app_["name"],
-                            on_click=lambda e, i=i: (set_pinned(True), set_index(i)),
-                        )
-                        for i, app_ in enumerate(PROMO_APPS)
-                    ],
-                    spacing=4,
-                ),
-            ],
-            spacing=10,
-        ),
-        padding=16,
-        border_radius=16,
-        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
-        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.WHITE)),
-        ink=True,
-        animate=200,
-        on_click=_pin_and_open,
+                                    ),
+                                ],
+                                spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            ft.Text(
+                                app["tagline"],
+                                size=11,
+                                color=ft.Colors.ON_SURFACE_VARIANT,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                        ],
+                        spacing=2,
+                        expand=True,
+                    ),
+                    ft.Icon(
+                        ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                        size=14,
+                        color=ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            # Rotation dots — also the manual selector (tap a dot to jump).
+            ft.Row(
+                [
+                    ft.Container(
+                        width=10,
+                        height=10,
+                        border_radius=5,
+                        bgcolor=AppColors.PRIMARY
+                        if i == index
+                        else ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT),
+                        ink=True,
+                        tooltip=app_["name"],
+                        on_click=lambda e, i=i: _pin_and_jump(i),
+                    )
+                    for i, app_ in enumerate(PROMO_APPS)
+                ],
+                spacing=4,
+            ),
+        ],
+        spacing=10,
     )
-
-
+    # A focusable button, not a Container: the D-pad has to be able to
+    # reach the hero at all. Same shared styling as the content cards.
+    return attach_focus_zoom(
+        ft.FilledButton(
+            content=body,
+            style=card_button_style(padding=16, radius=16, overlay_alpha=0.18),
+            animate_scale=card_focus_scale(1.02),
+            on_click=_pin_and_open,
+        )
+    )

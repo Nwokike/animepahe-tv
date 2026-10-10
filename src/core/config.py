@@ -20,3 +20,7 @@ EXTERNAL_PLAYER_NAMES = [
 
 # Cloudflare Worker for dynamic redirects and update checks
 WORKER_BASE_URL = "https://tv.kalerosemary7.workers.dev"
+
+# Support route (public issues tracker — no personal contact details ship
+# in the binary; see components/support_dialog.py)
+SUPPORT_URL = "https://github.com/Nwokike/animepahe-tv/issues"

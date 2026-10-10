@@ -36,8 +36,8 @@ def _settings_card(controls: list) -> ft.Control:
         content=ft.Column(controls=controls, spacing=0, tight=True),
         margin=ft.Margin.only(left=16, right=16, bottom=8),
         border_radius=12,
-        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
-        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.WHITE)),
+        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)),
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
     )
 
@@ -47,12 +47,12 @@ def _setting_row(icon, title, subtitle, trailing=None) -> ft.Control:
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.Icon(icon, size=20, color=AppColors.DARK_TEXT_DIM),
+                    content=ft.Icon(icon, size=20, color=ft.Colors.ON_SURFACE_VARIANT),
                     width=36,
                     height=36,
                     border_radius=10,
                     alignment=ft.Alignment.CENTER,
-                    bgcolor=ft.Colors.with_opacity(0.08, AppColors.DARK_TEXT),
+                    bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
                 ),
                 ft.Column(
                     [
@@ -60,12 +60,12 @@ def _setting_row(icon, title, subtitle, trailing=None) -> ft.Control:
                             title,
                             size=14,
                             weight=ft.FontWeight.W_500,
-                            color=AppColors.DARK_TEXT,
+                            color=ft.Colors.ON_SURFACE,
                         ),
                         ft.Text(
                             subtitle,
                             size=11,
-                            color=ft.Colors.with_opacity(0.6, AppColors.DARK_TEXT),
+                            color=ft.Colors.with_opacity(0.6, ft.Colors.ON_SURFACE),
                         ),
                     ],
                     spacing=2,

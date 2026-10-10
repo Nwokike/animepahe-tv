@@ -16,6 +16,7 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
+from components.pagination import pager as ft_pager
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -25,7 +26,7 @@ def _episode_card(ep, on_play, anime_session: str, now_playing: bool) -> ft.Cont
     image = (
         ft.Image(src=ep.snapshot, fit=ft.BoxFit.COVER, expand=True)
         if ep.snapshot
-        else ft.Container(bgcolor=AppColors.DARK_SURFACE_VARIANT)
+        else ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH)
     )
     content = ft.Stack(
         [
@@ -146,10 +147,10 @@ def AnimeDetailScreen() -> ft.Control:
         [
             ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True, opacity=0.3)
             if poster
-            else ft.Container(bgcolor=AppColors.DARK_BG),
+            else ft.Container(bgcolor=ft.Colors.SURFACE),
             ft.Container(
                 expand=True,
-                bgcolor=ft.Colors.with_opacity(0.85, AppColors.DARK_BG),
+                bgcolor=ft.Colors.with_opacity(0.85, ft.Colors.SURFACE),
             ),
         ],
         expand=True,
@@ -169,9 +170,9 @@ def AnimeDetailScreen() -> ft.Control:
         content=ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True)
         if poster
         else ft.Container(
-            content=ft.Icon(ft.Icons.MOVIE_ROUNDED, size=64, color=AppColors.DARK_TEXT_DIM),
+            content=ft.Icon(ft.Icons.MOVIE_ROUNDED, size=64, color=ft.Colors.ON_SURFACE_VARIANT),
             alignment=ft.Alignment.CENTER,
-            bgcolor=AppColors.DARK_SURFACE_VARIANT,
+            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
         ),
     )
 
@@ -223,22 +224,16 @@ def AnimeDetailScreen() -> ft.Control:
         run_spacing=12,
     )
 
-    pager = ft.Row(
-        [
-            ft.OutlinedButton(
-                content="Prev",
-                on_click=lambda e: controller.load_episodes(anime_session, state.episodes_page - 1),
-                disabled=state.episodes_page <= 1,
-            ),
-            ft.Text(f"Page {state.episodes_page}", size=13, color=AppColors.DARK_TEXT_DIM),
-            ft.OutlinedButton(
-                content="Next",
-                on_click=lambda e: controller.load_episodes(anime_session, state.episodes_page + 1),
-                disabled=not state.episodes_has_more,
-            ),
-        ],
-        alignment=ft.MainAxisAlignment.CENTER,
-        spacing=16,
+    pager = ft_pager(
+        page=state.episodes_page,
+        has_more=state.episodes_has_more,
+        on_prev=lambda e: controller.load_episodes(
+            anime_session, state.episodes_page - 1
+        ),
+        on_next=lambda e: controller.load_episodes(
+            anime_session, state.episodes_page + 1
+        ),
+        is_loading=state.is_loading,
     )
 
     def _metadata_row(anime: dict) -> ft.Control:
@@ -260,7 +255,7 @@ def AnimeDetailScreen() -> ft.Control:
             " • ".join(parts),
             size=14,
             weight=ft.FontWeight.W_500,
-            color=AppColors.DARK_TEXT_DIM,
+            color=ft.Colors.ON_SURFACE_VARIANT,
         )
 
     return ft.Stack(
@@ -279,7 +274,7 @@ def AnimeDetailScreen() -> ft.Control:
                                             title,
                                             size=28,
                                             weight=ft.FontWeight.BOLD,
-                                            color=AppColors.DARK_TEXT,
+                                            color=ft.Colors.ON_SURFACE,
                                             max_lines=2,
                                             overflow=ft.TextOverflow.ELLIPSIS,
                                         ),
@@ -297,7 +292,7 @@ def AnimeDetailScreen() -> ft.Control:
                             "Episodes",
                             size=20,
                             weight=ft.FontWeight.W_700,
-                            color=AppColors.DARK_TEXT,
+                            color=ft.Colors.ON_SURFACE,
                         ),
                         ft.Container(height=8),
                         grid,

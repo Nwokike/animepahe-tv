@@ -15,7 +15,8 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
-from core.constants import LBL_CF_BLOCKED_SEARCH
+from components.pagination import pager as ft_pager
+from core.constants import LBL_CF_BLOCKED_SEARCH, MAX_SEARCH_QUERY_LENGTH
 from core.theme import AppColors
 from hooks.use_debounce import use_debounce
 from state.app_state import AppStateCtx
@@ -28,13 +29,15 @@ def _result_card(anime, on_select, col: dict | None = None) -> ft.Control:
         if anime.poster
         else ft.Container(
             content=ft.Icon(
-                ft.Icons.MOVIE_ROUNDED, size=48, color=AppColors.DARK_TEXT_DIM
+                ft.Icons.MOVIE_ROUNDED, size=48, color=ft.Colors.ON_SURFACE_VARIANT
             ),
             alignment=ft.Alignment.CENTER,
-            bgcolor=ft.Colors.with_opacity(0.1, AppColors.DARK_TEXT),
+            bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
         )
     )
-    score_color = AppColors.SUCCESS if anime.score >= 7.5 else AppColors.WARNING
+    # score can be missing from the site payload — never format a None.
+    score = anime.score if getattr(anime, "score", None) is not None else None
+    score_color = AppColors.SUCCESS if (score or 0) >= 7.5 else AppColors.WARNING
     content = ft.Stack(
         [
             poster,
@@ -80,7 +83,7 @@ def _result_card(anime, on_select, col: dict | None = None) -> ft.Control:
                                 ),
                                 ft.Container(width=4),
                                 ft.Text(
-                                    f"★ {anime.score:.1f}",
+                                    f"★ {score:.1f}" if score is not None else "★ —",
                                     size=12,
                                     weight=ft.FontWeight.BOLD,
                                     color=score_color,
@@ -135,6 +138,10 @@ def SearchScreen() -> ft.Control:
         q = query.strip()
         if not q:
             return
+        # Double-submit guard: a second tap while the first is in flight
+        # would queue a duplicate request and jump the results twice.
+        if state.is_loading:
+            return
         # The original gated search behind the CF check too — a request
         # while blocked would just fail and look like "no results".
         if state.cf_blocked:
@@ -150,6 +157,8 @@ def SearchScreen() -> ft.Control:
 
     def _pick(q: str):
         set_query(q)
+        if state.is_loading:
+            return
         if state.cf_blocked:
             from core.notify import show_snack
 
@@ -166,26 +175,42 @@ def SearchScreen() -> ft.Control:
     needle = (debounced_query or "").strip().lower()
     suggestions = [h for h in history if needle in h.lower()] if needle else history[:8]
 
+    def _on_change(e):
+        # The original clamped the field; an unbounded paste could push a
+        # 100KB string into the query param.
+        value = (e.control.value or "")[:MAX_SEARCH_QUERY_LENGTH]
+        set_query(value)
+
     field = ft.TextField(
         hint_text="Search anime...",
         border_radius=16,
-        bgcolor=ft.Colors.with_opacity(0.05, AppColors.DARK_TEXT),
+        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
         border_color=ft.Colors.TRANSPARENT,
         focused_border_color=AppColors.PRIMARY,
         focused_bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
         prefix_icon=ft.Icons.SEARCH_ROUNDED,
-        content_padding=16,
+        content_padding=20,
+        max_length=MAX_SEARCH_QUERY_LENGTH,
         text_size=16,
         value=query,
         on_submit=_submit,
-        on_change=lambda e: set_query(e.control.value),
+        on_change=_on_change,
     )
+
+    # Inline spinner on the submit button while a search is in flight —
+    # the visible half of the double-submit guard.
+    searching = bool(state.is_loading and not state.search_results)
 
     header = ft.Row(
         [
             ft.Container(content=field, expand=True),
             ft.FilledButton(
-                content="Search",
+                content=ft.ProgressRing(
+                    width=16, height=16, stroke_width=2, color=ft.Colors.WHITE
+                )
+                if searching
+                else "Search",
+                disabled=searching,
                 on_click=_submit,
                 style=ft.ButtonStyle(bgcolor=AppColors.PRIMARY, color=ft.Colors.WHITE),
             ),
@@ -198,9 +223,9 @@ def SearchScreen() -> ft.Control:
             ft.Container(
                 content=ft.Row(
                     [
-                        ft.Icon(ft.Icons.HISTORY_ROUNDED, size=18, color=AppColors.DARK_TEXT_DIM),
+                        ft.Icon(ft.Icons.HISTORY_ROUNDED, size=18, color=ft.Colors.ON_SURFACE_VARIANT),
                         ft.Container(width=8),
-                        ft.Text(q, size=13, color=AppColors.DARK_TEXT, expand=True),
+                        ft.Text(q, size=13, color=ft.Colors.ON_SURFACE, expand=True),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
@@ -232,8 +257,8 @@ def SearchScreen() -> ft.Control:
             content=ft.Column(
                 [
                     ft.Icon(ft.Icons.CLOUD_OFF_ROUNDED, size=56, color=AppColors.ERROR),
-                    ft.Text("Search failed", size=16, weight=ft.FontWeight.W_600, color=AppColors.DARK_TEXT),
-                    ft.Text(state.search_error, size=12, color=AppColors.DARK_TEXT_DIM),
+                    ft.Text("Search failed", size=16, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE),
+                    ft.Text(state.search_error, size=12, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.OutlinedButton(content="Retry", on_click=_submit),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -243,22 +268,16 @@ def SearchScreen() -> ft.Control:
             expand=True,
         )
     elif state.search_results:
-        pager = ft.Row(
-            [
-                ft.OutlinedButton(
-                    content="Prev",
-                    on_click=lambda e: controller.load_search(state.search_query, state.search_page - 1),
-                    disabled=state.search_page <= 1,
-                ),
-                ft.Text(f"Page {state.search_page}", size=13, color=AppColors.DARK_TEXT_DIM),
-                ft.OutlinedButton(
-                    content="Next",
-                    on_click=lambda e: controller.load_search(state.search_query, state.search_page + 1),
-                    disabled=not state.search_has_more,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-            spacing=16,
+        pager = ft_pager(
+            page=state.search_page,
+            has_more=state.search_has_more,
+            on_prev=lambda e: controller.load_search(
+                state.search_query, state.search_page - 1
+            ),
+            on_next=lambda e: controller.load_search(
+                state.search_query, state.search_page + 1
+            ),
+            is_loading=state.is_loading,
         )
         results = ft.Column(
             [
@@ -285,11 +304,11 @@ def SearchScreen() -> ft.Control:
         results = ft.Container(
             content=ft.Column(
                 [
-                    ft.Icon(ft.Icons.SEARCH_OFF_ROUNDED, size=56, color=AppColors.DARK_TEXT_DIM),
+                    ft.Icon(ft.Icons.SEARCH_OFF_ROUNDED, size=56, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.Text(
                         f"No results found for '{state.search_query}'",
                         size=15,
-                        color=AppColors.DARK_TEXT_DIM,
+                        color=ft.Colors.ON_SURFACE_VARIANT,
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -302,11 +321,11 @@ def SearchScreen() -> ft.Control:
         results = ft.Container(
             content=ft.Column(
                 [
-                    ft.Icon(ft.Icons.SEARCH_ROUNDED, size=56, color=AppColors.DARK_TEXT_DIM),
+                    ft.Icon(ft.Icons.SEARCH_ROUNDED, size=56, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.Text(
                         "Search for anime to get started",
                         size=15,
-                        color=AppColors.DARK_TEXT_DIM,
+                        color=ft.Colors.ON_SURFACE_VARIANT,
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
