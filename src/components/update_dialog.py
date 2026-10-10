@@ -12,6 +12,8 @@ import logging
 
 import flet as ft
 
+from core.dialogs import show_app_dialog
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,11 +21,16 @@ def show_update_dialog(page: ft.Page, update_data: dict):
     """'New Version Available!' — mandatory updates block dismissal."""
     mandatory = bool(update_data.get("mandatory"))
 
-    async def open_download(e):
+    def _dismiss_dialog():
+        # Clear the Back-handler registration whether the pop lands or not.
+        setattr(page, "_app_dialog", None)
         try:
             page.pop_dialog()
         except Exception:
             pass
+
+    async def open_download(e):
+        _dismiss_dialog()
         try:
             await asyncio.wait_for(
                 ft.UrlLauncher().launch_url(update_data["apk_url"]), timeout=1.0
@@ -33,10 +40,7 @@ def show_update_dialog(page: ft.Page, update_data: dict):
         page.update()
 
     def dismiss(e):
-        try:
-            page.pop_dialog()
-        except Exception:
-            pass
+        _dismiss_dialog()
         page.update()
 
     actions = [
@@ -72,4 +76,4 @@ def show_update_dialog(page: ft.Page, update_data: dict):
         actions=actions,
         actions_alignment=ft.MainAxisAlignment.END,
     )
-    page.show_dialog(dlg)
+    show_app_dialog(page, dlg)

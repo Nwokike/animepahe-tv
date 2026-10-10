@@ -21,6 +21,7 @@ from core.config import (
     KTV_PLAY_STORE_URL,
     KTV_UPTODOWN_URL,
 )
+from core.dialogs import show_app_dialog
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,16 @@ def _button_style():
 def show_ktv_install_dialog(page: ft.Page):
     """Play Store / Uptodown / Not now — shown when the deep link fails."""
 
-    async def open_store(e):
+    def _dismiss_dialog():
+        # Clear the Back-handler registration whether the pop lands or not.
+        setattr(page, "_app_dialog", None)
         try:
             page.pop_dialog()
         except Exception:
             pass
+
+    async def open_store(e):
+        _dismiss_dialog()
         try:
             await asyncio.wait_for(
                 ft.UrlLauncher().launch_url(KTV_PLAY_STORE_URL), timeout=1.0
@@ -55,10 +61,7 @@ def show_ktv_install_dialog(page: ft.Page):
         page.update()
 
     async def open_uptodown(e):
-        try:
-            page.pop_dialog()
-        except Exception:
-            pass
+        _dismiss_dialog()
         try:
             await asyncio.wait_for(
                 ft.UrlLauncher().launch_url(KTV_UPTODOWN_URL), timeout=1.0
@@ -68,10 +71,7 @@ def show_ktv_install_dialog(page: ft.Page):
         page.update()
 
     def dismiss(e):
-        try:
-            page.pop_dialog()
-        except Exception:
-            pass
+        _dismiss_dialog()
         page.update()
 
     dlg = ft.AlertDialog(
@@ -102,7 +102,7 @@ def show_ktv_install_dialog(page: ft.Page):
         ],
         actions_alignment=ft.MainAxisAlignment.END,
     )
-    page.show_dialog(dlg)
+    show_app_dialog(page, dlg)
 
 
 def build_deep_link(m3u8_url: str, title: str) -> str:

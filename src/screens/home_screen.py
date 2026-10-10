@@ -1,8 +1,11 @@
 """Home screen — latest releases, cross-promo, and the CF gate.
 
-Visual craft carried over from the original views: 1.67 landscape cards with
-a 4px transparent border reserving the focus ring, radius 16, the
-left-to-right gradient, and the primary-colored episode label. Header follows
+Visual craft carried over from the original views: 1.67 landscape cards,
+radius 16, the left-to-right gradient, and the primary-colored episode
+label. The focus ring is the KTV pattern (flet 1.0.4): cards are flat
+``FilledButton``s carrying a FOCUSED side from ``card_button_style`` plus
+the on_focus/on_blur micro-zoom — a ``Container`` card cannot take D-pad
+focus in 1.0.4, which is what made the old ring invisible. Header follows
 the same line: icon + wordmark left, actions right.
 """
 
@@ -10,13 +13,18 @@ import flet as ft
 
 from components.banner_ad import build_banner_ad
 from components.cross_promo import PromoHero
+from components.focus_styles import (
+    attach_focus_zoom,
+    card_button_style,
+    card_focus_scale,
+)
 from core.constants import APP_NAME, APP_VERSION
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
-def _release_card(release, on_select, now_playing: bool) -> ft.Control:
+def _release_card(release, on_select, now_playing: bool, col: dict | None = None) -> ft.Control:
     play_icon = ft.Icon(
         ft.Icons.EQUALIZER_ROUNDED if now_playing else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
         size=40,
@@ -73,18 +81,20 @@ def _release_card(release, on_select, now_playing: bool) -> ft.Control:
         ],
         expand=True,
     )
-    return ft.Container(
-        content=content,
-        border=ft.Border.all(4, ft.Colors.TRANSPARENT),
-        padding=4,
-        border_radius=16,
-        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
-        animate_scale=300,
-        animate=300,
-        ink=True,
-        aspect_ratio=1.67,
-        on_click=lambda e: on_select(release.anime_session),
+    # A FilledButton styled flat, not a Container: in flet 1.0.4 a Container
+    # has no on_focus/on_blur and no per-state side, so a Container card
+    # can't receive D-pad focus at all on TV. The FOCUSED side from
+    # card_button_style + the focus/blur scale are the focus ring.
+    return attach_focus_zoom(
+        ft.FilledButton(
+            content=content,
+            style=card_button_style(radius=16),
+            aspect_ratio=1.67,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            animate_scale=card_focus_scale(),
+            col=col,
+            on_click=lambda e: on_select(release.anime_session),
+        )
     )
 
 
@@ -205,48 +215,54 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
         progress = f"Ep {record.get('episode_num', '?')}"
         if total:
             progress += f" · of {total}"
-        cards.append(
-            ft.Container(
-                content=ft.Column(
-                    [
-                        ft.Container(
-                            content=ft.Image(
-                                src=poster, fit=ft.BoxFit.COVER, expand=True
-                            )
-                            if poster
-                            else ft.Container(
-                                content=ft.Icon(
-                                    ft.Icons.MOVIE_ROUNDED,
-                                    size=32,
-                                    color=AppColors.DARK_TEXT_DIM,
-                                ),
-                                alignment=ft.Alignment.CENTER,
-                                bgcolor=AppColors.DARK_SURFACE_VARIANT,
-                            ),
-                            width=120,
-                            height=68,
-                            border_radius=8,
-                            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        body = ft.Column(
+            [
+                ft.Container(
+                    content=ft.Image(
+                        src=poster, fit=ft.BoxFit.COVER, expand=True
+                    )
+                    if poster
+                    else ft.Container(
+                        content=ft.Icon(
+                            ft.Icons.MOVIE_ROUNDED,
+                            size=32,
+                            color=AppColors.DARK_TEXT_DIM,
                         ),
-                        ft.Text(
-                            record.get("title", ""),
-                            size=12,
-                            weight=ft.FontWeight.W_600,
-                            color=AppColors.DARK_TEXT,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        ft.Text(progress, size=11, color=AppColors.PRIMARY),
-                    ],
-                    spacing=6,
+                        alignment=ft.Alignment.CENTER,
+                        bgcolor=AppColors.DARK_SURFACE_VARIANT,
+                    ),
                     width=120,
+                    height=68,
+                    border_radius=8,
+                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
                 ),
-                padding=4,
-                border=ft.Border.all(4, ft.Colors.TRANSPARENT),
-                border_radius=12,
-                ink=True,
-                animate=200,
-                on_click=lambda e, s=record["anime_session"]: on_open(s),
+                ft.Text(
+                    record.get("title", ""),
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    color=AppColors.DARK_TEXT,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+                ft.Text(progress, size=11, color=AppColors.PRIMARY),
+            ],
+            spacing=6,
+            width=120,
+        )
+        cards.append(
+            attach_focus_zoom(
+                ft.FilledButton(
+                    content=body,
+                    # Flat card style (unlike the grid cards these sit on the
+                    # page background, so the DEFAULT side stays hairline).
+                    style=card_button_style(
+                        padding=4,
+                        radius=12,
+                        overlay_alpha=0.18,
+                    ),
+                    animate_scale=card_focus_scale(1.03),
+                    on_click=lambda e, s=record["anime_session"]: on_open(s),
+                )
             )
         )
     return ft.Column(
@@ -342,13 +358,11 @@ def HomeScreen() -> ft.Control:
 
     grid = ft.ResponsiveRow(
         controls=[
-            ft.Container(
-                content=_release_card(
-                    r,
-                    controller.open_anime,
-                    now_playing["anime"] == r.anime_session
-                    and now_playing["episode"] == r.session,
-                ),
+            _release_card(
+                r,
+                controller.open_anime,
+                now_playing["anime"] == r.anime_session
+                and now_playing["episode"] == r.session,
                 col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
             )
             for r in releases

@@ -113,6 +113,14 @@ def AppShell() -> ft.Control:
     controller.open_sheet = lambda d: set_active_dialog(d)
     controller.close_dialog = lambda: set_active_dialog(None)
 
+    # Publish what global Back should do (the controller's FocusManager
+    # reads this on every keypress; the closures above are the actions).
+    if controller._app_controller is not None:
+        controller._app_controller.ui_state = {
+            "dialog_open": active_dialog is not None,
+            "view": active_view,
+        }
+
     if state.player_open:
         body = _build_player(state, controller)
         chrome = None

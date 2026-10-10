@@ -48,6 +48,19 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
             )
         )
     else:
+        # Play is a real focusable button: on TV the row itself can't take
+        # focus (a Container has no focus events in flet 1.0.4), and the
+        # IconButton family does — same reason the card builders are
+        # buttons. Delete stays next to it as the secondary action.
+        if state == "complete":
+            trailing.append(
+                ft.IconButton(
+                    icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                    icon_size=20,
+                    tooltip="Play",
+                    on_click=lambda e: controller.play_downloaded(session),
+                )
+            )
         trailing.append(
             ft.IconButton(
                 icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
@@ -98,10 +111,10 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
         ),
         padding=ft.Padding.symmetric(horizontal=12, vertical=8),
         border_radius=8,
+        # The play action moved into `trailing` as a focusable IconButton;
+        # the row itself is display-only now (tap-through would double-fire
+        # with the button on touch devices).
         ink=True,
-        on_click=None
-        if active
-        else (lambda e: controller.play_downloaded(session)),
     )
 
 

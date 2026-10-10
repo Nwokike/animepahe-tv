@@ -11,6 +11,11 @@ its own anime by session — today it reads state.episodes like the old view.
 import flet as ft
 
 from components.banner_ad import build_banner_ad
+from components.focus_styles import (
+    attach_focus_zoom,
+    card_button_style,
+    card_focus_scale,
+)
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -92,18 +97,18 @@ def _episode_card(ep, on_play, anime_session: str, now_playing: bool) -> ft.Cont
         ],
         expand=True,
     )
-    return ft.Container(
-        content=content,
-        border=ft.Border.all(4, ft.Colors.TRANSPARENT),
-        padding=4,
-        border_radius=16,
-        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
-        animate_scale=300,
-        animate=300,
-        ink=True,
-        aspect_ratio=1.67,
-        on_click=lambda e: on_play(anime_session, ep.session),
+    # Flat FilledButton so the D-pad can focus the episode (Container cards
+    # are unreachable on TV in flet 1.0.4); the FOCUSED side + scale are
+    # the focus ring.
+    return attach_focus_zoom(
+        ft.FilledButton(
+            content=content,
+            style=card_button_style(radius=16),
+            aspect_ratio=1.67,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            animate_scale=card_focus_scale(),
+            on_click=lambda e: on_play(anime_session, ep.session),
+        )
     )
 
 

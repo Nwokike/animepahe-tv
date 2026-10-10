@@ -55,6 +55,9 @@ class AppController:
         self.cache: Cache | None = None
         self.update_service: UpdateService | None = None
         self._loading_locks: dict[str, asyncio.Lock] = {}
+        # The shell-owned ControllerMethods (set in main()); the global Back
+        # handler routes through its navigation closures.
+        self.shell: ControllerMethods | None = None
 
     async def init(self):
         self.page.title = APP_NAME
@@ -73,6 +76,13 @@ class AppController:
         self.update_service = UpdateService()
         self._search_gen = 0
         self._resolved_m3u8: str | None = None
+        # The shell publishes what Back should do (dialog open? which view?
+        # is the player up?) on every render; _handle_global_back reads it.
+        self.ui_state = {"dialog_open": False, "view": "tabs"}
+        from core.focus_manager import FocusManager
+
+        self.focus_manager = FocusManager(self.page)
+        self.focus_manager.set_back_handler(self._handle_global_back)
         from services.downloads import DownloadManager
 
         self.downloads = DownloadManager(store=self.store)
@@ -105,6 +115,42 @@ class AppController:
         if key not in self._loading_locks:
             self._loading_locks[key] = asyncio.Lock()
         return self._loading_locks[key]
+
+    def _handle_global_back(self):
+        """Back/Escape precedence, translated from the original 1.0.9 app
+        (which had `page.views` to pop): open dialog → player (the player's
+        own FocusScope owns Back while it's open, so it can save the resume
+        position first) → detail view → tabs root → let the OS background
+        the app.
+        """
+        from core.dialogs import close_app_dialog
+
+        # Ad-hoc dialogs (update prompt, KTV install prompt) first — the
+        # original closed whatever dialog was open before navigating.
+        if close_app_dialog(self.page):
+            return
+        ui = self.ui_state
+        if ui.get("dialog_open"):
+            self._shell_action("close_dialog")
+            return
+        if state.player_open:
+            # The player's FocusScope handles Back and saves the position
+            # before the shell tears the player down — do nothing here.
+            return
+        if ui.get("view") == "anime":
+            self._shell_action("back")
+            return
+        # Root: the OS finishes/backgrounds the app, as on the original.
+
+    def _shell_action(self, name: str):
+        """Call a navigation closure on the shell-owned methods instance.
+
+        The shell fills these in on every render (and they're no-ops until
+        its first render), so the controller never holds a stale closure.
+        """
+        action = getattr(self.shell, name, None)
+        if action is not None:
+            action()
 
     # ------------------------------------------------------------------
     # Data actions — called by screens through ControllerMethods
@@ -708,6 +754,7 @@ async def main(page: ft.Page):
     # The shell's player branch reaches the controller through this handle
     # (its ControllerMethods copy is the shell-owned navigation half).
     methods._app_controller = controller
+    controller.shell = methods
 
     # Ads: one SDK service on the page, guarded to the mobile family.
     try:

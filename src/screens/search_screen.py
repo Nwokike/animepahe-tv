@@ -10,13 +10,18 @@ title/year/type/score, 4px border reserve for the focus ring.
 import flet as ft
 
 from components.banner_ad import build_banner_ad
+from components.focus_styles import (
+    attach_focus_zoom,
+    card_button_style,
+    card_focus_scale,
+)
 from core.theme import AppColors
 from hooks.use_debounce import use_debounce
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
-def _result_card(anime, on_select) -> ft.Control:
+def _result_card(anime, on_select, col: dict | None = None) -> ft.Control:
     poster = (
         ft.Image(src=anime.poster, fit=ft.BoxFit.COVER, expand=True, opacity=0.6)
         if anime.poster
@@ -89,15 +94,22 @@ def _result_card(anime, on_select) -> ft.Control:
         ],
         expand=True,
     )
-    return ft.Container(
-        content=ft.Container(content=content, border_radius=12, clip_behavior=ft.ClipBehavior.ANTI_ALIAS, aspect_ratio=0.67),
-        border=ft.Border.all(4, ft.Colors.TRANSPARENT),
-        padding=4,
-        border_radius=16,
-        animate_scale=300,
-        animate=300,
-        ink=True,
-        on_click=lambda e: on_select(anime),
+    # Flat FilledButton (not a Container) — only the Button family takes
+    # on_focus/on_blur and per-state sides in flet 1.0.4, so only it can
+    # show a focus ring and be reached by a D-pad on TV.
+    return attach_focus_zoom(
+        ft.FilledButton(
+            content=ft.Container(
+                content=content,
+                border_radius=12,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                aspect_ratio=0.67,
+            ),
+            style=card_button_style(padding=4, radius=16),
+            animate_scale=card_focus_scale(),
+            col=col,
+            on_click=lambda e: on_select(anime),
+        )
     )
 
 
@@ -230,8 +242,9 @@ def SearchScreen() -> ft.Control:
             [
                 ft.ResponsiveRow(
                     controls=[
-                        ft.Container(
-                            content=_result_card(a, controller.open_anime),
+                        _result_card(
+                            a,
+                            controller.open_anime,
                             col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
                         )
                         for a in state.search_results
