@@ -13,6 +13,7 @@ both AdMob policy and TV focus design call out as wrong.
 
 import flet as ft
 
+from core.tasks import spawn
 from core.theme import AppColors
 from screens.anime_detail_screen import AnimeDetailScreen
 from screens.downloads_screen import DownloadsScreen
@@ -113,7 +114,7 @@ def AppShell() -> ft.Control:
     controller.close_dialog = lambda: set_active_dialog(None)
 
     if state.player_open:
-        body = _build_player(state)
+        body = _build_player(state, controller)
         chrome = None
         show_nav = False
     elif active_view == "anime":
@@ -191,15 +192,20 @@ def AppShell() -> ft.Control:
 _active_player = None
 
 
-def _build_player(state) -> ft.Control:
+def _build_player(state, controller) -> ft.Control:
     """The in-app player branch, wrapped in FocusScope so Back/Escape
     always reaches it (without autofocus the overlay swallows the first
-    remote press)."""
+    remote press). A pre-open failure (e.g. a deleted download) short-circuits
+    to the error card instead of a blank player."""
     from components.player.immersive_player import ImmersivePlayer
     from hooks.use_focus_scope import FocusScope
 
     spec = getattr(state, "player_spec", None) or {}
     from services.store import get_store
+
+    error = getattr(state, "player_error", None)
+    if error:
+        return _build_player_error(state, controller, error)
 
     global _active_player
 
@@ -214,6 +220,69 @@ def _build_player(state) -> ft.Control:
     )
     _active_player = player
     return FocusScope(content=player, on_back=_player_back)
+
+
+def _build_player_error(state, controller, message: str) -> ft.Control:
+    """Playback couldn't start: same black stage as the player so the
+    transition never flashes the app behind it."""
+    session = getattr(state, "current_episode_session", "")
+
+    def _retry():
+        state.player_error = None
+        state.episodes_version += 1
+        spawn(
+            controller._app_controller.play_downloaded(session),
+            name="retry-downloaded",
+        )
+
+    def _back():
+        state.player_error = None
+        state.player_open = False
+        state.episodes_version += 1
+
+    return ft.Container(
+        expand=True,
+        bgcolor=ft.Colors.BLACK,
+        alignment=ft.Alignment.CENTER,
+        content=ft.Column(
+            [
+                ft.Icon(ft.Icons.ERROR_OUTLINE_ROUNDED, size=64, color=AppColors.ERROR),
+                ft.Container(height=16),
+                ft.Text(
+                    "Playback unavailable",
+                    size=20,
+                    weight=ft.FontWeight.W_700,
+                    color=ft.Colors.WHITE,
+                ),
+                ft.Container(height=8),
+                ft.Text(
+                    message,
+                    size=14,
+                    color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=24),
+                ft.Row(
+                    [
+                        ft.OutlinedButton(
+                            content="Retry",
+                            icon=ft.Icons.REFRESH_ROUNDED,
+                            on_click=lambda e: _retry(),
+                        ),
+                        ft.OutlinedButton(
+                            content="Go Back",
+                            icon=ft.Icons.ARROW_BACK_ROUNDED,
+                            on_click=lambda e: _back(),
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=12,
+                ),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+    )
 
 
 async def _player_back():

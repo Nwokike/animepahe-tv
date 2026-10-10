@@ -17,6 +17,7 @@ from core.constants import APP_NAME
 # Logging first: the console + ring-buffer handlers attach at import time,
 # so every service constructed below logs where it can be seen.
 from core.logger_handler import in_memory_log_handler  # noqa: F401
+from core.notify import show_snack
 from core.tasks import spawn
 from core.theme import AppColors, AppTheme
 from services.animepahe import AnimePaheScraper
@@ -95,12 +96,10 @@ class AppController:
             state.update_available = True
             state.update_data = update_data
 
-    def _show_error_snackbar(self):
-        try:
-            snack = ft.SnackBar(ft.Text("Network error"), bgcolor=AppColors.ERROR)
-            self.page.show_dialog(snack)
-        except Exception:
-            pass
+    def _show_error_snackbar(self, message: str = "Network error"):
+        """Surface a failure to the user (guarded: never raises, never kills
+        a real dialog). All failure paths funnel through here."""
+        show_snack(self.page, message, bgcolor=AppColors.ERROR)
 
     def _get_lock(self, key: str) -> asyncio.Lock:
         if key not in self._loading_locks:
@@ -137,6 +136,8 @@ class AppController:
                 logger.error("load_latest page=%d failed: %s", page_num, ex)
                 state.latest_releases = []
                 state.latest_has_more = False
+                if page_num == 1:
+                    self._show_error_snackbar("Couldn't load the latest releases.")
             finally:
                 state.is_loading = False
                 if page_num == 1 and not state.latest_releases:
@@ -153,6 +154,7 @@ class AppController:
             await self.cache.clear()
         except Exception as ex:
             logger.error("retry_cloudflare failed: %s", ex)
+            self._show_error_snackbar("Couldn't refresh the session.")
         await self.load_latest(1)
 
     async def load_episodes(self, anime_session: str, page_num: int = 1):
@@ -181,6 +183,7 @@ class AppController:
                 logger.error("load_episodes session=%s failed: %s", anime_session, ex)
                 state.episodes = []
                 state.episodes_has_more = False
+                self._show_error_snackbar("Couldn't load the episode list.")
             finally:
                 state.is_loading = False
                 state.episodes_version += 1
@@ -221,6 +224,7 @@ class AppController:
             sources = await self.scraper.sources(anime_session, episode_session)
         except Exception as ex:
             logger.error("sources(%s/%s) failed: %s", anime_session, episode_session, ex)
+            self._show_error_snackbar("Couldn't load the stream sources.")
             sources = []
         if not sources:
             logger.warning("no sources — external player fallback")
@@ -230,7 +234,11 @@ class AppController:
         state.selected_source = sources[0]
 
         # 2. Resolve the best source -> m3u8 -> variants.
-        m3u8 = await self.kwik.resolve(sources[0].url)
+        try:
+            m3u8 = await self.kwik.resolve(sources[0].url)
+        except Exception as ex:
+            logger.error("kwik resolve(%s) failed: %s", sources[0].url, ex)
+            m3u8 = None
         if not m3u8:
             logger.warning("kwik resolve failed — external player fallback")
             await self._open_external_player(anime_session, episode_session)
@@ -304,9 +312,14 @@ class AppController:
         variants = pending.get("variants") or []
         if choice["kind"] == "source":
             # Re-resolve this site source, then play its own variants.
-            m3u8 = await self.kwik.resolve(choice["url"])
-            if m3u8:
-                variants = await self._fetch_variants(m3u8)
+            try:
+                m3u8 = await self.kwik.resolve(choice["url"])
+                if m3u8:
+                    variants = await self._fetch_variants(m3u8)
+            except Exception as ex:
+                logger.error("quality switch resolve failed: %s", ex)
+                self._show_error_snackbar("Couldn't switch to that source.")
+                m3u8 = None
             await self._open_player(
                 m3u8 or pending["m3u8"],
                 variants,
@@ -337,6 +350,8 @@ class AppController:
         from components.player.immersive_player import KWIK_USER_AGENT
 
         anime = await self._resolve_anime(anime_session)
+        # Clear any previous open-failure so it can't blink over the new one.
+        state.player_error = None
         state.player_spec = {
             "resource": resource,
             "variants": variants,
@@ -428,11 +443,18 @@ class AppController:
             sources = await self.scraper.sources(anime_session, episode_session)
         except Exception as ex:
             logger.error("download: sources failed: %s", ex)
+            self._show_error_snackbar("Couldn't start the download.")
             return
         if not sources:
+            self._show_error_snackbar("No stream found for this episode.")
             return
-        m3u8 = await self.kwik.resolve(sources[0].url)
+        try:
+            m3u8 = await self.kwik.resolve(sources[0].url)
+        except Exception as ex:
+            logger.error("download: resolve failed: %s", ex)
+            m3u8 = None
         if not m3u8:
+            self._show_error_snackbar("Couldn't resolve the stream for download.")
             return
 
         metadata = {
@@ -483,11 +505,15 @@ class AppController:
         row = rows.get(episode_session) or {}
         playlist = row.get("playlist")
         if not playlist or not os.path.exists(playlist):
-            state.player_error = "Downloaded file is missing."
+            # Open the player branch on the error card — staying on Downloads
+            # with no feedback looks like the tap did nothing.
+            state.player_error = "The downloaded file is missing."
+            state.player_open = True
             state.episodes_version += 1
             return
         from components.player.immersive_player import KWIK_USER_AGENT
 
+        state.player_error = None
         state.player_spec = {
             "resource": playlist,
             "variants": [],
@@ -542,8 +568,8 @@ class AppController:
                 "score": 0.0,
                 "season": "",
             }
-        # Cold link: only case that pays a network round-trip ��� search by the
-        # title we can derive from the episodes page, and take the real poster
+        # Cold link: only case that pays a network round-trip — search by the
+        # title we can derive from the releases list, and take the real poster
         # (a /snapshots/ placeholder means the poster wasn't resolved yet).
         return await self._resolve_anime_by_search(anime_session)
 
@@ -626,6 +652,16 @@ class AppController:
 async def main(page: ft.Page):
     controller = AppController(page)
     await controller.init()
+
+    # Unhandled exceptions in event handlers land here — the only place a
+    # crash is visible to the user at all. Console line (via logger) plus a
+    # snack, so a broken tap never looks like a dead app.
+    def _on_page_error(e):
+        message = str(getattr(e, "data", None) or e)
+        logger.error("unhandled page error: %s", message)
+        show_snack(page, "Something went wrong.", bgcolor=AppColors.ERROR)
+
+    page.on_error = _on_page_error
 
     methods = ControllerMethods()
     methods.load_latest = lambda page_num=1: spawn(
