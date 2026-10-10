@@ -68,7 +68,9 @@ def AppShell() -> ft.Control:
         # Full-screen branch (Sherlock's results-view pattern): nav bar
         # hides, an AppBar with a back button appears.
         set_active_view("anime")
-        controller.load_episodes(session)
+        # load_anime resolves the header (poster/title/metadata) before
+        # the episodes load, so cold-opened details don't sit on "Loading...".
+        controller.load_anime(session)
 
     # The controller drives navigation by mutating these closures in place
     # (identity must survive — see controller_ctx.py).

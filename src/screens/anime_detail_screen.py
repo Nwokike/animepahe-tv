@@ -236,6 +236,28 @@ def AnimeDetailScreen() -> ft.Control:
         spacing=16,
     )
 
+    def _metadata_row(anime: dict) -> ft.Control:
+        """year / type / status / N Episodes / score, as the original."""
+        parts = []
+        if anime.get("year"):
+            parts.append(str(anime["year"]))
+        if anime.get("type"):
+            parts.append(anime["type"])
+        if anime.get("status"):
+            parts.append(anime["status"])
+        if anime.get("episodes"):
+            parts.append(f"{anime['episodes']} Episodes")
+        if anime.get("score"):
+            parts.append(f"★ {float(anime['score']):.1f}")
+        if not parts:
+            return ft.Container(width=0, height=0)
+        return ft.Text(
+            " • ".join(parts),
+            size=14,
+            weight=ft.FontWeight.W_500,
+            color=AppColors.DARK_TEXT_DIM,
+        )
+
     return ft.Stack(
         [
             backdrop,
@@ -256,6 +278,8 @@ def AnimeDetailScreen() -> ft.Control:
                                             max_lines=2,
                                             overflow=ft.TextOverflow.ELLIPSIS,
                                         ),
+                                        ft.Container(height=8),
+                                        _metadata_row(anime),
                                     ],
                                     expand=True,
                                     alignment=ft.MainAxisAlignment.CENTER,

@@ -30,6 +30,20 @@ from state.controller_ctx import ControllerMethods, ControllerMethodsCtx
 logger = logging.getLogger(__name__)
 
 
+def _anime_dict(anime) -> dict:
+    """Anime dataclass -> the detail header's dict."""
+    return {
+        "title": anime.title,
+        "poster": anime.poster,
+        "episodes": anime.episodes,
+        "year": anime.year,
+        "type": anime.type,
+        "status": anime.status,
+        "score": anime.score,
+        "season": anime.season,
+    }
+
+
 class AppController:
     """Owns services + data actions. Navigation lives in AppShell."""
 
@@ -494,11 +508,12 @@ class AppController:
         state.downloads_version += 1
 
     async def _resolve_anime(self, anime_session: str) -> dict | None:
-        """Title/poster for an anime, cheapest source first.
+        """Title/poster/metadata for an anime, cheapest source first.
 
         Order: in-memory releases/search results → Continue Watching store →
-        (only then, for cold deep links) a title search. Episodes never need
-        this — they load by session — but the detail screen's header does.
+        (only then, for cold links) a title search, which is how the original
+        self-healed a snapshot poster. Episodes never need this — they load
+        by session — but the detail screen's header does.
         """
         for release in state.latest_releases:
             if release.anime_session == anime_session:
@@ -506,26 +521,55 @@ class AppController:
                     "title": release.anime_title,
                     "poster": release.snapshot,
                     "episodes": 0,
+                    "year": 0,
+                    "type": "",
+                    "status": "",
+                    "score": 0.0,
+                    "season": "",
                 }
         for anime in state.search_results:
             if anime.session == anime_session:
-                return {
-                    "title": anime.title,
-                    "poster": anime.poster,
-                    "episodes": anime.episodes,
-                }
+                return _anime_dict(anime)
         entry = (await self.store.get_continue_watching()).get(anime_session)
         if entry:
             return {
                 "title": entry.get("title", ""),
                 "poster": entry.get("poster", ""),
                 "episodes": entry.get("total_episodes", 0),
+                "year": 0,
+                "type": "",
+                "status": "",
+                "score": 0.0,
+                "season": "",
             }
-        # Cold link: the only case that pays a network round-trip. Reuse the
-        # episodes' anime_id? No — the API needs a title; use the newest
-        # episode snapshot as a poster and a generic title until Phase 3's
-        # metadata endpoint arrives.
-        return None
+        # Cold link: only case that pays a network round-trip ��� search by the
+        # title we can derive from the episodes page, and take the real poster
+        # (a /snapshots/ placeholder means the poster wasn't resolved yet).
+        return await self._resolve_anime_by_search(anime_session)
+
+    async def _resolve_anime_by_search(self, anime_session: str) -> dict | None:
+        """Self-heal a cold-opened anime: derive a title from the episodes we
+        already have, search with it, and keep the match for this session."""
+        title_guess = ""
+        for release in state.latest_releases:
+            if release.anime_session == anime_session:
+                title_guess = release.anime_title
+                break
+        if not title_guess:
+            return None
+        try:
+            results, _ = await self.scraper.search(title_guess, 1)
+        except Exception as ex:
+            logger.warning("anime self-heal search failed: %s", ex)
+            return None
+        matched = next((a for a in results if a.session == anime_session), None)
+        if matched is None:
+            return None
+        # Cache it so the next open is free.
+        state.search_results = [matched] + [
+            a for a in state.search_results if a.session != anime_session
+        ]
+        return _anime_dict(matched)
 
     async def load_anime(self, anime_session: str):
         """Open the detail screen: resolve the header, then load episodes."""
