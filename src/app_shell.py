@@ -49,8 +49,11 @@ def _use_rail(page) -> bool:
 @ft.component
 def AppShell() -> ft.Control:
     controller = ft.use_context(ControllerMethodsCtx)
+    state = ft.use_context(AppStateCtx)
     active_tab, set_active_tab = ft.use_state("Home")
-    active_view, set_active_view = ft.use_state("tabs")  # "tabs" | "anime"
+    active_view, set_active_view = ft.use_state("tabs")  # tabs | anime | player
+    _ = state.episodes_version
+    _ = state.player_open
 
     from flet import context as flet_context
 
@@ -73,11 +76,28 @@ def AppShell() -> ft.Control:
     controller.open_settings = lambda: set_active_tab("Settings")
     controller.open_anime = _open_anime
     controller.back = lambda: set_active_view("tabs")
+    controller.close_player = lambda: set_active_view("anime")
+    controller.play_adjacent = lambda delta: _play_adjacent(delta)
+    controller.choose_quality = lambda idx: _choose_quality(idx)
+
+    def _play_adjacent(delta):
+        from core.tasks import spawn
+
+        spawn(controller._app_controller.play_adjacent(delta), name="play-adjacent")
+
+    def _choose_quality(index):
+        from core.tasks import spawn
+
+        spawn(controller._app_controller.choose_quality(index), name="choose-quality")
 
     def _on_tab(name: str):
         set_active_tab(name)
 
-    if active_view == "anime":
+    if state.player_open:
+        body = _build_player(state)
+        chrome = None
+        show_nav = False
+    elif active_view == "anime":
         body = AnimeDetailScreen()
         chrome = _detail_appbar(controller)
         show_nav = False
@@ -137,6 +157,47 @@ def AppShell() -> ft.Control:
         spacing=0,
         expand=True,
     )
+
+
+def _build_player(state) -> ft.Control:
+    """The in-app player branch, wrapped in FocusScope so Back/Escape
+    always reaches it (without autofocus the overlay swallows the first
+    remote press)."""
+    from components.player.immersive_player import ImmersivePlayer
+    from hooks.use_focus_scope import FocusScope
+
+    spec = getattr(state, "player_spec", None) or {}
+    from services.store import get_store
+
+    player = ImmersivePlayer(
+        resource=spec.get("resource", ""),
+        title=spec.get("title", ""),
+        http_headers=spec.get("headers"),
+        resume_key=spec.get("episode_session"),
+        store=get_store(),
+        variants=spec.get("variants") or [],
+        on_close=lambda: _close_player(),
+    )
+    return FocusScope(content=player, on_back=lambda: _close_player())
+
+
+def _close_player():
+    from flet import context as flet_context
+
+    page = flet_context.page
+    if page is None:
+        return
+    # The player saves its own position in handle_close(); we only flip the
+    # shell back to the detail screen.
+    page.run_task(_async_close)
+
+
+async def _async_close():
+    from flet import context as flet_context
+    from state.app_state import state
+
+    state.player_open = False
+    state.episodes_version += 1
 
 
 def _detail_appbar(controller) -> ft.Control:

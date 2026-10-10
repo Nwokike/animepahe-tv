@@ -164,10 +164,8 @@ class AppController:
                 state.episodes_version += 1
 
     async def play_episode(self, anime_session: str, episode_session: str):
-        # Phase 3 replaces this with the in-app flet-video player (quality
-        # selector, resume, next/prev). Phase 2 additionally records the
-        # Continue Watching entry here — the record is a controller-level
-        # composite because the anime's title/poster are not on the Episode.
+        # Resolve the stream, then open the in-app player. The ktv:// deep
+        # link stays as the fallback for when resolution fails.
         state.current_anime_session = anime_session
         state.current_episode_session = episode_session
         state.episodes_version += 1
@@ -187,9 +185,132 @@ class AppController:
             await self.store.record_watch(record)
             state.continue_watching = await self.store.get_continue_watching()
             state.continue_version += 1
-        logger.info(
-            "play_episode %s/%s (player lands in Phase 3)", anime_session, episode_session
+
+        # 1. Stream sources.
+        try:
+            sources = await self.scraper.sources(anime_session, episode_session)
+        except Exception as ex:
+            logger.error("sources(%s/%s) failed: %s", anime_session, episode_session, ex)
+            sources = []
+        if not sources:
+            logger.warning("no sources — external player fallback")
+            await self._open_external_player(anime_session, episode_session)
+            return
+        state.selected_source = sources[0]
+
+        # 2. Resolve kwik -> m3u8.
+        m3u8 = await self.kwik.resolve(sources[0].url)
+        if not m3u8:
+            logger.warning("kwik resolve failed — external player fallback")
+            await self._open_external_player(anime_session, episode_session)
+            return
+
+        # 3. Master playlist -> variants (empty = single quality).
+        variants = await self._fetch_variants(m3u8)
+        if len(variants) > 1:
+            state.pending_playback = {
+                "m3u8": m3u8,
+                "variants": variants,
+                "anime_session": anime_session,
+                "episode_session": episode_session,
+            }
+            state.quality_dialog = True
+        else:
+            await self._open_player(m3u8, [], anime_session, episode_session)
+
+    async def _fetch_variants(self, m3u8: str) -> list[dict]:
+        from components.player.immersive_player import KWIK_USER_AGENT, _stream_variants
+
+        try:
+            client = self.kwik._get_client()
+            resp = await client.get(
+                m3u8,
+                headers={
+                    "User-Agent": KWIK_USER_AGENT,
+                    "Referer": "https://kwik.cx/",
+                },
+            )
+            if resp.status_code == 200 and resp.text:
+                return _stream_variants(resp.text)
+        except Exception as ex:
+            logger.warning("variant fetch failed: %s", ex)
+        return []
+
+    async def choose_quality(self, variant_index: int):
+        """0 = Auto (top variant), 1..N = variants[index-1]."""
+        pending = state.pending_playback
+        if not pending:
+            return
+        state.quality_dialog = False
+        variants = pending.get("variants") or []
+        if variant_index == 0 or not variants:
+            await self._open_player(
+                pending["m3u8"], [], pending["anime_session"], pending["episode_session"]
+            )
+            return
+        variant = variants[variant_index - 1]
+        await self._open_player(
+            variant["uri"], variants, pending["anime_session"], pending["episode_session"]
         )
+
+    async def _open_player(
+        self,
+        resource: str,
+        variants: list[dict],
+        anime_session: str,
+        episode_session: str,
+    ):
+        from components.player.immersive_player import KWIK_USER_AGENT
+
+        anime = await self._resolve_anime(anime_session)
+        self._player_spec = {
+            "resource": resource,
+            "variants": variants,
+            "title": (anime or {}).get("title") or "AnimePahe",
+            "episode_session": episode_session,
+            "anime_session": anime_session,
+            "headers": {
+                "User-Agent": KWIK_USER_AGENT,
+                "Referer": "https://kwik.cx/",
+            },
+        }
+        state.player_open = True
+        state.episodes_version += 1
+        logger.info("player opening for %s/%s", anime_session, episode_session)
+
+    async def close_player(self):
+        state.player_open = False
+        state.episodes_version += 1
+
+    async def play_adjacent(self, delta: int):
+        """Next/previous episode within the loaded page."""
+        current = state.current_episode_session
+        episodes = state.episodes or []
+        if not episodes or not current:
+            return
+        index = next((i for i, e in enumerate(episodes) if e.session == current), None)
+        if index is None:
+            return
+        target = index + delta
+        if target < 0 or target >= len(episodes):
+            return
+        nxt = episodes[target]
+        await self.close_player()
+        await self.play_episode(state.current_anime_session, nxt.session)
+
+    async def _open_external_player(self, anime_session: str, episode_session: str):
+        """Fallback: hand the episode to KTV Player via deep link, as before."""
+        try:
+            await asyncio.wait_for(
+                ft.UrlLauncher().launch_url(
+                    f"ktv://play/?url=https://animepahe.com/play/{anime_session}/{episode_session}"
+                ),
+                timeout=1.5,
+            )
+        except Exception as ex:
+            logger.warning("external player launch failed: %s", ex)
+            state.player_error = "Could not open a player for this episode."
+            state.episodes_version += 1
 
     async def _resolve_anime(self, anime_session: str) -> dict | None:
         """Title/poster for an anime, cheapest source first.
@@ -303,6 +424,17 @@ async def main(page: ft.Page):
     methods.clear_search_history = lambda: spawn(
         controller.clear_search_history(), name="clear-search-history"
     )
+    methods.choose_quality = lambda index: spawn(
+        controller.choose_quality(index), name="choose-quality"
+    )
+    methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
+    methods.play_adjacent = lambda delta: spawn(
+        controller.play_adjacent(delta), name="play-adjacent"
+    )
+
+    # The shell's player branch reaches the controller through this handle
+    # (its ControllerMethods copy is the shell-owned navigation half).
+    methods._app_controller = controller
 
     page.render(lambda: ControllerMethodsCtx(methods, lambda: AppShell()))
 

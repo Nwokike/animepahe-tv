@@ -36,7 +36,7 @@ ROTATE_SECONDS = 8
 
 
 def _open_url(url: str):
-    async def _open(e):
+    async def _open(e=None):
         try:
             await ft.UrlLauncher().launch_url(url)
         except Exception:

@@ -83,6 +83,13 @@ class AppState:
     search_page: int = 1
     continue_watching: dict = {}
     selected_anime: dict | None = None
+    selected_source: object | None = None
+
+    # Player (in-app playback)
+    player_open: bool = False
+    quality_dialog: bool = False
+    pending_playback: dict | None = None
+    player_error: str | None = None
 
     def __init__(self):
         self.search_results = []
