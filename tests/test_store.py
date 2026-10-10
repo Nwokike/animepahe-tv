@@ -170,3 +170,42 @@ async def test_clearance_round_trip(store):
 async def test_clearance_empty_cookies_ignored(store):
     await store.save_clearance("", "UA/1.0")
     assert await store.get_clearance() is None
+
+
+def test_early_access_round_trip(tmp_path, monkeypatch):
+    import asyncio
+    import time
+
+    monkeypatch.setenv("FLET_APP_STORAGE_DATA", str(tmp_path))
+    from services.store import JsonStore
+
+    (tmp_path / "animepahe").mkdir(parents=True, exist_ok=True)
+
+    async def _run():
+        store = JsonStore(filename="ea-test.json")
+        assert await store.is_early_access("ep1") is False
+        await store.grant_early_access("ep1")
+        assert await store.is_early_access("ep1") is True
+        # Survives a reload (fresh instance, same file).
+        reloaded = JsonStore(filename="ea-test.json")
+        assert await reloaded.is_early_access("ep1") is True
+
+    asyncio.run(_run())
+
+
+def test_early_access_expiry(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.setenv("FLET_APP_STORAGE_DATA", str(tmp_path))
+    from services.store import JsonStore
+
+    (tmp_path / "animepahe").mkdir(parents=True, exist_ok=True)
+
+    async def _run():
+        store = JsonStore(filename="ea-expiry.json")
+        await store.put_section(
+            "early_access", {"ep1": 1.0}
+        )  # epoch 1 — long expired
+        assert await store.is_early_access("ep1") is False
+
+    asyncio.run(_run())

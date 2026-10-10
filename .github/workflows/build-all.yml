@@ -22,8 +22,11 @@ env:
   PYTHONUTF8: "1"
   FLET_CLI_NO_RICH_OUTPUT: "1"
   UV_PYTHON: "3.13"
-  BUILD_VERSION: ${{ inputs.build_version || '1.0.9' }}
-  BUILD_NUMBER: ${{ inputs.build_number || '10' }}
+  # Tag pushes carry the version (v1.2.3 -> 1.2.3, build number = UTC date
+  # stamp, monotonic without a counter to bump by hand); manual dispatches
+  # keep their explicit inputs.
+  BUILD_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.build_version || '1.0.9' }}
+  BUILD_NUMBER: ${{ startsWith(github.ref, 'refs/tags/v') && github.run_number || inputs.build_number || '10' }}
 
 jobs:
   # ─── 0. Create Release Tag & Placeholder ───────────────

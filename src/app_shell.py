@@ -18,6 +18,7 @@ from screens.anime_detail_screen import AnimeDetailScreen
 from screens.downloads_screen import DownloadsScreen
 from screens.home_screen import HomeScreen
 from screens.search_screen import SearchScreen
+from screens.settings_screen import SettingsScreen
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -110,7 +111,7 @@ def AppShell() -> ft.Control:
         elif active_tab == "Downloads":
             body = DownloadsScreen()
         else:
-            body = _placeholder("Settings", "Settings + activity terminal — Phase 5.")
+            body = SettingsScreen()
         chrome = None
         show_nav = True
 

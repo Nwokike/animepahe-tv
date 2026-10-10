@@ -10,6 +10,7 @@ its own anime by session — today it reads state.episodes like the old view.
 
 import flet as ft
 
+from components.banner_ad import build_banner_ad
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -111,6 +112,13 @@ def AnimeDetailScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.episodes_version
+
+    from flet import context as flet_context
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
 
     anime_session = state.current_anime_session
     episodes = state.episodes
@@ -264,6 +272,7 @@ def AnimeDetailScreen() -> ft.Control:
                         ),
                         ft.Container(height=8),
                         grid,
+                        build_banner_ad(page, inline=True),
                         pager,
                         ft.Container(height=32),
                     ],

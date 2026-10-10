@@ -8,6 +8,7 @@ the same line: icon + wordmark left, actions right.
 
 import flet as ft
 
+from components.banner_ad import build_banner_ad
 from components.cross_promo import PromoHero
 from core.constants import APP_NAME, APP_VERSION
 from core.theme import AppColors
@@ -344,6 +345,7 @@ def HomeScreen() -> ft.Control:
                 content=ft.Column(
                     [
                         PromoHero(),
+                        build_banner_ad(page, inline=True),
                         _continue_watching_row(state.continue_watching, controller.open_anime)
                         or ft.Container(width=0, height=0),
                         ft.Text(
@@ -354,6 +356,7 @@ def HomeScreen() -> ft.Control:
                         ),
                         grid,
                         pager,
+                        build_banner_ad(page, inline=True),
                         ft.Container(height=32),
                     ],
                     spacing=16,

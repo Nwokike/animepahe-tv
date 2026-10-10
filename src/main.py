@@ -192,6 +192,14 @@ class AppController:
             state.continue_watching = await self.store.get_continue_watching()
             state.continue_version += 1
 
+        # Interstitial between episodes (the full-map cadence).
+        try:
+            from services.ads import show_interstitial
+
+            await show_interstitial(self.page)
+        except Exception as ex:
+            logger.warning("interstitial skip: %s", ex)
+
         # 1. Stream sources.
         try:
             sources = await self.scraper.sources(anime_session, episode_session)
@@ -550,6 +558,22 @@ async def main(page: ft.Page):
     # The shell's player branch reaches the controller through this handle
     # (its ControllerMethods copy is the shell-owned navigation half).
     methods._app_controller = controller
+
+    # Ads: one SDK service on the page, guarded to the mobile family.
+    try:
+        from services.ads import build_ad_service, show_app_open
+
+        ad_service = build_ad_service(
+            page,
+            on_initialized=lambda e: spawn(show_app_open(page), name="app-open"),
+            on_init_failed=lambda e: logger.warning(
+                "ad init failed: %s", getattr(e, "data", e)
+            ),
+        )
+        if ad_service is not None and not isinstance(ad_service, ft.Container):
+            page.services.append(ad_service)
+    except Exception as ex:
+        logger.warning("ad service setup skipped: %s", ex)
 
     page.render(lambda: ControllerMethodsCtx(methods, lambda: AppShell()))
 

@@ -253,3 +253,27 @@ class JsonStore:
         if episode_session in entries:
             entries.pop(episode_session, None)
             await self.put_section("downloads", entries)
+
+    # ------------------------------------------------------------------
+    # Rewarded-ad early access (episode_key -> unlocked_at timestamp).
+    # Rewards are purchasable currency: the row is all the bookkeeping
+    # needed, and clearing app data resets it.
+    # ------------------------------------------------------------------
+
+    EARLY_ACCESS_HOURS = 24
+
+    async def is_early_access(self, episode_key: str) -> bool:
+        entries = await self.section("early_access", {})
+        if not isinstance(entries, dict):
+            return False
+        ts = entries.get(episode_key)
+        if not ts:
+            return False
+        return (time.time() - float(ts)) < self.EARLY_ACCESS_HOURS * 3600
+
+    async def grant_early_access(self, episode_key: str) -> None:
+        entries = await self.section("early_access", {})
+        if not isinstance(entries, dict):
+            entries = {}
+        entries[episode_key] = time.time()
+        await self.put_section("early_access", entries)

@@ -7,6 +7,7 @@ screen; this screen only lists and manages what exists.
 
 import flet as ft
 
+from components.banner_ad import build_banner_ad
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -110,6 +111,13 @@ def DownloadsScreen() -> ft.Control:
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.downloads_version
 
+    from flet import context as flet_context
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+
     downloads = state.downloads or {}
     if not downloads:
         return ft.Container(
@@ -211,6 +219,7 @@ def DownloadsScreen() -> ft.Control:
             )
         )
 
+    sections.append(build_banner_ad(page))
     return ft.Column(
         controls=sections,
         spacing=12,

@@ -9,6 +9,7 @@ title/year/type/score, 4px border reserve for the focus ring.
 
 import flet as ft
 
+from components.banner_ad import build_banner_ad
 from core.theme import AppColors
 from hooks.use_debounce import use_debounce
 from state.app_state import AppStateCtx
@@ -105,6 +106,13 @@ def SearchScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.search_version
+
+    from flet import context as flet_context
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
     _ = state.search_query
 
     query, set_query = ft.use_state("")
@@ -231,6 +239,7 @@ def SearchScreen() -> ft.Control:
                     spacing=12,
                     run_spacing=12,
                 ),
+                build_banner_ad(page, inline=True),
                 pager,
             ],
             spacing=16,

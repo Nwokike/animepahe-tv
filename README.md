@@ -39,44 +39,74 @@ Get the latest version of AnimePahe TV. If you aren't sure which Android version
 
 ## Features
 
-- **Browse & Search** — Paginated anime discovery with real-time search and cover art previews.
-- **Episode Grid** — Snapshot-based episode cards with pagination, duration display, and filler indicators.
-- **Multi-Quality Stream Resolution** — Automatic best-quality selection from available resolutions (360p–1080p).
-- **TV Remote Navigation** — Full D-pad support with sequential tab indexing, focus ring highlights, and hover effects. Optimized for Android TV, Fire Stick, and Leanback.
-- **Adaptive Scraper Waterfall** — Multi-strategy content resolution: JSON API → HTML parsing → regex extraction → Dean Edwards JS unpack. Each layer has tested fallbacks.
-- **System Theme Awareness** — Automatically follows device light/dark mode with manual override.
-- **Responsive Layout** — SafeArea-wrapped, ListView-scrollable views that adapt from phone to TV screen sizes.
+- **Browse & Search** — Submit-driven search with debounced recent-search suggestions, paginated results, and real empty/error states.
+- **Continue Watching** — A shelf on Home that picks up exactly where you stopped; positions persist across launches.
+- **In-app Player** — `flet-video` (mpv) with a quality selector when the master playlist offers variants, resume from your saved position, next/previous episode buttons, and a 10s-network-timeout watchdog so a dead stream fails into Retry instead of hanging.
+- **Offline Downloads** — Save any episode (or a whole series) for offline: parallel segments, `Range`-resumable, cancel-safe, grouped by series with progress and sizes. Downloaded episodes play from the same player with resume intact.
+- **All four ad formats** — inline + sticky banners, interstitial between episodes, rewarded early access, and app-open on cold start, on phone and Android TV.
+- **Live Activity Terminal** — Settings → Open Terminal: the last 500 engine/network/UI log lines with telemetry, for diagnosing Cloudflare/kwik/download issues.
+- **TV Remote Navigation** — Left navigation rail on TV and wide screens, bottom bar on phones, D-pad focus order with an autofocus back handler; no primary nav at the bottom on TV.
+- **Adaptive Scraper Waterfall** — Multi-strategy resolution: JSON API → HTML parsing (stdlib) → regex extraction → Dean Edwards JS unpack, each layer with tested fallbacks.
+- **Persistent Cloudflare session** — the clearance cookie is stored durably and reused, so returning boots skip the Turnstile webview.
+- **System Theme Awareness** — Dark → Light → System cycling.
+- **Adaptive Layout** — Rail on wide/TV, bottom bar on phones; glass cards with focus-ring reserves that never shift layout.
 
 ## Architecture
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Flet 0.85 (Python → Flutter) |
-| Video Engine | `flet-video` (libmpv backend) |
-| Network | `httpx` (async, connection pooling, 15s timeout) |
-| Cache | `aiosqlite` (WAL-mode SQLite with TTL expiration) |
-| Stream Resolver | Dean Edwards JS unpack + regex + BeautifulSoup HTML parsing |
-| DDoS Bypass | Cloudflare challenge solver with JA3 fingerprint rotation |
-| State Management | Flet `@observable` reactive state with page-scoped view builders |
-| Routing | Flet declarative routing with base64-encoded URL parameters |
-| Navigation | Sequential `tab_index` D-pad focus chain across all interactive elements |
+| Frontend | Flet 1.0.4 (Python → Flutter), `@ft.component` screens |
+| Video Engine | `flet-video` 1.0.4 (mpv backend) |
+| Network | `primp` (async, Chrome impersonation for Cloudflare, `Range`-capable streaming) |
+| Cloudflare | `flet-webview-all` on Android/iOS/TV; pywebview subprocess for desktop dev |
+| Durable state | JSON store in `FLET_APP_STORAGE_DATA` (history, continue watching, positions, clearance, downloads) |
+| Stream Resolver | Dean Edwards JS unpack + regex + stdlib HTML parsing |
+| Ads | `flet-yandex-ads` (banner, interstitial, rewarded, app open) |
+| State Management | `@observable` AppState + context providers + a controller bridge |
+| Navigation | Component-state branches (tabs / detail / player), rail/bar adaptive |
+| Diagnostics | In-memory ring-buffer log handler → Activity Terminal |
+| Storage | No Android permissions needed — app-private dirs only |
 
 ### Project Structure
 
 ```text
 src/
-├── main.py                 # App entry, routing, global back handler, theme init
-├── core/
-│   ├── config.py           # Feature flags (internal/external player toggle)
-│   ├── state.py            # @observable reactive state (AppState)
-│   ├── theme.py            # Light/dark color schemes, glass bg helpers
-│   └── focus_manager.py    # Global keyboard/back event handler for TV remotes
-├── views/
-│   ├── splash.py           # Animated splash with auto-transition
-│   ├── home.py             # Latest releases grid + pagination + D-pad focus
-│   ├── search.py           # Search bar + results grid + D-pad focus
-│   ├── anime_detail.py     # Anime info + episode grid + pagination + D-pad
-│   └── player.py           # flet-video player with stream resolution overlay
+├── main.py                    # AppController (services + data actions) + entry
+├── app_shell.py               # Adaptive shell: rail/bottom nav, tab + detail + player branches
+├── state/
+│   ├── app_state.py           # AppStateCtx = ft.create_context(state)
+│   └── controller_ctx.py      # ControllerMethods bridge
+├── screens/
+│   ├── home_screen.py         # Promo hero, continue watching, latest grid, banners
+│   ├── search_screen.py       # Submit-driven search + suggestions + pager
+│   ├── anime_detail_screen.py # Backdrop, poster, metadata, episode grid, download buttons
+│   ├── downloads_screen.py    # Series-grouped offline episodes
+│   └── settings_screen.py     # Activity terminal + about
+├── components/
+│   ├── banner_ad.py           # Canonical build_banner_ad()
+│   ├── cross_promo.py         # Hero + 'more from us' cross-promo
+│   └── player/
+│       └── immersive_player.py # ImmersivePlayer: mpv props, overlay, watchdog, resume
+├── hooks/
+│   ├── use_debounce.py        # Debounced value hook
+│   └── use_focus_scope.py     # Back/Escape with autofocus (TV remotes)
+├── services/
+│   ├── animepahe.py           # Scraper (API → HTML → regex → unpack)
+│   ├── ddos_solver.py         # Cloudflare session + durable clearance
+│   ├── webview_solver.py      # WebView solver (mobile: flet-webview-all; desktop: pywebview)
+│   ├── desktop_cf_solver.py   # Desktop pywebview subprocess
+│   ├── kwik_resolver.py       # kwik m3u8 resolution with referer + clearance
+│   ├── cache.py               # TTL JSON cache (regenerable tier)
+│   ├── store.py              # Durable JSON store (search/continue/positions/clearance/downloads)
+│   ├── downloads.py           # DownloadManager: parallel, resumable, manifest-gated
+│   ├── ads.py                 # Yandex ad service + interstitial/rewarded/app-open
+│   └── update_service.py      # Worker-based update check
+└── core/
+    ├── state.py               # @observable AppState
+    ├── theme.py               # Palette + glass helpers
+    ├── constants.py           # Labels, app name/version
+    ├── logger_handler.py      # Ring-buffer logging for the terminal
+    └── tasks.py               # spawn() task helper
 ├── services/
 │   ├── animepahe.py        # Multi-strategy scraper (API → HTML → regex)
 │   ├── kwik_resolver.py    # Dean Edwards JS unpacker + m3u8 extractor
@@ -84,7 +114,7 @@ src/
 │   └── cache.py            # Async SQLite cache with TTL
 └── components/
     └── player/
-        └── immersive_player.py  # Full-screen player wrapper (future)
+
 
 ```
 
