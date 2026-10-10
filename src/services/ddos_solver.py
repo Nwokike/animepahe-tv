@@ -2,6 +2,7 @@ import logging
 from urllib.parse import urlparse
 import primp
 from core.state import state
+from services.store import get_store
 from services.webview_solver import WebViewSolver
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class DDoSSolver:
         self._timeout = timeout
         self._base_url = "https://animepahe.com"
         self._cookies_str = ""
+        self._store = get_store()
         self._user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     def _get_client(self) -> primp.AsyncClient:
@@ -116,7 +118,23 @@ class DDoSSolver:
             logger.error("DDoS failed to resolve base URL, using fallback: %s", ex)
             self._base_url = "https://animepahe.com"
 
-        # 2. Trigger WebViewSolver
+        # 2. Try the persisted clearance BEFORE showing any webview. This is
+        #    the slow-boot fix: a returning user skips Turnstile entirely
+        #    unless Cloudflare has expired the cookie.
+        stored = await self._store.get_clearance()
+        if stored:
+            stored_ua = stored.get("user_agent") or self._user_agent
+            stored_cookies = stored.get("cookies") or ""
+            if await self._probe_api(stored_ua, stored_cookies):
+                self._user_agent = stored_ua
+                self._cookies_str = stored_cookies
+                self._solved = True
+                logger.info("DDoS reused persisted clearance — no challenge shown")
+                return True
+            logger.info("DDoS persisted clearance expired, solving fresh")
+            await self._store.clear_clearance()
+
+        # 3. Trigger WebViewSolver
         page = getattr(state, "page", None)
         if page is None:
             logger.error(
@@ -129,10 +147,33 @@ class DDoSSolver:
             self._cookies_str = cookies
             self._user_agent = ua
             self._solved = True
-            logger.info("DDoS solved successfully. User-Agent set, Cookies captured.")
+            await self._store.save_clearance(cookies, ua)
+            logger.info("DDoS solved successfully. Clearance persisted durably.")
             return True
         except Exception as ex:
             logger.error("DDoS solve challenge failed: %s", ex)
+            return False
+
+    async def _probe_api(self, user_agent: str, cookies: str) -> bool:
+        """Is this clearance still good? One cheap API call decides."""
+        try:
+            client = self._get_client()
+            headers = {"User-Agent": user_agent}
+            if cookies:
+                headers["Cookie"] = cookies
+            resp = await client.get(
+                f"{self._base_url}/api",
+                params={"m": "airing", "page": "1"},
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                return False
+            if _looks_like_cf_challenge(resp.text, resp.status_code):
+                return False
+            body = resp.text or ""
+            return body.lstrip()[:1] == "{"  # the API always answers JSON
+        except Exception as ex:
+            logger.debug("DDoS clearance probe failed: %s", ex)
             return False
 
     async def _request(
@@ -197,6 +238,7 @@ class DDoSSolver:
             self._clear_webview_cookies()
             self._solved = False
             self._cookies_str = ""
+            await self._store.clear_clearance()
             await self.solve()
 
             # Re-build headers and retry once with the fresh clearance
@@ -227,6 +269,7 @@ class DDoSSolver:
         logger.info("DDoS resetting solver state + clearing WebView cookies")
         self._solved = False
         self._cookies_str = ""
+        await self._store.clear_clearance()
         self._clear_webview_cookies()
         await self.close()
         self._client = None

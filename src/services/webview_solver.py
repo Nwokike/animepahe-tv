@@ -24,20 +24,18 @@ def _get_python_executable() -> str:
 class WebViewSolver:
     @staticmethod
     async def solve_challenge(page: ft.Page, url: str) -> tuple[str, str]:
-        # Check platform - Android, Android TV, iOS, or macOS can run Flet native webview
-        is_mobile = page.platform in [
-            ft.PagePlatform.ANDROID,
-            ft.PagePlatform.ANDROID_TV,
-            ft.PagePlatform.IOS,
-            ft.PagePlatform.MACOS,
-        ]
-
-        if is_mobile:
-            logger.info("WebViewSolver using Flet WebView (Mobile/TV/macOS)")
+        # flet-webview-all renders on Android (and Android TV, which Flutter
+        # reports as TargetPlatform.android); desktop dev uses the pywebview
+        # subprocess because third-party extension controls do not render
+        # under `flet run` (flet-dev/flet#5168).
+        is_mobile_family = page.platform.is_mobile() or (
+            page.platform == ft.PagePlatform.ANDROID_TV
+        )
+        if is_mobile_family:
+            logger.info("WebViewSolver using FletWebviewAll (mobile/TV)")
             return await WebViewSolver._solve_mobile(page, url)
-        else:
-            logger.info("WebViewSolver using pywebview subprocess (Desktop)")
-            return await WebViewSolver._solve_desktop(page, url)
+        logger.info("WebViewSolver using pywebview subprocess (Desktop dev)")
+        return await WebViewSolver._solve_desktop(page, url)
 
     @staticmethod
     async def _solve_desktop(page: ft.Page, url: str) -> tuple[str, str]:
@@ -123,19 +121,7 @@ class WebViewSolver:
 
     @staticmethod
     async def _solve_mobile(page: ft.Page, url: str) -> tuple[str, str]:
-        from flet_webview import WebView, JavaScriptMode, WebViewConsoleMessageEvent
-
-        # Force platform to ANDROID on Android TV so flet_webview methods work.
-        # flet_webview's _check_mobile_or_mac_platform() only allows ANDROID,
-        # IOS, and MACOS — ANDROID_TV is not recognized, causing all WebView
-        # method calls (set_javascript_mode, reload, run_javascript, etc.) to
-        # raise FletUnsupportedPlatformException.
-        original_platform = page.platform
-        if page.platform == ft.PagePlatform.ANDROID_TV:
-            logger.info(
-                "Mobile solver: overriding ANDROID_TV -> ANDROID for flet_webview compatibility"
-            )
-            page.platform = ft.PagePlatform.ANDROID
+        from flet_webview_all import FletWebviewAll
 
         # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
         _cookie_manager = None
@@ -236,44 +222,38 @@ class WebViewSolver:
                 await _try_resolve(msg[7:].strip(), current_url=current_url)
 
         async def on_url_change(e):
-            logger.info("WebView URL changed to: %s", e.data)
+            current_url = e.url
+            logger.info("WebView page started: %s", current_url)
             # When we land on animepahe, try native cookie reader if challenge token is not present
-            if _cookie_manager and "animepahe" in e.data and "__cf_chl" not in e.data:
-                cookies = await _android_cookies(e.data)
+            if _cookie_manager and "animepahe" in current_url and "__cf_chl" not in current_url:
+                cookies = await _android_cookies(current_url)
                 if cookies:
-                    await _try_resolve(cookies, current_url=e.data)
+                    await _try_resolve(cookies, current_url=current_url)
 
-        is_tv = original_platform == ft.PagePlatform.ANDROID_TV
+        is_tv = page.platform == ft.PagePlatform.ANDROID_TV
 
         async def on_page_ended(e):
-            logger.info("WebView page load ended: %s", e.data)
+            logger.info("WebView page load finished: %s", e.url)
             # NOTE: we intentionally do NOT inject viewport/scale CSS or mutate
             # document.title here. Cloudflare's Turnstile challenge is a JS app
-            # that watches the DOM; mutating it (body transform, viewport meta,
-            # title) trips its integrity checks and causes the page to reload
-            # itself — the reload loop seen on Android TV. We only disable zoom
-            # via the official API, which does not disturb the page.
-            try:
-                await webview.disable_zoom()
-                logger.info("WebView zoom disabled")
-            except Exception as ex:
-                logger.error("Error disabling zoom: %s", ex)
+            # that watches the DOM; mutating it trips its integrity checks and
+            # causes the page to reload itself — the reload loop seen on TV.
+            # Zoom is disabled at construction (zoom_enabled=False), so there is
+            # nothing to call here and the page is never disturbed.
 
-        webview = WebView(
+        webview = FletWebviewAll(
             url=url,
             expand=True,
+            # Equivalent of the old set_javascript_mode(UNRESTRICTED) call.
+            javascript_mode="unrestricted",
+            # Equivalent of disable_zoom() without disturbing the challenge DOM.
+            zoom_enabled=False,
             on_console_message=on_console,
-            on_url_change=on_url_change,
-            on_page_ended=on_page_ended,
+            on_page_started=on_url_change,
+            on_page_finished=on_page_ended,
         )
 
         async def poll_cookies():
-            try:
-                await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
-                logger.info("WebView JS mode set to UNRESTRICTED")
-            except Exception as ex:
-                logger.error("Error setting JS mode: %s", ex)
-
             while not result_future.done():
                 current_url = ""
                 try:
@@ -399,6 +379,4 @@ class WebViewSolver:
                 page.pop_dialog()
             except Exception:
                 pass
-            # Restore the original platform if it was overridden
-            page.platform = original_platform
             page.update()

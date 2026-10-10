@@ -52,7 +52,7 @@ class AppController:
         self.cache = Cache()
         self.store = JsonStore()
         self.scraper = AnimePaheScraper()
-        self.kwik = KwikResolver()
+        self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
         self._search_gen = 0
 

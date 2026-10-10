@@ -33,6 +33,17 @@ def _data_dir() -> str:
     return path
 
 
+_default_store: "JsonStore | None" = None
+
+
+def get_store() -> "JsonStore":
+    """Process-wide store singleton — every writer must share one instance."""
+    global _default_store
+    if _default_store is None:
+        _default_store = JsonStore()
+    return _default_store
+
+
 def _atomic_write_json(path: str, payload: dict) -> None:
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
     try:
@@ -185,3 +196,25 @@ class JsonStore:
                 "timestamp": time.time(),
             }
         await self.put_section("positions", positions)
+
+    # ------------------------------------------------------------------
+    # Cloudflare clearance (durable — survives reboots; this is what makes
+    # a returning user's boot skip the Turnstile webview entirely)
+    # ------------------------------------------------------------------
+
+    async def get_clearance(self) -> dict | None:
+        entry = await self.section("clearance", None)
+        if not isinstance(entry, dict) or not entry.get("cookies"):
+            return None
+        return entry
+
+    async def save_clearance(self, cookies: str, user_agent: str) -> None:
+        if not cookies:
+            return
+        await self.put_section(
+            "clearance",
+            {"cookies": cookies, "user_agent": user_agent, "timestamp": time.time()},
+        )
+
+    async def clear_clearance(self) -> None:
+        await self.put_section("clearance", None)

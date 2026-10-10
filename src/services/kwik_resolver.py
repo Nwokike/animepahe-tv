@@ -44,13 +44,30 @@ def _dean_unpack(html_text: str) -> list[str]:
 
 
 class KwikResolver:
-    def __init__(self):
+    def __init__(self, ddos_solver=None):
         self._client: primp.AsyncClient | None = None
+        # Optional session owner: when the scraper passes its DDoSSolver in,
+        # requests carry the Cloudflare clearance the CDN expects.
+        self._ddos = ddos_solver
 
     def _get_client(self) -> primp.AsyncClient:
         if self._client is None:
             self._client = primp.AsyncClient(timeout=15, impersonate="chrome")
         return self._client
+
+    def _headers(self, kwik_url: str) -> dict:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://kwik.cx/",
+        }
+        ddos = self._ddos
+        if ddos is not None and getattr(ddos, "_solved", False):
+            cookies = getattr(ddos, "_cookies_str", "")
+            if cookies:
+                headers["Cookie"] = cookies
+        return headers
 
     async def resolve(self, kwik_url: str) -> str | None:
         logger.info("resolve(%s)", kwik_url)
@@ -69,13 +86,7 @@ class KwikResolver:
     async def _resolve_dean(self, kwik_url: str) -> str | None:
         client = self._get_client()
         logger.info("fetching %s", kwik_url)
-        resp = await client.get(
-            kwik_url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": kwik_url,
-            },
-        )
+        resp = await client.get(kwik_url, headers=self._headers(kwik_url))
         logger.info("status=%s, len=%s", resp.status_code, len(resp.text))
         if resp.status_code != 200:
             return None
@@ -90,13 +101,7 @@ class KwikResolver:
 
     async def _resolve_direct_scan(self, kwik_url: str) -> str | None:
         client = self._get_client()
-        resp = await client.get(
-            kwik_url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": kwik_url,
-            },
-        )
+        resp = await client.get(kwik_url, headers=self._headers(kwik_url))
         logger.info("direct_scan status=%s, len=%s", resp.status_code, len(resp.text))
         if resp.status_code != 200:
             return None
@@ -113,12 +118,7 @@ class KwikResolver:
         try:
             client = self._get_client()
             resp = await client.head(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Referer": referer,
-                },
-                timeout=5,
+                url, headers=self._headers(url), timeout=5
             )
             ct = resp.headers.get("content-type", "")
             result = resp.status_code == 200 and "mpegurl" in ct

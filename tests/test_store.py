@@ -150,3 +150,23 @@ async def test_position_resume_rules(store):
 
     # Unknown episode: None.
     assert await store.get_position("nope") is None
+
+
+@pytest.mark.asyncio
+async def test_clearance_round_trip(store):
+    assert await store.get_clearance() is None
+    await store.save_clearance("cf_clearance=abc; __cf_bm=xyz", "UA/1.0")
+    entry = await store.get_clearance()
+    assert entry["cookies"] == "cf_clearance=abc; __cf_bm=xyz"
+    assert entry["user_agent"] == "UA/1.0"
+    # Survives a reload (fresh instance, same file) — the boot fix.
+    reloaded = JsonStore(filename=os.path.basename(store.path))
+    assert (await reloaded.get_clearance())["cookies"] == "cf_clearance=abc; __cf_bm=xyz"
+    await store.clear_clearance()
+    assert await store.get_clearance() is None
+
+
+@pytest.mark.asyncio
+async def test_clearance_empty_cookies_ignored(store):
+    await store.save_clearance("", "UA/1.0")
+    assert await store.get_clearance() is None
