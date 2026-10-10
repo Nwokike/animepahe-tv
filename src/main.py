@@ -14,6 +14,9 @@ import flet as ft
 
 from app_shell import AppShell
 from core.constants import APP_NAME
+# Logging first: the console + ring-buffer handlers attach at import time,
+# so every service constructed below logs where it can be seen.
+from core.logger_handler import in_memory_log_handler  # noqa: F401
 from core.tasks import spawn
 from core.theme import AppColors, AppTheme
 from services.animepahe import AnimePaheScraper

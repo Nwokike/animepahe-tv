@@ -9,6 +9,8 @@ Cloudflare solver, the kwik resolver and downloads.
 import logging
 import os
 import platform
+import shutil
+import sys
 import threading
 import time
 from collections import deque
@@ -51,11 +53,23 @@ in_memory_log_handler.setFormatter(
     )
 )
 
+# Console handler: the old build streamed its playback diagnostics with
+# print("[DEBUG] ..."); the rewrite moved them to logger.* — keep them
+# visible in the terminal `flet run` is launched from, because that is
+# where the Cloudflare/kwik/resolve flow gets diagnosed.
+_console_handler = logging.StreamHandler(sys.stderr)
+_console_handler.setLevel(logging.INFO)
+_console_handler.setFormatter(
+    logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
+)
+
 _root = logging.getLogger()
 if not any(isinstance(h, MemoryLogHandler) for h in _root.handlers):
     _root.addHandler(in_memory_log_handler)
-# Deliver records to the handler in the first place — the root logger
-# defaults to WARNING.
+if not any(isinstance(h, logging.StreamHandler) for h in _root.handlers):
+    _root.addHandler(_console_handler)
+# Deliver records to the handlers in the first place — the root logger
+# defaults to WARNING, so INFO diagnostics were being dropped entirely.
 if _root.level == logging.WARNING:
     _root.setLevel(logging.INFO)
 
