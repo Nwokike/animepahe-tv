@@ -43,8 +43,6 @@ class AppController:
 
     async def init(self):
         self.page.title = APP_NAME
-        self.page.padding = 0
-        self.page.spacing = 0
 
         self.page.fonts = {"Outfit": "assets/outfit.css"}
         self.page.theme = AppTheme.get_light_theme()

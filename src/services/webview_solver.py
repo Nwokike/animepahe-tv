@@ -65,7 +65,6 @@ class WebViewSolver:
             ),
             modal=True,
         )
-        page.dialog_open = True
         page.show_dialog(loading_dlg)
         page.update()
 
@@ -112,7 +111,6 @@ class WebViewSolver:
             )
             return cookies, ua
         finally:
-            page.dialog_open = False
             try:
                 page.pop_dialog()
             except Exception:
@@ -121,7 +119,7 @@ class WebViewSolver:
 
     @staticmethod
     async def _solve_mobile(page: ft.Page, url: str) -> tuple[str, str]:
-        from flet_webview_all import FletWebviewAll
+        from flet_webview_all import FletWebviewAll, WebViewConsoleMessageEvent
 
         # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
         _cookie_manager = None
@@ -160,9 +158,14 @@ class WebViewSolver:
             )
 
             # Check title and current URL to avoid premature completion on challenge interstitial
+            # FletWebviewAll has no get_title(); read it via JS.
             title = ""
             try:
-                title = (await webview.get_title()) or ""
+                result = await webview.run_javascript_returning_result(
+                    "document.title",
+                )
+                if isinstance(result, str):
+                    title = result
             except Exception:
                 pass
 
@@ -204,10 +207,15 @@ class WebViewSolver:
 
             logger.info("Mobile solver verified challenge completion! Title: %s", title)
             ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            # FletWebviewAll has no get_user_agent(); read it via JS.
             try:
-                ua = (await webview.get_user_agent()) or ua
+                final_ua = await webview.run_javascript_returning_result(
+                    "navigator.userAgent",
+                )
+                if isinstance(final_ua, str) and final_ua:
+                    ua = final_ua
             except Exception as ex:
-                logger.error("Failed to get UA: %s", ex)
+                logger.debug("UA read via JS failed: %s", ex)
             if not result_future.done():
                 result_future.set_result((cookie_str, ua))
 
@@ -338,7 +346,6 @@ class WebViewSolver:
             modal=True,
         )
 
-        page.dialog_open = True
         page.show_dialog(dlg)
         page.update()
 
@@ -370,7 +377,6 @@ class WebViewSolver:
             return cookies, ua
         finally:
             polling_task.cancel()
-            page.dialog_open = False
             if is_tv and original_on_keyboard is not None:
                 page.on_keyboard_event = original_on_keyboard
             elif is_tv:

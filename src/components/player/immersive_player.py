@@ -231,6 +231,8 @@ class ImmersivePlayer(ft.Stack):
             self.video.update()
 
         def _cycle_quality(e=None):
+            from core.tasks import spawn
+
             if not self.variants:
                 return
             self._current_variant_index = (self._current_variant_index + 1) % (
@@ -238,10 +240,13 @@ class ImmersivePlayer(ft.Stack):
             )
             index = self._current_variant_index
             if index == 0:
-                self._swap_media(self.resource, "Auto quality")
+                spawn(self._swap_media(self.resource, "Auto quality"), name="quality-switch")
             else:
                 variant = self.variants[index - 1]
-                self._swap_media(variant["uri"], f"Quality: {variant['label']}")
+                spawn(
+                    self._swap_media(variant["uri"], f"Quality: {variant['label']}"),
+                    name="quality-switch",
+                )
 
         def _bar(desktop: bool) -> list:
             items = [
@@ -270,21 +275,28 @@ class ImmersivePlayer(ft.Stack):
                     on_click=_cycle_speed,
                 )
             )
+            # VideoSkipNext/PreviousButton are value objects without event
+            # handlers — real IconButtons are the supported way to add
+            # custom skip behaviour inside the bar.
             if self.on_previous is not None:
                 items.append(
-                    fv.VideoSkipPreviousButton(
-                        icon_size=24.0,
+                    ft.IconButton(
+                        icon=ft.Icons.SKIP_PREVIOUS_ROUNDED,
+                        icon_size=24,
+                        tooltip="Previous episode",
                         on_click=lambda e: self.on_previous(),
                     )
                 )
             if self.on_next is not None:
                 items.append(
-                    fv.VideoSkipNextButton(
-                        icon_size=24.0,
+                    ft.IconButton(
+                        icon=ft.Icons.SKIP_NEXT_ROUNDED,
+                        icon_size=24,
+                        tooltip="Next episode",
                         on_click=lambda e: self.on_next(),
                     )
                 )
-            items.append(fv.VideoFullscreenButton(icon_size=24.0))
+            items.append(fv.VideoFullscreenButton(icon_size=24))
             return items
 
         top_bar = [
@@ -336,8 +348,10 @@ class ImmersivePlayer(ft.Stack):
         pass
 
     def did_mount(self):
+        from core.tasks import spawn
+
         self._read_resume_position()
-        self._start_playback()
+        spawn(self._start_playback(), name="player-start")
 
     def _read_resume_position(self):
         if not self.store or not self.resume_key:

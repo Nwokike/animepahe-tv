@@ -188,7 +188,7 @@ def AnimeDetailScreen() -> ft.Control:
         if ep.session in download_progress:
             return ft.ProgressRing(width=16, height=16, stroke_width=2)
         return ft.IconButton(
-            icon=ft.Icons.DOWNLOAD_OUTLINE_ROUNDED,
+            icon=ft.Icons.DOWNLOAD_ROUNDED,
             icon_size=18,
             tooltip="Download episode",
             on_click=lambda e: controller.download_episode(anime_session, ep.session),

@@ -88,7 +88,56 @@ def _release_card(release, on_select, now_playing: bool) -> ft.Control:
     )
 
 
-def _header(controller, on_theme, theme_icon) -> ft.Control:
+def _version_pill(state, page) -> ft.Control:
+    # Morphs into the "Update Available!" pill the original had, wired
+        # to the restored update dialog. Until then it's a quiet version tag.
+        update_data = state.update_data if state.update_available else None
+
+        if update_data:
+            from components.update_dialog import show_update_dialog
+
+            return ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Text(
+                            "Update Available!",
+                            size=11,
+                            weight=ft.FontWeight.BOLD,
+                            color=AppColors.PRIMARY,
+                        ),
+                        ft.Container(
+                            width=6,
+                            height=6,
+                            border_radius=3,
+                            bgcolor=AppColors.PRIMARY,
+                        ),
+                    ],
+                    spacing=4,
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+                border_radius=6,
+                bgcolor=ft.Colors.with_opacity(0.15, AppColors.PRIMARY),
+                border=ft.Border.all(1.5, AppColors.PRIMARY),
+                ink=True,
+                tooltip="A new version is available",
+                on_click=lambda e: show_update_dialog(page, update_data) if page else None,
+            )
+        return ft.Container(
+            content=ft.Text(
+                f"v{APP_VERSION}",
+                size=11,
+                color=AppColors.DARK_TEXT_DIM,
+            ),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+            border_radius=6,
+            border=ft.Border.all(
+                1, ft.Colors.with_opacity(0.2, AppColors.DARK_TEXT_DIM)
+            ),
+            tooltip="Version",
+        )
+
+def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
     """Icon + wordmark left; search, version, theme right — the original line."""
     action = lambda icon, tip, handler: ft.Container(
         content=ft.Icon(icon, color=AppColors.DARK_TEXT, size=20),
@@ -116,19 +165,7 @@ def _header(controller, on_theme, theme_icon) -> ft.Control:
                 ),
                 ft.Row(
                     [
-                        ft.Container(
-                            content=ft.Text(
-                                f"v{APP_VERSION}",
-                                size=11,
-                                color=AppColors.DARK_TEXT_DIM,
-                            ),
-                            padding=ft.Padding.symmetric(horizontal=8, vertical=6),
-                            border_radius=6,
-                            border=ft.Border.all(
-                                1, ft.Colors.with_opacity(0.2, AppColors.DARK_TEXT_DIM)
-                            ),
-                            tooltip="Version",
-                        ),
+                        _version_pill(state, page),
                         action(ft.Icons.SEARCH_ROUNDED, "Search", lambda e: controller.open_search()),
                         action(
                             theme_icon,
@@ -340,7 +377,7 @@ def HomeScreen() -> ft.Control:
 
     body = ft.Column(
         [
-            _header(controller, _toggle_theme, theme_icon),
+            _header(state, page, controller, _toggle_theme, theme_icon),
             ft.Container(
                 content=ft.Column(
                     [

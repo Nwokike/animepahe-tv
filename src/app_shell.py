@@ -130,15 +130,22 @@ def AppShell() -> ft.Control:
         chrome = None
         show_nav = True
 
-    destinations = [
+    rail_destinations = [
         ft.NavigationRailDestination(icon=icon, label=label)
+        for icon, label in zip(_TAB_ICONS, _TABS, strict=True)
+    ]
+    # The bar takes NavigationBarDestination objects — feeding it rail
+    # destinations serializes the wrong wire type and the bottom bar
+    # renders empty on phones.
+    bar_destinations = [
+        ft.NavigationBarDestination(icon=icon, label=label)
         for icon, label in zip(_TAB_ICONS, _TABS, strict=True)
     ]
     selected = _TABS.index(active_tab)
 
     if _use_rail(page):
         rail_or_bar = ft.NavigationRail(
-            destinations=destinations,
+            destinations=rail_destinations,
             selected_index=selected,
             on_change=lambda e: _on_tab(_TABS[e.control.selected_index]),
             min_width=72,
@@ -166,7 +173,7 @@ def AppShell() -> ft.Control:
         [
             ft.Container(content=body, expand=True),
             ft.NavigationBar(
-                destinations=destinations,
+                destinations=bar_destinations,
                 selected_index=selected,
                 on_change=lambda e: _on_tab(_TABS[e.control.selected_index]),
             ),
@@ -174,6 +181,12 @@ def AppShell() -> ft.Control:
         spacing=0,
         expand=True,
     )
+
+
+# Reference to the live player so the FocusScope back key can run its
+# bounded position save before the shell flips state. Without this, a
+# remote/system Back discards the resume position for that episode.
+_active_player = None
 
 
 def _build_player(state) -> ft.Control:
@@ -186,6 +199,8 @@ def _build_player(state) -> ft.Control:
     spec = getattr(state, "player_spec", None) or {}
     from services.store import get_store
 
+    global _active_player
+
     player = ImmersivePlayer(
         resource=spec.get("resource", ""),
         title=spec.get("title", ""),
@@ -195,7 +210,30 @@ def _build_player(state) -> ft.Control:
         variants=spec.get("variants") or [],
         on_close=lambda: _close_player(),
     )
-    return FocusScope(content=player, on_back=lambda: _close_player())
+    _active_player = player
+    return FocusScope(content=player, on_back=_player_back)
+
+
+async def _player_back():
+    # Back from the remote/keyboard: let the player save its position
+    # (bounded, 3s) before the shell tears it down.
+    player = _active_player
+    if player is not None:
+        try:
+            await player.handle_close()
+        except Exception:
+            pass
+    await _async_close_player()
+
+
+async def _async_close_player():
+    global _active_player
+
+    from state.app_state import state
+
+    _active_player = None
+    state.player_open = False
+    state.episodes_version += 1
 
 
 def _close_player():
@@ -204,17 +242,7 @@ def _close_player():
     page = flet_context.page
     if page is None:
         return
-    # The player saves its own position in handle_close(); we only flip the
-    # shell back to the detail screen.
-    page.run_task(_async_close)
-
-
-async def _async_close():
-    from flet import context as flet_context
-    from state.app_state import state
-
-    state.player_open = False
-    state.episodes_version += 1
+    page.run_task(_player_back())
 
 
 def _detail_appbar(controller) -> ft.Control:
