@@ -59,6 +59,7 @@ class AppController:
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
         self._search_gen = 0
+        self._resolved_m3u8: str | None = None
         from services.downloads import DownloadManager
 
         self.downloads = DownloadManager(store=self.store)
@@ -222,6 +223,7 @@ class AppController:
             logger.warning("kwik resolve failed — external player fallback")
             await self._open_external_player(anime_session, episode_session)
             return
+        self._resolved_m3u8 = m3u8
         variants = await self._fetch_variants(m3u8)
 
         # 3. Quality choices: m3u8 variants first ("Auto" = top), then any
@@ -359,18 +361,42 @@ class AppController:
         await self.play_episode(state.current_anime_session, nxt.session)
 
     async def _open_external_player(self, anime_session: str, episode_session: str):
-        """Fallback: hand the episode to KTV Player via deep link, as before."""
-        try:
-            await asyncio.wait_for(
-                ft.UrlLauncher().launch_url(
-                    f"ktv://play/?url=https://animepahe.com/play/{anime_session}/{episode_session}"
-                ),
-                timeout=1.5,
+        """Fallback: hand the resolved stream to KTV Player.
+
+        The deep link carries the m3u8 (base64) and a human title, exactly
+        as the original build did; a failed launch offers the KTV install
+        dialog instead of failing silently. If we never resolved a stream,
+        the caller passes m3u8=None and we hand over the play-page URL.
+        """
+        anime = await self._resolve_anime(anime_session)
+        ep = next(
+            (e for e in state.episodes if e.session == episode_session), None
+        )
+        title = (anime or {}).get("title", "Anime")
+        ep_num = ep.episode if ep else None
+
+        if not self._resolved_m3u8:
+            # Nothing resolved: send the play page (KTV will resolve itself).
+            logger.warning("external fallback with no resolved stream")
+            from services.external_player import launch_external
+
+            await launch_external(
+                self.page,
+                f"https://animepahe.com/play/{anime_session}/{episode_session}",
+                episode_title(title, ep_num),
             )
-        except Exception as ex:
-            logger.warning("external player launch failed: %s", ex)
-            state.player_error = "Could not open a player for this episode."
-            state.episodes_version += 1
+            return
+
+        from services.external_player import episode_title, launch_external
+
+        resolution = (
+            state.selected_source.resolution if state.selected_source else None
+        )
+        await launch_external(
+            self.page,
+            self._resolved_m3u8,
+            episode_title(title, ep_num, resolution),
+        )
 
     # ------------------------------------------------------------------
     # Downloads
