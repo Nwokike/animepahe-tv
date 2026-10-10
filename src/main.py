@@ -203,7 +203,7 @@ class AppController:
         except Exception as ex:
             logger.warning("interstitial skip: %s", ex)
 
-        # 1. Stream sources.
+        # 1. Stream sources — sorted best-first, as the original did.
         try:
             sources = await self.scraper.sources(anime_session, episode_session)
         except Exception as ex:
@@ -213,27 +213,45 @@ class AppController:
             logger.warning("no sources — external player fallback")
             await self._open_external_player(anime_session, episode_session)
             return
+        sources = sorted(sources, key=lambda s: s.resolution, reverse=True)
         state.selected_source = sources[0]
 
-        # 2. Resolve kwik -> m3u8.
+        # 2. Resolve the best source -> m3u8 -> variants.
         m3u8 = await self.kwik.resolve(sources[0].url)
         if not m3u8:
             logger.warning("kwik resolve failed — external player fallback")
             await self._open_external_player(anime_session, episode_session)
             return
-
-        # 3. Master playlist -> variants (empty = single quality).
         variants = await self._fetch_variants(m3u8)
+
+        # 3. Quality choices: m3u8 variants first ("Auto" = top), then any
+        #    additional site sources that differ in resolution/audio/fansub.
+        choices: list[dict] = []
         if len(variants) > 1:
-            state.pending_playback = {
-                "m3u8": m3u8,
-                "variants": variants,
-                "anime_session": anime_session,
-                "episode_session": episode_session,
-            }
-            state.quality_dialog = True
-        else:
-            await self._open_player(m3u8, [], anime_session, episode_session)
+            choices.append(
+                {"label": f"Auto ({variants[-1]['label']})", "kind": "variant", "index": 0}
+            )
+            for i, v in enumerate(variants):
+                choices.append({"label": v["label"], "kind": "variant", "index": i + 1})
+        for src in sources[1:]:
+            audio_label = src.audio or "jpn"
+            label = f"{src.resolution}p - {audio_label}"
+            if src.fansub:
+                label += f" ({src.fansub})"
+            choices.append({"label": label, "kind": "source", "url": src.url})
+
+        if len(choices) <= 1:
+            await self._open_player(m3u8, variants, anime_session, episode_session)
+            return
+        state.quality_choices = choices
+        state.quality_dialog_open = True
+        state.pending_playback = {
+            "m3u8": m3u8,
+            "variants": variants,
+            "anime_session": anime_session,
+            "episode_session": episode_session,
+        }
+        state.episodes_version += 1
 
     async def _fetch_variants(self, m3u8: str) -> list[dict]:
         from components.player.immersive_player import KWIK_USER_AGENT, _stream_variants
@@ -253,21 +271,46 @@ class AppController:
             logger.warning("variant fetch failed: %s", ex)
         return []
 
-    async def choose_quality(self, variant_index: int):
-        """0 = Auto (top variant), 1..N = variants[index-1]."""
+    async def choose_quality(self, choice_index: int):
+        """Open the pending playback with the chosen quality."""
         pending = state.pending_playback
         if not pending:
             return
-        state.quality_dialog = False
-        variants = pending.get("variants") or []
-        if variant_index == 0 or not variants:
+        state.quality_dialog_open = False
+        choices = state.quality_choices or []
+        if choice_index < 0 or choice_index >= len(choices):
             await self._open_player(
-                pending["m3u8"], [], pending["anime_session"], pending["episode_session"]
+                pending["m3u8"],
+                pending.get("variants") or [],
+                pending["anime_session"],
+                pending["episode_session"],
             )
             return
-        variant = variants[variant_index - 1]
+        choice = choices[choice_index]
+        variants = pending.get("variants") or []
+        if choice["kind"] == "source":
+            # Re-resolve this site source, then play its own variants.
+            m3u8 = await self.kwik.resolve(choice["url"])
+            if m3u8:
+                variants = await self._fetch_variants(m3u8)
+            await self._open_player(
+                m3u8 or pending["m3u8"],
+                variants,
+                pending["anime_session"],
+                pending["episode_session"],
+            )
+            return
+        index = choice["index"]
+        if index == 0 or not variants:
+            await self._open_player(
+                pending["m3u8"], variants, pending["anime_session"], pending["episode_session"]
+            )
+            return
         await self._open_player(
-            variant["uri"], variants, pending["anime_session"], pending["episode_session"]
+            variants[index - 1]["uri"],
+            variants,
+            pending["anime_session"],
+            pending["episode_session"],
         )
 
     async def _open_player(
@@ -280,7 +323,7 @@ class AppController:
         from components.player.immersive_player import KWIK_USER_AGENT
 
         anime = await self._resolve_anime(anime_session)
-        self._player_spec = {
+        state.player_spec = {
             "resource": resource,
             "variants": variants,
             "title": (anime or {}).get("title") or "AnimePahe",
@@ -407,7 +450,7 @@ class AppController:
             return
         from components.player.immersive_player import KWIK_USER_AGENT
 
-        self._player_spec = {
+        state.player_spec = {
             "resource": playlist,
             "variants": [],
             "title": row.get("title", "AnimePahe"),

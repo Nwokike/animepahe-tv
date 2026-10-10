@@ -87,9 +87,11 @@ class AppState:
 
     # Player (in-app playback)
     player_open: bool = False
-    quality_dialog: bool = False
-    pending_playback: dict | None = None
+    player_spec: dict | None = None
     player_error: str | None = None
+    quality_dialog_open: bool = False
+    quality_choices: list | None = None
+    pending_playback: dict | None = None
 
     # Offline downloads (durable rows + throttled live progress)
     downloads: dict = {}

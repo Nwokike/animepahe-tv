@@ -95,6 +95,21 @@ def AppShell() -> ft.Control:
     def _on_tab(name: str):
         set_active_tab(name)
 
+    # Dialog portal (Sherlock pattern): one dialog whose identity survives
+    # re-renders; screens open sheets through the controller instead of
+    # calling page.show_dialog ad hoc.
+    active_dialog, set_active_dialog = ft.use_state(None)
+    if state.quality_dialog_open and active_dialog is None:
+        set_active_dialog(_build_quality_dialog(state, controller))
+    if not state.quality_dialog_open and active_dialog is not None:
+        set_active_dialog(None)
+    try:
+        ft.use_dialog(active_dialog)
+    except RuntimeError:
+        pass
+    controller.open_sheet = lambda d: set_active_dialog(d)
+    controller.close_dialog = lambda: set_active_dialog(None)
+
     if state.player_open:
         body = _build_player(state)
         chrome = None
@@ -232,4 +247,29 @@ def _placeholder(title: str, message: str) -> ft.Control:
         ),
         alignment=ft.Alignment.CENTER,
         expand=True,
+    )
+
+
+def _build_quality_dialog(state, controller) -> ft.Control:
+    """Select Quality & Audio — restored from the original build, extended
+    with the m3u8 variants the player can switch to."""
+    choices = state.quality_choices or []
+    buttons = [
+        ft.OutlinedButton(
+            content=choice["label"],
+            on_click=lambda e, i=i: controller.choose_quality(i),
+        )
+        for i, choice in enumerate(choices)
+    ]
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Select Quality & Audio", weight=ft.FontWeight.BOLD),
+        content=ft.Column(controls=buttons, tight=True, spacing=8),
+        actions=[
+            ft.TextButton(
+                content="Cancel",
+                on_click=lambda e: controller.close_dialog(),
+            )
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
     )
