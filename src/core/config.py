@@ -37,3 +37,12 @@ STARTUP_PROBE_BUDGET = 12.0      # wall-clock cap for the parallel probe race
 CACHE_TTL_LATEST = 300
 CACHE_TTL_SEARCH = 600
 CACHE_TTL_EPISODES = 3600
+
+# Provider endpoints (the complete bench; see docs/decisions.md).
+ANIMEOUT_API = "https://animeout.xyz/wp-json/wp/v2"
+KUSONIME_API = "https://kusonime.com/wp-json/wp/v2"
+KUSONIME_BASE = "https://kusonime.com"
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
