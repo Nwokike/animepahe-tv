@@ -24,3 +24,11 @@ WORKER_BASE_URL = "https://tv.kalerosemary7.workers.dev"
 # Support route (public issues tracker — no personal contact details ship
 # in the binary; see components/support_dialog.py)
 SUPPORT_URL = "https://github.com/Nwokike/animepahe-tv/issues"
+
+# Provider router tuning (values from the resilience research; see
+# docs/decisions.md). Providers are never locked: failover is per request.
+BREAKER_FAIL_THRESHOLD = 3       # consecutive failures -> OPEN
+BREAKER_OPEN_SECONDS = 30.0      # first cooldown; only failed trials double it
+BREAKER_OPEN_MAX_SECONDS = 300.0
+BREAKER_HALF_OPEN_TRIALS = 1     # trial requests when HALF_OPEN
+STARTUP_PROBE_BUDGET = 12.0      # wall-clock cap for the parallel probe race

@@ -87,6 +87,13 @@ class AppController:
 
         self.store = get_store()
         self.scraper = AnimePaheScraper()
+        # The data layer: the ROUTER. AnimePahe slots in as provider #1
+        # (a thin adapter over the untouched scraper); further complete
+        # providers register here and fail over per request.
+        from services.providers.animepahe_provider import AnimePaheProvider
+        from services.router import ProviderRouter
+
+        self.router = ProviderRouter([AnimePaheProvider(self.scraper)])
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
         self._search_gen = 0
@@ -281,7 +288,7 @@ class AppController:
             state.latest_version += 1
 
             try:
-                results, has_more = await self.scraper.latest_releases(page_num)
+                results, has_more = await self.router.latest_releases(page_num)
                 if gen != self._latest_gen:
                     logger.info("load_latest discarding stale page=%d", page_num)
                     return
@@ -350,7 +357,7 @@ class AppController:
             state.episodes_version += 1
 
             try:
-                episodes, has_more = await self.scraper.episodes(anime_session, page_num)
+                episodes, has_more = await self.router.episodes(anime_session, page_num)
                 if gen != self._episodes_gen:
                     logger.info("load_episodes discarding stale page for %s", anime_session)
                     return
@@ -388,7 +395,7 @@ class AppController:
         if "/snapshots/" not in poster:
             return
         try:
-            results, _ = await self.scraper.search(anime.get("title") or "", 1)
+            results, _ = await self.router.search(anime.get("title") or "", 1)
         except Exception as ex:
             logger.debug("poster heal search failed: %s", ex)
             return
@@ -497,7 +504,7 @@ class AppController:
 
         # 1. Stream sources — sorted best-first, as the original did.
         try:
-            sources = await self.scraper.sources(anime_session, episode_session)
+            sources = await self.router.sources(anime_session, episode_session)
         except Exception as ex:
             logger.error("sources(%s/%s) failed: %s", anime_session, episode_session, ex)
             self._show_error_snackbar("Couldn't load the stream sources.")
@@ -725,7 +732,7 @@ class AppController:
         """The 1.0.9 external flow: quality dialog (all sources), resolve the
         chosen one, hand the m3u8 to KTV with a human title."""
         try:
-            sources = await self.scraper.sources(anime_session, episode_session)
+            sources = await self.router.sources(anime_session, episode_session)
         except Exception as ex:
             logger.error("external: sources failed: %s", ex)
             self._show_error_snackbar("Couldn't load the stream sources.")
@@ -854,7 +861,7 @@ class AppController:
         state.starting_downloads.add(episode_session)
         state.busy_version += 1
         try:
-            sources = await self.scraper.sources(anime_session, episode_session)
+            sources = await self.router.sources(anime_session, episode_session)
         except Exception as ex:
             logger.error("download: sources failed: %s", ex)
             self._show_error_snackbar("Couldn't start the download.")
@@ -1026,7 +1033,7 @@ class AppController:
         if not title_guess:
             return None
         try:
-            results, _ = await self.scraper.search(title_guess, 1)
+            results, _ = await self.router.search(title_guess, 1)
         except Exception as ex:
             logger.warning("anime self-heal search failed: %s", ex)
             return None
@@ -1064,7 +1071,7 @@ class AppController:
             state.search_version += 1
 
             try:
-                results, has_more = await self.scraper.search(query, page)
+                results, has_more = await self.router.search(query, page)
                 if gen != self._search_gen:
                     logger.info("load_search discarding stale response for %r", query)
                     return
