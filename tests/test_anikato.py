@@ -266,3 +266,85 @@ def test_parse_schedule_tabs_and_day():
     # sub and dub rows stay separate as served — nothing merged
     types = {e["type"] for e in day}
     assert types <= {"sub", "dub"}
+
+
+# ---------------------------------------------------------------------
+# AnimePahe m=links (Phase 2) — the six-client-attested response shape
+# ---------------------------------------------------------------------
+
+def test_animepahe_sources_via_links_parses_renditions():
+    import asyncio
+
+    from services.providers.animepahe_provider import AnimePaheProvider
+
+    LINKS_RESPONSE = {
+        "status": 200,
+        "data": {
+            "360": {"audio": "jpn", "kwik": "https://kwik.si/e/abc360", "hd": "0", "filesize": 87.5},
+            "720": {"audio": "jpn", "kwik": "https://kwik.si/e/abc720", "hd": "1", "filesize": 176.2},
+            "1080": {"audio": "jpn", "kwik": "https://kwik.si/e/abc1080", "hd": "1", "filesize": 293.0},
+        },
+    }
+
+    class FakeScraper:
+        ddos = None
+
+        async def _fetch_api(self, params):
+            assert params["m"] == "links"
+            assert params["id"] == "958"
+            assert params["p"] == "kwik"
+
+            class R:
+                def json(self):
+                    return LINKS_RESPONSE
+
+            return R()
+
+    provider = AnimePaheProvider(scraper=FakeScraper())
+    provider._anime_ids["ep-sess"] = 958
+    sources = asyncio.run(provider.sources("pahe-anime", "ep-sess"))
+    assert [s.resolution for s in sources] == [360, 720, 1080]
+    assert all(s.audio == "jpn" for s in sources)
+    assert sources[2].url == "https://kwik.si/e/abc1080"
+    assert sources[1].size == "176.2MB"
+
+
+def test_animepahe_links_failure_falls_back_to_scrape():
+    import asyncio
+
+    from core.state import Source
+    from services.providers.animepahe_provider import AnimePaheProvider
+
+    class FakeScraper:
+        ddos = None
+
+        async def _fetch_api(self, params):
+            raise RuntimeError("walled")
+
+        async def sources(self, a, e):
+            return [Source(url="https://kwik.si/e/fallback", resolution=720, audio="jpn", fansub="Subs")]
+
+    provider = AnimePaheProvider(scraper=FakeScraper())
+    provider._anime_ids["ep-sess"] = 958
+    sources = asyncio.run(provider.sources("pahe-anime", "ep-sess"))
+    assert sources[0].url.endswith("fallback")  # the scrape safety net
+
+
+def test_animepahe_links_without_anime_id_goes_straight_to_scrape():
+    import asyncio
+
+    from core.state import Source
+    from services.providers.animepahe_provider import AnimePaheProvider
+
+    class FakeScraper:
+        ddos = None
+
+        async def _fetch_api(self, params):
+            raise AssertionError("m=links must not fire without the id")
+
+        async def sources(self, a, e):
+            return [Source(url="https://kwik.si/e/scraped", resolution=1080, audio="jpn", fansub="Subs")]
+
+    provider = AnimePaheProvider(scraper=FakeScraper())
+    sources = asyncio.run(provider.sources("pahe-anime", "unknown-ep"))
+    assert sources[0].resolution == 1080

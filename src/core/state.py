@@ -46,6 +46,8 @@ class Source:
     # Skip windows as the source declares them: {"intro": {...},
     # "outro": {...}} — shapes vary per source (arrays or objects).
     skip: dict = field(default_factory=dict)
+    # File size when the source serves it (e.g. "176MB") — display only.
+    size: str = ""
 
 
 @dataclass(unsafe_hash=True)

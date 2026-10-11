@@ -571,6 +571,8 @@ class AppController:
             label = f"{src.resolution}p - {audio_label}"
             if src.fansub:
                 label += f" ({src.fansub})"
+            if getattr(src, "size", ""):
+                label += f" [{src.size}]"
             choices.append(
                 {
                     "label": label,
@@ -1056,6 +1058,8 @@ class AppController:
             label = f"{src.resolution}p - {audio_label}"
             if src.fansub:
                 label += f" ({src.fansub})"
+            if getattr(src, "size", ""):
+                label += f" [{src.size}]"
             choices.append(
                 {
                     "label": label,
