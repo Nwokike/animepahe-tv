@@ -60,12 +60,15 @@ def _walk(control):
 
 
 def _find_buttons(control):
-    # ActionControl, not ft.Button: OutlinedButton does NOT inherit
-    # Button in flet 1.0.4 (only FilledButton does).
+    # flet 0.85.3: OutlinedButton does not inherit Button (only FilledButton
+    # does), so both are matched explicitly.
+    _BUTTONS = tuple(
+        c for c in (getattr(ft, "OutlinedButton", None), getattr(ft, "Button", None)) if c
+    )
     return [
         c
         for c in _walk(control)
-        if isinstance(c, ft.ActionControl) and hasattr(c, "on_click")
+        if _BUTTONS and isinstance(c, _BUTTONS) and hasattr(c, "on_click")
     ]
 
 

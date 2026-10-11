@@ -32,7 +32,7 @@ class WebViewSolver:
             page.platform == ft.PagePlatform.ANDROID_TV
         )
         if is_mobile_family:
-            logger.info("WebViewSolver using FletWebviewAll (mobile/TV)")
+            logger.info("WebViewSolver using flet_webview WebView (mobile/TV)")
             return await WebViewSolver._solve_mobile(page, url)
         logger.info("WebViewSolver using pywebview subprocess (Desktop dev)")
         return await WebViewSolver._solve_desktop(page, url)
@@ -119,7 +119,7 @@ class WebViewSolver:
 
     @staticmethod
     async def _solve_mobile(page: ft.Page, url: str) -> tuple[str, str]:
-        from flet_webview_all import FletWebviewAll, WebViewConsoleMessageEvent
+        from flet_webview import WebView, WebViewConsoleMessageEvent
 
         # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
         _cookie_manager = None
@@ -158,7 +158,7 @@ class WebViewSolver:
             )
 
             # Check title and current URL to avoid premature completion on challenge interstitial
-            # FletWebviewAll has no get_title(); read it via JS.
+            # flet_webview's WebView has no get_title(); read it via JS.
             title = ""
             try:
                 result = await webview.run_javascript_returning_result(
@@ -207,7 +207,7 @@ class WebViewSolver:
 
             logger.info("Mobile solver verified challenge completion! Title: %s", title)
             ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            # FletWebviewAll has no get_user_agent(); read it via JS.
+            # flet_webview's WebView has no get_user_agent(); read it via JS.
             try:
                 final_ua = await webview.run_javascript_returning_result(
                     "navigator.userAgent",
@@ -249,7 +249,7 @@ class WebViewSolver:
             # Zoom is disabled at construction (zoom_enabled=False), so there is
             # nothing to call here and the page is never disturbed.
 
-        webview = FletWebviewAll(
+        webview = WebView(
             url=url,
             expand=True,
             # Equivalent of the old set_javascript_mode(UNRESTRICTED) call.
