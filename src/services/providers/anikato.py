@@ -106,20 +106,41 @@ def _parse_items(html: str) -> list[Anime]:
 
 
 def _parse_watch(html: str) -> dict:
-    """The watch page: anime id (drives the VRF episode list) + metadata.
-    The id sits on #watch-main with other attributes between, so scope
-    the search after the marker."""
+    """The watch page: anime id (drives the VRF episode list) + the full
+    metadata the page serves — nothing dropped."""
     watch_pos = html.find('id="watch-main"')
     scope = html[watch_pos : watch_pos + 600] if watch_pos >= 0 else html
     id_m = re.search(r'data-id="(\d+)"', scope)
     poster_m = re.search(r'img itemprop="image" src="([^"]+)"', html)
     title_m = re.search(r'itemprop="name"[^>]*>([^<]+)<', html)
-    synopsis_m = re.search(r'class="synopsis[^"]*">\s*<div class="content">\s*(.*?)</div>', html, re.S)
+    synopsis_m = re.search(
+        r'class="synopsis[^"]*">.*?<div class="content">(.*?)</div>', html, re.S
+    )
+    meta = re.search(r'class="bmeta"(.*?)class="w-side', html, re.S)
+    meta_html = meta.group(1) if meta else ""
+
+    def _meta_after(label: str) -> str:
+        # "Type: <span>TV</span>" — label and value are siblings in one div.
+        m = re.search(label + r":\s*<span>(.*?)</span>", meta_html, re.S | re.I)
+        return _clean(m.group(1)) if m else ""
+
+    season_m = re.search(r"Premiered:\s*<span>(.*?)</span>", meta_html, re.S | re.I)
+    genres = [_clean(g) for g in re.findall(r'href="[^"]*/genre/[^"]*"[^>]*>([^<]+)</a>', meta_html)]
+    episodes_raw = _meta_after("Episodes")
+    score_raw = _meta_after("MAL")
     return {
         "anime_id": int(id_m.group(1)) if id_m else 0,
         "poster": poster_m.group(1) if poster_m else "",
         "title": _clean(title_m.group(1)) if title_m else "",
-        "synopsis": _clean(synopsis_m.group(1))[:800] if synopsis_m else "",
+        "synopsis": _clean(synopsis_m.group(1))[:1200] if synopsis_m else "",
+        "type": _meta_after("Type"),
+        "status": _meta_after("Status"),
+        "season": _clean(season_m.group(1)) if season_m else "",
+        "episodes": int(episodes_raw) if episodes_raw.isdigit() else 0,
+        "score": float(score_raw) if re.match(r"[\d.]+", score_raw) else 0.0,
+        "aired": _meta_after("Aired"),
+        "duration": _meta_after("Duration"),
+        "genres": genres,
     }
 
 
@@ -252,6 +273,26 @@ class AniKatoProvider:
         result = (items, len(items) >= 20)
         self._cache_put(key, result, CACHE_TTL_SEARCH)
         return result
+
+    async def anime(self, session: str) -> Anime | None:
+        _, slug = split_session(session)
+        if not slug:
+            return None
+        watch = await self._watch_page(slug)
+        season_year = re.search(r"(\d{4})", watch.get("season") or "")
+        return Anime(
+            id=watch["anime_id"],
+            title=watch["title"] or slug,
+            type=watch.get("type") or "TV",
+            episodes=watch.get("episodes") or 0,
+            status=watch.get("status") or "",
+            season=watch.get("season") or "",
+            year=int(season_year.group(1)) if season_year else 0,
+            score=watch.get("score") or 0.0,
+            poster=watch["poster"],
+            session=make_session("anikato", slug),
+            synopsis=watch.get("synopsis") or "",
+        )
 
     # ------------------------------------------------------------------
     # Episodes

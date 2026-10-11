@@ -46,6 +46,7 @@ def _anime_dict(anime) -> dict:
         "status": anime.status,
         "score": anime.score,
         "season": anime.season,
+        "synopsis": getattr(anime, "synopsis", "") or "",
     }
 
 
@@ -1190,9 +1191,18 @@ class AppController:
                 "score": 0.0,
                 "season": "",
             }
-        # Cold link: only case that pays a network round-trip — search by the
-        # title we can derive from the releases list, and take the real poster
-        # (a /snapshots/ placeholder means the poster wasn't resolved yet).
+        # Cold link: the owning provider's details first (anikato serves
+        # synopsis/type/status/score from the watch page), then the title
+        # search self-heal as the last resort.
+        provider = self.router.get(self._owner_of(anime_session))
+        if provider is not None and hasattr(provider, "anime"):
+            try:
+                details = await provider.anime(anime_session)
+            except Exception as ex:
+                logger.warning("provider details failed for %s: %s", anime_session, ex)
+                details = None
+            if details is not None:
+                return _anime_dict(details)
         return await self._resolve_anime_by_search(anime_session)
 
     async def _resolve_anime_by_search(self, anime_session: str) -> dict | None:

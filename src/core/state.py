@@ -14,6 +14,7 @@ class Anime:
     score: float
     poster: str
     session: str
+    synopsis: str = ""
 
 
 @dataclass(unsafe_hash=True)

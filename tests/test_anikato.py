@@ -198,3 +198,51 @@ def test_player_active_window_prefers_sources_falls_back():
     # episode-array fallback when getSources served nothing
     player.skip = {"intro": {}, "outro": {}, "episode_intro": [], "episode_outro": [1280, 1369]}
     assert player._active_window(1300) == (1280.0, 1369.0)
+
+
+def test_parse_watch_extracts_the_full_metadata_block():
+    from services.providers.anikato import _parse_watch
+
+    watch = _parse_watch(_read("anikato_watch.html"))
+    assert watch["anime_id"] == 958
+    assert watch["type"] == "TV"
+    assert watch["status"] == "Finished Airing"
+    assert watch["episodes"] == 220
+    assert watch["score"] == 7.89
+    assert watch["season"] == "FALL 2002"
+    assert watch["aired"] == "Oct 3, 2002 to Feb 8, 2007"
+    assert "Action" in watch["genres"]
+    assert watch["synopsis"].startswith("Moments prior to Naruto")
+
+
+def test_provider_anime_maps_the_watch_page():
+    import asyncio
+
+    from services.providers.anikato import AniKatoProvider
+
+    class FakeClient:
+        is_closed = False
+
+        async def get(self, url, headers=None, timeout=None):
+            class R:
+                status_code = 200
+                text = _read("anikato_watch.html")
+
+                def json(self):
+                    raise ValueError
+
+            return R()
+
+        async def aclose(self):
+            pass
+
+    provider = AniKatoProvider(client=FakeClient())
+    anime = asyncio.run(provider.anime("anikato:naruto-eybxz"))
+    assert anime.id == 958
+    assert anime.title == "Naruto"
+    assert anime.type == "TV"
+    assert anime.episodes == 220
+    assert anime.score == 7.89
+    assert anime.year == 2002
+    assert anime.synopsis.startswith("Moments prior")
+    assert anime.session == "anikato:naruto-eybxz"
