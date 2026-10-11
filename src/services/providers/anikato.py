@@ -172,6 +172,41 @@ def _parse_servers(html: str) -> list[tuple[str, str]]:
     return servers
 
 
+def _parse_schedule_tabs(html: str) -> list[dict]:
+    """The 7 airing-day tabs: [{time, date, weekday}]."""
+    return [
+        {"time": str(m.group(1)), "date": _clean(m.group(2)), "weekday": _clean(m.group(3))}
+        for m in re.finditer(
+            r'data-time="(\d+)"[^>]*>\s*<div class="date">([^<]*)</div>\s*'
+            r'<div class="wday">([^<]*)</div>',
+            html,
+        )
+    ]
+
+
+def _parse_schedule_day(html: str) -> list[dict]:
+    """One airing day: [{time, slug, episode, title, type}] as served."""
+    entries = []
+    for m in re.finditer(
+        r'href="[^"]*?/watch/([a-z0-9\-]+)/ep-(\d+)\?type=(sub|dub)"[^>]*>'
+        r'.*?<div class="time[^"]*"[^>]*>([\d:]+)</div>.*?'
+        r'<span>\s*Episode\s*(\d+)</span>.*?'
+        r'd-title"[^>]*>([^<]+)<',
+        html,
+        re.S,
+    ):
+        entries.append(
+            {
+                "slug": m.group(1),
+                "episode": int(m.group(2)),
+                "type": m.group(3),
+                "time": m.group(4),
+                "title": _clean(m.group(6)),
+            }
+        )
+    return entries
+
+
 def _megaplay_params(url: str) -> tuple[str, str, str] | None:
     """https://megaplay.buzz/[videojs/]stream/s-2/{realid}/{sub|dub}?s=tcdn
     -> (realid, type, s)."""
@@ -507,3 +542,44 @@ class AniKatoProvider:
 
     async def close(self) -> None:
         pass
+
+    # ------------------------------------------------------------------
+    # Discovery: airing schedule + surprise-me
+    # ------------------------------------------------------------------
+
+    async def schedule_tabs(self) -> list[dict]:
+        """The 7 airing-day tabs: [{time, date, weekday}] as served."""
+        key = "schedule_tabs"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        html = await self._get_text(f"{BASE}/ajax/schedule?tz=0", xhr=True)
+        data = json.loads(html)
+        tabs = _parse_schedule_tabs(data.get("result") or "")
+        self._cache_put(key, tabs, CACHE_TTL_LATEST)
+        return tabs
+
+    async def schedule_entries(self, time: str) -> list[dict]:
+        """One airing day: [{time, slug, episode, title, type}] — entries
+        travel as served (sub and dub rows are separate on the source)."""
+        from urllib.parse import quote
+
+        key = f"schedule_{time}"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        html = await self._get_text(
+            f"{BASE}/ajax/schedule/date?tz=0&time={quote(str(time))}", xhr=True
+        )
+        data = json.loads(html)
+        entries = _parse_schedule_day(data.get("result") or "")
+        self._cache_put(key, entries, CACHE_TTL_LATEST)
+        return entries
+
+    async def random_slug(self) -> str | None:
+        """/random redirects to a random watch page — the final URL's slug."""
+        resp = await self._client.get(f"{BASE}/random")
+        if resp.status_code != 200:
+            return None
+        m = re.search(r"/watch/([a-z0-9\-]+)", str(resp.url))
+        return m.group(1) if m else None

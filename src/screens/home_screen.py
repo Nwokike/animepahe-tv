@@ -192,6 +192,16 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
                     [
                         _version_pill(state, page),
                         action(
+                            ft.Icons.CALENDAR_MONTH_ROUNDED,
+                            "Airing schedule",
+                            lambda e: controller.open_schedule(),
+                        ),
+                        action(
+                            ft.Icons.SHUFFLE_ROUNDED,
+                            "Surprise me",
+                            lambda e: controller.open_random(),
+                        ),
+                        action(
                             ft.Icons.SEARCH_ROUNDED,
                             "Search",
                             lambda e: controller.open_search(),

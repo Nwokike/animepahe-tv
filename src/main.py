@@ -835,6 +835,137 @@ class AppController:
         state.sources_test_version += 1
         logger.info("source test: %s", [(r["name"], r["probe_ok"], r["search_count"]) for r in rows])
 
+    async def load_schedule(self, time: str | None = None):
+        """Airing schedule: 7 day tabs, then the selected day's entries.
+        Only providers that expose a schedule answer (anikato); the router
+        is not involved — this is a source-specific extra."""
+        provider = self.router.get("anikato")
+        if provider is None:
+            self._show_error_snackbar("No source offers a schedule yet.")
+            return
+        try:
+            tabs = await provider.schedule_tabs()
+            state.schedule_tabs = tabs
+            if time is None and tabs:
+                time = tabs[0]["time"]
+            state.schedule_time = time or ""
+            state.schedule_entries = await provider.schedule_entries(time) if time else []
+        except Exception as ex:
+            logger.warning("schedule load failed: %s", ex)
+            state.schedule_tabs = []
+            state.schedule_entries = []
+        state.schedule_version += 1
+
+    async def open_schedule(self):
+        """Home header: the airing-calendar dialog."""
+        await self.load_schedule()
+        from core.dialogs import show_app_dialog
+        from core.theme import AppColors
+
+        def _pick_day(e, t: str):
+            from core.tasks import spawn
+
+            spawn(self.load_schedule(t), name="load-schedule")
+
+        def _open_entry(slug: str):
+            from core.tasks import spawn
+
+            _close_schedule()
+            spawn(self.load_anime(f"anikato:{slug}"), name="open-schedule-anime")
+
+        def _close_schedule():
+            try:
+                setattr(self.page, "_app_dialog", None)
+                self.page.pop_dialog()
+            except Exception:
+                pass
+
+        day_chips = ft.Row(
+            [
+                ft.OutlinedButton(
+                    content=f"{t.get('weekday', '')} {t.get('date', '')}",
+                    on_click=lambda e, t=t["time"]: _pick_day(e, t),
+                    style=ft.ButtonStyle(
+                        side={
+                            ft.ControlState.DEFAULT: ft.BorderSide(
+                                1.5,
+                                AppColors.PRIMARY
+                                if t["time"] == state.schedule_time
+                                else ft.Colors.with_opacity(0.3, AppColors.PRIMARY),
+                            )
+                        }
+                    ),
+                )
+                for t in state.schedule_tabs
+            ],
+            spacing=6,
+            scroll=ft.ScrollMode.AUTO,
+            wrap=False,
+        )
+        entry_rows = [
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Text(
+                            entry.get("time", ""),
+                            size=13,
+                            weight=ft.FontWeight.W_700,
+                            color=AppColors.PRIMARY,
+                        ),
+                        ft.Container(width=10),
+                        ft.Text(
+                            entry.get("title", ""),
+                            size=13,
+                            weight=ft.FontWeight.W_600,
+                            expand=True,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(
+                            f"Ep {entry.get('episode', '')} · {entry.get('type', '')}",
+                            size=12,
+                            color=ft.Colors.ON_SURFACE_VARIANT,
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+                border_radius=8,
+                ink=True,
+                on_click=lambda e, s=entry.get("slug", ""): _open_entry(s),
+            )
+            for entry in state.schedule_entries
+        ] or [ft.Text("No airings this day.", size=13, color=ft.Colors.ON_SURFACE_VARIANT)]
+
+        show_app_dialog(
+            self.page,
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Airing Schedule", weight=ft.FontWeight.BOLD),
+                content=ft.Column(
+                    [day_chips, ft.Container(height=10), ft.Column(entry_rows, tight=True, spacing=2, scroll=ft.ScrollMode.AUTO, height=380)],
+                    tight=True,
+                    spacing=8,
+                ),
+                actions=[ft.TextButton(content="Close", on_click=lambda e: _close_schedule())],
+                actions_alignment=ft.MainAxisAlignment.END,
+            ),
+        )
+
+    async def open_random(self):
+        """Home header: surprise-me — a random anime's detail page."""
+        provider = self.router.get("anikato")
+        if provider is None:
+            self._show_error_snackbar("No source offers surprise-me yet.")
+            return
+        try:
+            slug = await provider.random_slug()
+        except Exception as ex:
+            logger.warning("random failed: %s", ex)
+            slug = None
+        if slug:
+            await self.load_anime(f"anikato:{slug}")
+
     def sources_status(self) -> dict:
         """Settings: per-provider live health as plain dicts."""
         return {
@@ -1330,6 +1461,12 @@ async def main(page: ft.Page):
     )
     methods.load_episodes = lambda session, page_num=1: spawn(
         controller.load_episodes(session, page_num), name="load-episodes"
+    )
+    methods.open_schedule = lambda: spawn(
+        controller.open_schedule(), name="open-schedule"
+    )
+    methods.open_random = lambda: spawn(
+        controller.open_random(), name="open-random"
     )
     methods.load_anime = lambda session: spawn(
         controller.load_anime(session), name="load-anime"

@@ -100,6 +100,11 @@ class AppState:
     # Dev-test panel (Settings): rows from "Test all sources".
     source_test_results: list = []
     sources_test_version: int = 0
+    # Airing schedule (anikato): 7 day tabs + the selected day's entries.
+    schedule_tabs: list = []
+    schedule_entries: list = []
+    schedule_time: str = ""
+    schedule_version: int = 0
 
     # Player (in-app playback)
     player_open: bool = False

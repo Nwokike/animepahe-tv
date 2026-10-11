@@ -246,3 +246,23 @@ def test_provider_anime_maps_the_watch_page():
     assert anime.year == 2002
     assert anime.synopsis.startswith("Moments prior")
     assert anime.session == "anikato:naruto-eybxz"
+
+
+def test_parse_schedule_tabs_and_day():
+    from services.providers.anikato import _parse_schedule_day, _parse_schedule_tabs
+
+    tabs = _parse_schedule_tabs(_read("anikato_schedule_tabs.html"))
+    assert len(tabs) == 7
+    assert tabs[0] == {"time": "1791158400", "date": "Oct 05", "weekday": "Mon"}
+    day = _parse_schedule_day(_read("anikato_schedule_day.html"))
+    assert day[0] == {
+        "slug": "renegade-immortal-ogxqp",
+        "episode": 161,
+        "type": "sub",
+        "time": "02:00",
+        "title": "Renegade Immortal",
+    }
+    assert len(day) == 6
+    # sub and dub rows stay separate as served — nothing merged
+    types = {e["type"] for e in day}
+    assert types <= {"sub", "dub"}
