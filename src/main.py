@@ -369,6 +369,36 @@ class AppController:
                     state.is_loading = False
                     state.episodes_version += 1
 
+        # The header poster from a latest-release card is an episode still
+        # (/snapshots/). The original build self-healed it with a title
+        # search; keep that so detail opened from Home doesn't sit on a still.
+        if gen == self._episodes_gen:
+            await self._heal_anime_poster(anime_session, gen)
+
+    async def _heal_anime_poster(self, anime_session: str, gen: int):
+        """Replace a /snapshots/ placeholder poster with the real poster."""
+        anime = state.selected_anime or {}
+        poster = anime.get("poster") or ""
+        if "/snapshots/" not in poster:
+            return
+        try:
+            results, _ = await self.scraper.search(anime.get("title") or "", 1)
+        except Exception as ex:
+            logger.debug("poster heal search failed: %s", ex)
+            return
+        if gen != self._episodes_gen:
+            return
+        matched = next(
+            (a for a in results if a.session == anime_session and a.poster), None
+        )
+        if matched is None or "/snapshots/" in (matched.poster or ""):
+            return
+        merged = dict(state.selected_anime or {})
+        merged["poster"] = matched.poster
+        state.selected_anime = merged
+        state.episodes_version += 1
+        logger.info("poster healed for %s", anime_session)
+
     async def play_episode(self, anime_session: str, episode_session: str):
         # Resolve the stream, then open the in-app player. The ktv:// deep
         # link stays as the fallback for when resolution fails.
@@ -492,7 +522,13 @@ class AppController:
         #    parity), so they don't belong in this list.
         choices: list[dict] = []
         for src in sources:
-            audio_label = src.audio or "jpn"
+            # The original build's label format: DUB (ENG) when the audio is
+            # English, SUB (JPN) otherwise, plus the fansub group.
+            audio_label = (
+                "DUB (ENG)"
+                if "eng" in (src.audio or "").lower()
+                else f"SUB ({(src.audio or 'jpn').upper()})"
+            )
             label = f"{src.resolution}p - {audio_label}"
             if src.fansub:
                 label += f" ({src.fansub})"

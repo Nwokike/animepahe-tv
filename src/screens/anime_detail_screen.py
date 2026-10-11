@@ -23,7 +23,14 @@ from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
-def _episode_card(ep, on_play, anime_session: str, now_playing: bool) -> ft.Control:
+def _episode_card(
+    ep,
+    on_play,
+    anime_session: str,
+    now_playing: bool,
+    state_glyph=None,
+    menu_items=None,
+) -> ft.Control:
     image = (
         ft.Image(src=ep.snapshot, fit=ft.BoxFit.COVER, expand=True)
         if ep.snapshot
@@ -88,12 +95,41 @@ def _episode_card(ep, on_play, anime_session: str, now_playing: bool) -> ft.Cont
             ft.Container(
                 alignment=ft.Alignment.CENTER_RIGHT,
                 padding=16,
-                content=ft.Icon(
-                    ft.Icons.EQUALIZER_ROUNDED
-                    if now_playing
-                    else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
-                    size=40,
-                    color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
+                content=ft.Row(
+                    [
+                        state_glyph or ft.Container(width=0),
+                        ft.Icon(
+                            ft.Icons.EQUALIZER_ROUNDED
+                            if now_playing
+                            else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                            size=40,
+                            color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
+                        ),
+                        # Compact three-dot overflow (the KTV full-dialog
+                        # treatment was rejected): items are built per
+                        # episode state, so the menu never shows an action
+                        # the current state can't honour.
+                        ft.PopupMenuButton(
+                            icon=ft.Icons.MORE_VERT_ROUNDED,
+                            icon_size=20,
+                            icon_color=ft.Colors.WHITE,
+                            menu_position=ft.PopupMenuPosition.UNDER,
+                            tooltip="Episode options",
+                            items=menu_items
+                            or [
+                                ft.PopupMenuItem(
+                                    content="Play",
+                                    icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                                    height=40,
+                                    on_click=lambda e: on_play(
+                                        anime_session, ep.session
+                                    ),
+                                )
+                            ],
+                        ),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
             ),
         ],
@@ -192,42 +228,92 @@ def AnimeDetailScreen() -> ft.Control:
     downloads = state.downloads or {}
     download_progress = state.download_progress or {}
 
-    def _download_action(ep) -> ft.Control:
+    def _episode_state(ep) -> tuple[object, list]:
+        """(trailing state control, overflow menu items) for one episode.
+
+        Download moved out from under the card and into a compact three-dot
+        menu carried inside the row — one tap for play, one for everything
+        else. The trailing slot only ever shows a *passive* state glyph
+        (done check, or a spinner while a job is starting/running), never a
+        second tappable button.
+        """
         row = downloads.get(ep.session) or {}
-        if row.get("state") == "complete":
-            return ft.Icon(
+        active = ep.session in download_progress
+        starting = ep.session in state.starting_downloads
+        done = row.get("state") == "complete"
+
+        trailing: object = ft.Container(width=0)
+        if done:
+            trailing = ft.Icon(
                 ft.Icons.DOWNLOAD_DONE_ROUNDED,
                 size=18,
                 color=AppColors.SUCCESS,
             )
-        if ep.session in state.starting_downloads:
+        elif starting or active:
             # Source + kwik resolve before the job starts — spin instead of
             # looking like the tap did nothing.
-            return ft.ProgressRing(width=16, height=16, stroke_width=2)
-        if ep.session in download_progress:
-            return ft.ProgressRing(width=16, height=16, stroke_width=2)
-        return ft.IconButton(
-            icon=ft.Icons.DOWNLOAD_ROUNDED,
-            icon_size=18,
-            tooltip="Download episode",
-            on_click=lambda e: controller.download_episode(anime_session, ep.session),
-        )
+            trailing = ft.ProgressRing(width=16, height=16, stroke_width=2)
+
+        items = [
+            ft.PopupMenuItem(
+                content="Play",
+                icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                height=40,
+                on_click=lambda e, s=ep.session: controller.play_episode(
+                    anime_session, s
+                ),
+            ),
+        ]
+        if done:
+            items.append(
+                ft.PopupMenuItem(
+                    content="Play offline",
+                    icon=ft.Icons.DOWNLOAD_DONE_ROUNDED,
+                    height=40,
+                    on_click=lambda e, s=ep.session: controller.play_downloaded(s),
+                )
+            )
+            items.append(
+                ft.PopupMenuItem(
+                    content="Delete download",
+                    icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
+                    height=40,
+                    on_click=lambda e, s=ep.session: controller.delete_download(s),
+                )
+            )
+        elif active or starting:
+            items.append(
+                ft.PopupMenuItem(
+                    content="Cancel download",
+                    icon=ft.Icons.CLOSE_ROUNDED,
+                    height=40,
+                    on_click=lambda e, s=ep.session: controller.cancel_download(s),
+                )
+            )
+        else:
+            items.append(
+                ft.PopupMenuItem(
+                    content="Download",
+                    icon=ft.Icons.DOWNLOAD_ROUNDED,
+                    height=40,
+                    on_click=lambda e, s=ep.session: controller.download_episode(
+                        anime_session, s
+                    ),
+                )
+            )
+        return trailing, items
 
     grid = ft.ResponsiveRow(
         controls=[
             ft.Container(
-                content=ft.Column(
-                    [
-                        _episode_card(
-                            ep,
-                            controller.play_episode,
-                            anime_session,
-                            now_playing["anime"] == anime_session
-                            and now_playing["episode"] == ep.session,
-                        ),
-                        _download_action(ep),
-                    ],
-                    spacing=2,
+                content=_episode_card(
+                    ep,
+                    controller.play_episode,
+                    anime_session,
+                    now_playing["anime"] == anime_session
+                    and now_playing["episode"] == ep.session,
+                    state_glyph=_episode_state(ep)[0],
+                    menu_items=_episode_state(ep)[1],
                 ),
                 col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
             )

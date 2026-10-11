@@ -29,9 +29,19 @@ from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
-def _result_card(anime, on_select, col: dict | None = None) -> ft.Control:
+def _result_card(
+    anime, on_select, col: dict | None = None, now_playing: bool = False
+) -> ft.Control:
+    """One search result. `now_playing` (the anime currently open) dims the
+    poster and swaps the play icon for the equalizer — the treatment the
+    original search view had, so the current series stays findable."""
     poster = (
-        ft.Image(src=anime.poster, fit=ft.BoxFit.COVER, expand=True, opacity=0.6)
+        ft.Image(
+            src=anime.poster,
+            fit=ft.BoxFit.COVER,
+            expand=True,
+            opacity=0.5 if now_playing else 1.0,
+        )
         if anime.poster
         else ft.Container(
             content=ft.Icon(
@@ -58,7 +68,11 @@ def _result_card(anime, on_select, col: dict | None = None) -> ft.Control:
             ft.Container(
                 alignment=ft.Alignment.CENTER,
                 content=ft.Icon(
-                    ft.Icons.PLAY_CIRCLE_FILL_ROUNDED, size=48, color=ft.Colors.WHITE
+                    ft.Icons.EQUALIZER_ROUNDED
+                    if now_playing
+                    else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                    size=48,
+                    color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
                 ),
             ),
             ft.Container(
@@ -323,6 +337,7 @@ def SearchScreen() -> ft.Control:
                             a,
                             controller.open_anime,
                             col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
+                            now_playing=state.current_anime_session == a.session,
                         )
                         for a in state.search_results
                     ],

@@ -415,6 +415,10 @@ class ImmersivePlayer(ft.Stack):
                     self.resume_key,
                     entry["position"],
                 )
+                # The read can land AFTER the first ready/duration/position
+                # signal, which would otherwise consume nothing and lose the
+                # resume. Re-check now that we know the target.
+                self._check_and_trigger_seek()
 
         from core.tasks import spawn
 
@@ -433,7 +437,12 @@ class ImmersivePlayer(ft.Stack):
             self.video.playlist = [
                 fv.VideoMedia(self.resource, http_headers=self.http_headers)
             ]
-            self.video.update()
+            try:
+                self.video.update()
+            except RuntimeError:
+                # Not mounted yet (slow first frame) — play() pushes the
+                # playlist itself, so this is safe to skip.
+                logger.debug("video.update() before mount; skipped")
             await self.video.play()
             self._start_watchdog()
             self._start_checkpoints()
@@ -951,14 +960,21 @@ class ImmersivePlayer(ft.Stack):
         )
 
     def _on_complete(self, e=None):
-        """Auto-advance only when the position is near the end.
+        """Auto-advance only at a real ending.
 
-        A stall or a premature complete at 0s must not jump to the next
-        episode and lose the user's place (KTV's 5s rule).
+        Two guards, both from the house player: duration must be known (a
+        stall-induced complete arrives before the first duration tick and
+        would otherwise jump episodes and abandon position), and the
+        position must be within 5s of the end.
         """
-        if self._last_duration > 0 and self._last_position < self._last_duration - 5:
+        if self._last_duration <= 0:
+            logger.info("complete ignored: duration unknown")
+            return
+        if self._last_position < self._last_duration - 5:
             logger.info(
-                "complete ignored: %.0fs of %.0fs", self._last_position, self._last_duration
+                "complete ignored: %.0fs of %.0fs",
+                self._last_position,
+                self._last_duration,
             )
             return
         if self.on_next is not None:

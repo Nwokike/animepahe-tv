@@ -615,7 +615,19 @@ def _build_quality_dialog(state, controller) -> ft.Control:
             spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        content=ft.Column(controls=buttons, tight=True, spacing=8),
+        content=ft.Column(
+            controls=[
+                ft.Text(
+                    "Tip: If the player does not start, try again. Make sure "
+                    "you already have the player installed.",
+                    size=12,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                *buttons,
+            ],
+            tight=True,
+            spacing=10,
+        ),
         actions=[
             ft.TextButton(
                 content="Cancel",
