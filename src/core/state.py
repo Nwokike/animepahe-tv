@@ -78,8 +78,9 @@ class AppState:
     episodes_version: int = 0
     continue_version: int = 0
 
-    # Search + continue watching (durable store-backed)
-    search_history: list[str] = []
+    # Search + continue watching (durable store-backed). Recent rows are
+    # {title, session, ts} — the ANIME that was opened, not the typed text.
+    search_history: list[dict] = []
     search_error: str | None = None
     search_page: int = 1
     continue_watching: dict = {}

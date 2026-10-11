@@ -32,14 +32,14 @@ async def test_search_history_dedup_and_cap(store):
         await store.add_search(q)
     history = await store.get_search_history()
     assert len(history) == SEARCH_HISTORY_LIMIT
-    assert history[0] == f"q{SEARCH_HISTORY_LIMIT + 4}"  # newest first
-    assert "q0" not in history  # oldest evicted
+    assert history[0]["title"] == f"q{SEARCH_HISTORY_LIMIT + 4}"  # newest first
+    assert "q0" not in [r["title"] for r in history]  # oldest evicted
 
     # Re-searching an existing query moves it to the front, no duplicate.
     await store.add_search("q10")
     history = await store.get_search_history()
-    assert history.count("q10") == 1
-    assert history[0] == "q10"
+    assert [r["title"] for r in history].count("q10") == 1
+    assert history[0]["title"] == "q10"
 
     await store.clear_search_history()
     assert await store.get_search_history() == []
@@ -96,7 +96,7 @@ async def test_records_survive_reload(store):
     await store.add_search("frieren")
     await store.record_watch({"anime_session": "aaa", "title": "Frieren"})
     reloaded = JsonStore(filename=os.path.basename(store.path))
-    assert await reloaded.get_search_history() == ["frieren"]
+    assert [r["title"] for r in await reloaded.get_search_history()] == ["frieren"]
     assert list(await reloaded.get_continue_watching()) == ["aaa"]
 
 
@@ -111,8 +111,85 @@ async def test_records_survive_reload_isolated():
     await store.add_search("frieren")
     await store.record_watch({"anime_session": "aaa", "title": "Frieren"})
     reloaded = JsonStore(filename="reload-check.json")
-    assert await reloaded.get_search_history() == ["frieren"]
+    assert [r["title"] for r in await reloaded.get_search_history()] == ["frieren"]
     assert list(await reloaded.get_continue_watching()) == ["aaa"]
+
+
+@pytest.mark.asyncio
+async def test_search_selection_records_the_opened_anime(store):
+    """Recents remember what was OPENED (title + session), not what was
+    typed — re-opening a result is then one tap."""
+    await store.add_search("black clover")
+    await store.add_search_selection("Black Clover", "sess-a")
+    await store.add_search_selection("Black Clover Season 1", "sess-b")
+    history = await store.get_search_history()
+    # the typed query stays, below what was actually opened
+    assert [r["title"] for r in history] == [
+        "Black Clover Season 1",
+        "Black Clover",
+        "black clover",
+    ]
+    assert history[0]["session"] == "sess-b"
+    # re-opening the same session moves it to the front, no duplicate
+    await store.add_search_selection("Black Clover", "sess-a")
+    assert [r["title"] for r in await store.get_search_history()] == [
+        "Black Clover",
+        "Black Clover Season 1",
+        "black clover",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_string_history_migrates(store):
+    """Rows written before the {title, session} shape still read."""
+    import json
+
+    with open(store.path, "w", encoding="utf-8") as fh:
+        json.dump({"search_history": ["frieren", "naruto"]}, fh)
+    store._data = {}
+    store._loaded = False
+    history = await store.get_search_history()
+    assert [r["title"] for r in history] == ["frieren", "naruto"]
+    assert all(r["session"] == "" for r in history)
+
+
+@pytest.mark.asyncio
+async def test_remove_search_drops_one_row(store):
+    await store.add_search_selection("A", "s1")
+    await store.add_search_selection("B", "s2")
+    await store.remove_search("A", "s1")
+    assert [r["title"] for r in await store.get_search_history()] == ["B"]
+
+
+@pytest.mark.asyncio
+async def test_favorites_round_trip_and_cap(store):
+    for i in range(230):
+        await store.add_favorite({"anime_session": f"s{i}", "title": f"T{i}"})
+    favorites = await store.get_favorites()
+    assert len(favorites) == 200
+    assert "s229" in favorites  # newest kept
+    assert "s0" not in favorites  # oldest pruned
+    assert await store.is_favorite("s229") is True
+    assert (
+        await store.toggle_favorite({"anime_session": "s229", "title": "T"}) is False
+    )
+    assert await store.is_favorite("s229") is False
+
+
+@pytest.mark.asyncio
+async def test_favorites_never_store_base64_posters(store):
+    await store.add_favorite(
+        {"anime_session": "s1", "title": "T", "poster": "data:image/webp;base64,AAAA"}
+    )
+    row = (await store.get_favorites())["s1"]
+    assert row["poster"] == ""
+
+
+@pytest.mark.asyncio
+async def test_external_player_round_trip(store):
+    assert await store.get_external_player() is False
+    await store.save_external_player(True)
+    assert await store.get_external_player() is True
 
 
 @pytest.mark.asyncio
@@ -125,7 +202,8 @@ async def test_corrupt_file_recovers_empty(tmp_path, monkeypatch):
     # And the next write repairs the file.
     await store.add_search("hello")
     with open(store.path, encoding="utf-8") as f:
-        assert json.load(f)["search_history"] == ["hello"]
+        rows = json.load(f)["search_history"]
+    assert [r["title"] for r in rows] == ["hello"]
 
 
 def teardown_module():

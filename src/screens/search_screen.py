@@ -29,6 +29,20 @@ from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
+def _row_title_session(row) -> tuple[str, str]:
+    """Normalize one recent-search row to (title, session).
+
+    Rows are ``{title, session, ts}`` dicts — the ANIME the user opened, so
+    recents read "Black Clover Season 1" instead of what was typed. Rows
+    written before that shape were bare strings. Suggestions must never
+    render a raw row (passing a dict to the search field is what broke
+    submit), so every read of a row goes through here.
+    """
+    if isinstance(row, dict):
+        return str(row.get("title") or ""), str(row.get("session") or "")
+    return str(row or ""), ""
+
+
 def _result_card(
     anime, on_select, col: dict | None = None, now_playing: bool = False
 ) -> ft.Control:
@@ -158,7 +172,10 @@ def SearchScreen() -> ft.Control:
     debounced_query = use_debounce(query, 250)
 
     def _submit(e=None):
-        q = query.strip()
+        # `query` is local state and only ever set from a string, but the
+        # retry button re-enters this path with whatever was last set —
+        # coerce so a stray non-string can never crash submit.
+        q = query.strip() if isinstance(query, str) else ""
         if not q:
             return
         # Double-submit guard: a second tap while the first is in flight
@@ -183,8 +200,15 @@ def SearchScreen() -> ft.Control:
             return
         controller.load_search(q, 1)
 
-    def _pick(q: str):
-        set_query(q)
+    def _pick(row):
+        # Tapping a recent row: open the anime directly when it carries a
+        # session (recents store what was opened, not what was typed);
+        # otherwise fill the field and search by title.
+        title, session = _row_title_session(row)
+        if session:
+            controller.open_anime(session)
+            return
+        set_query(title)
         if state.is_loading:
             return
         if not state.is_online:
@@ -199,7 +223,7 @@ def SearchScreen() -> ft.Control:
                 bgcolor=AppColors.WARNING,
             )
             return
-        controller.load_search(q, 1)
+        controller.load_search(title, 1)
 
     def _warn_offline():
         from core.notify import show_snack
@@ -210,10 +234,16 @@ def SearchScreen() -> ft.Control:
             bgcolor=AppColors.ERROR,
         )
 
-    # Suggestions: recent history filtered by what has been typed (debounced).
+    # Suggestions: recent selections filtered by what has been typed
+    # (debounced). Filter matches the row's title — the anime that was
+    # opened — so typing "black" still surfaces "Black Clover Season 1".
     history = state.search_history or []
     needle = (debounced_query or "").strip().lower()
-    suggestions = [h for h in history if needle in h.lower()] if needle else history[:8]
+    suggestions = (
+        [h for h in history if needle in _row_title_session(h)[0].lower()]
+        if needle
+        else history[:8]
+    )
 
     def _on_change(e):
         # The original clamped the field; an unbounded paste could push a
@@ -275,16 +305,21 @@ def SearchScreen() -> ft.Control:
                     [
                         ft.Icon(ft.Icons.HISTORY_ROUNDED, size=18, color=ft.Colors.ON_SURFACE_VARIANT),
                         ft.Container(width=8),
-                        ft.Text(q, size=13, color=ft.Colors.ON_SURFACE, expand=True),
+                        ft.Text(
+                            _row_title_session(row)[0],
+                            size=13,
+                            color=ft.Colors.ON_SURFACE,
+                            expand=True,
+                        ),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
                 padding=ft.Padding.symmetric(horizontal=12, vertical=10),
                 border_radius=8,
                 ink=True,
-                on_click=lambda e, q=q: _pick(q),
+                on_click=lambda e, row=row: _pick(row),
             )
-            for q in suggestions
+            for row in suggestions
         ],
         spacing=2,
         visible=bool(suggestions) and not state.search_results,

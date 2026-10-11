@@ -552,17 +552,6 @@ class HLSProxy:
             body_bytes,
         )
 
-    @staticmethod
-    def _looks_like_playlist(abs_url: str) -> bool:
-        """Heuristic: is this URI a nested playlist (rewrite) or a segment?"""
-        low = abs_url.lower()
-        if low.endswith(".m3u8") or ".m3u8?" in low:
-            return True
-        parsed = urllib.parse.urlparse(abs_url)
-        return not parsed.path.lower().endswith(
-            (".ts", ".m4s", ".mp4", ".aac", ".mp3", ".key", ".iv")
-        )
-
     def _rewrite_m3u8(
         self,
         content: str,
@@ -689,14 +678,17 @@ class HLSProxy:
                 stream_inf_line = None
                 continue
 
-            if self._looks_like_playlist(abs_seg_url):
-                output_lines.append(_proxy_sub(abs_seg_url))
-            else:
-                proxy_seg = (
-                    f"{base_proxy}/segment?"
-                    f"url={_b64_encode(abs_seg_url)}{ref_param}{hdrs_param}"
-                )
-                output_lines.append(proxy_seg)
+            # Everything else in a media playlist is a SEGMENT — route it to
+            # /segment unconditionally. The extension guess that used to live
+            # here misrouted this CDN's .jpg-named segments to
+            # /playlist.m3u8, which streamed JPEG bytes with an mpegurl
+            # content type and killed playback with "Failed to recognize
+            # file format". (A line that really is a nested playlist still
+            # works: /segment streams the bytes it fetches.)
+            output_lines.append(
+                f"{base_proxy}/segment?"
+                f"url={_b64_encode(abs_seg_url)}{ref_param}{hdrs_param}"
+            )
 
         if stream_inf_line is not None:
             # Trailing STREAM-INF with no URI line — keep verbatim

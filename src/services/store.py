@@ -102,19 +102,59 @@ class JsonStore:
     # Search history (most-recent-first, deduped, capped)
     # ------------------------------------------------------------------
 
-    async def get_search_history(self) -> list[str]:
+    async def get_search_history(self) -> list[dict]:
+        """Recent SEARCHES as {title, session, ts} — newest first.
+
+        `title` is the anime the user actually opened (e.g. "Black Clover
+        Season 1"), not the string they typed, so re-opening a result is one
+        tap. Rows saved before this shape (bare strings) migrate on read.
+        """
         history = await self.section("search_history", [])
-        return list(history) if isinstance(history, list) else []
+        if not isinstance(history, list):
+            return []
+        rows: list[dict] = []
+        for item in history:
+            if isinstance(item, dict) and item.get("title"):
+                rows.append(
+                    {
+                        "title": str(item["title"])[:200],
+                        "session": str(item.get("session") or "")[:120],
+                        "ts": float(item.get("ts") or 0),
+                    }
+                )
+            elif isinstance(item, str) and item.strip():
+                # v1 rows: the typed query, no session to open directly.
+                rows.append({"title": item.strip()[:200], "session": "", "ts": 0.0})
+        return rows
 
     async def add_search(self, query: str) -> None:
+        """Record a typed query (fallback when nothing was opened)."""
         query = (query or "").strip()
         if not query:
             return
+        await self.add_search_selection(query, "")
+
+    async def add_search_selection(self, title: str, session: str = "") -> None:
+        """Record the ANIME that was opened from search, MRU-deduped."""
+        title = (title or "").strip()
+        if not title:
+            return
         history = await self.get_search_history()
-        if query in history:
-            history.remove(query)
-        history.insert(0, query)
+        if session:
+            history = [r for r in history if r.get("session") != session]
+        else:
+            history = [r for r in history if r.get("title", "").lower() != title.lower()]
+        history.insert(0, {"title": title[:200], "session": session[:120], "ts": time.time()})
         del history[SEARCH_HISTORY_LIMIT:]
+        await self.put_section("search_history", history)
+
+    async def remove_search(self, title: str, session: str = "") -> None:
+        history = await self.get_search_history()
+        history = [
+            r
+            for r in history
+            if not (r.get("title") == title and r.get("session") == session)
+        ]
         await self.put_section("search_history", history)
 
     async def clear_search_history(self) -> None:

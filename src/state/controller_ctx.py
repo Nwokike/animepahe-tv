@@ -27,13 +27,11 @@ class ControllerMethods:
 
     # Data actions
     load_latest: object = lambda: None
-    search: object = lambda query: None
     load_episodes: object = lambda session: None
     load_anime: object = lambda session: None
     play_episode: object = lambda anime_session, episode_session: None
     download_episode: object = lambda anime_session, episode_session: None
     retry_cloudflare: object = lambda: None
-    check_updates: object = lambda: None
     load_search: object = lambda query, page=1: None
     clear_search_history: object = lambda: None
 

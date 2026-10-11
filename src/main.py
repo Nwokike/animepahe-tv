@@ -130,6 +130,7 @@ class AppController:
         state.search_history = await self.store.get_search_history()
         state.continue_watching = await self.store.get_continue_watching()
         state.downloads = await self.store.get_downloads()
+        state.favorites = await self.store.get_favorites()
 
         # Restore the theme choice before the first render so the shell
         # never flashes the wrong mode.
@@ -1084,6 +1085,32 @@ class AppController:
                     state.is_loading = False
                     state.search_version += 1
 
+    async def toggle_favorite(self, row: dict) -> bool:
+        """Favorite/unfavorite a WHOLE anime; bumps the version so every
+        shelf showing favorites re-renders."""
+        if not isinstance(row, dict):
+            return False
+        favorited = await self.store.toggle_favorite(row)
+        state.favorites = await self.store.get_favorites()
+        state.favorites_version += 1
+        return favorited
+
+    async def record_search_selection(self, anime) -> None:
+        """A search result was opened: remember the ANIME (title + session),
+        so recents show 'Black Clover Season 1' rather than the typed text."""
+        if anime is None:
+            return
+        title = getattr(anime, "title", "") or ""
+        session = getattr(anime, "session", "") or ""
+        if not title:
+            return
+        await self.store.add_search_selection(title, session)
+        state.search_history = await self.store.get_search_history()
+
+    async def remove_search(self, title: str, session: str = "") -> None:
+        await self.store.remove_search(title, session)
+        state.search_history = await self.store.get_search_history()
+
     async def clear_search_history(self):
         await self.store.clear_search_history()
         state.search_history = []
@@ -1130,11 +1157,16 @@ async def main(page: ft.Page):
         controller.choose_quality(index), name="choose-quality"
     )
     methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
-    methods.cancel_resolve = lambda: spawn(
-        controller.cancel_resolve(), name="cancel-resolve"
-    )
+    # Sync action: no spawn() — create_task(None) would raise.
+    methods.cancel_resolve = lambda: controller.cancel_resolve()
     methods.toggle_favorite = lambda row: spawn(
         controller.toggle_favorite(row), name="toggle-favorite"
+    )
+    methods.record_search_selection = lambda anime: spawn(
+        controller.record_search_selection(anime), name="record-search-selection"
+    )
+    methods.remove_search = lambda title, session="": spawn(
+        controller.remove_search(title, session), name="remove-search"
     )
     methods.play_adjacent = lambda delta: spawn(
         controller.play_adjacent(delta), name="play-adjacent"
