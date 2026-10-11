@@ -61,7 +61,6 @@ class AppState:
     episodes: list[Episode] = []
     episodes_has_more: bool = True
     episodes_page: int = 1
-    selected_source: Source | None = None
     current_anime_session: str = ""
     current_episode_session: str = ""
     player_error: str | None = None

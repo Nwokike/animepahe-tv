@@ -250,9 +250,15 @@ class ImmersivePlayer(ft.Stack):
         from core.tasks import spawn
 
         # Chips render their label immediately; the stream probe refreshes
-        # the text (and is the only thing that reveals them).
+        # the text (and is the only thing that reveals them). Every list
+        # accumulates across BOTH control branches (touch + desktop): _bar()
+        # runs once per branch, and an assignment would let the second
+        # branch clobber the first, leaving one platform's chips stale.
         self.quality_texts = []
         self.audio_texts = []
+        self.quality_chips = []
+        self.audio_chips = []
+        self.speed_texts = []
 
         def _cycle_speed(e=None):
             self._speed_index = (self._speed_index + 1) % len(SPEEDS)
@@ -288,7 +294,7 @@ class ImmersivePlayer(ft.Stack):
                 on_click=_open_settings,
                 visible=False,
             )
-            self.quality_chip = quality_chip
+            self.quality_chips.append(quality_chip)
             items.append(quality_chip)
 
             audio_text = ft.Text("Audio", size=12)
@@ -302,11 +308,11 @@ class ImmersivePlayer(ft.Stack):
                 on_click=_open_settings,
                 visible=False,
             )
-            self.audio_chip = audio_chip
+            self.audio_chips.append(audio_chip)
             items.append(audio_chip)
 
             speed_text = ft.Text("1.0x", size=12)
-            self.speed_texts = [speed_text]
+            self.speed_texts.append(speed_text)
             items.append(
                 ft.Container(
                     content=speed_text,
@@ -638,13 +644,12 @@ class ImmersivePlayer(ft.Stack):
         has_audio = len(self._audio_cache or []) >= 2
         for text in self.quality_texts:
             text.value = value if has_quality else "Auto"
-        if hasattr(self, "quality_chip"):
-            self.quality_chip.visible = has_quality
-        if hasattr(self, "audio_texts"):
-            for text in self.audio_texts:
-                text.value = self._current_audio or "Default"
-        if hasattr(self, "audio_chip"):
-            self.audio_chip.visible = has_audio
+        for chip in self.quality_chips:
+            chip.visible = has_quality
+        for text in self.audio_texts:
+            text.value = self._current_audio or "Default"
+        for chip in self.audio_chips:
+            chip.visible = has_audio
 
     # ------------------------------------------------------------------
     # Overlay + watchdog

@@ -21,19 +21,33 @@ from core.state import AppState
 from state.app_state import state as singleton_state
 
 
+class _Dialogs:
+    """Models flet's Page._dialogs stack (controls list, open flag)."""
+
+    def __init__(self):
+        self.controls: list = []
+
+
 class _FakePage:
     title = None
 
     def __init__(self):
         self.shown: list = []
         self.popped = 0
+        self._dialogs = _Dialogs()
 
     def show_dialog(self, dialog):
+        dialog.open = True
         self.shown.append(dialog)
+        self._dialogs.controls.append(dialog)
 
     def pop_dialog(self):
         self.popped += 1
-        return self.shown.pop() if self.shown else None
+        for dialog in reversed(self._dialogs.controls):
+            if getattr(dialog, "open", False):
+                dialog.open = False
+                return dialog
+        return None
 
 
 class _RecordingShell:
@@ -114,3 +128,20 @@ def test_ad_hoc_dialog_closes_without_navigating():
     assert controller.page.popped == 1
     assert controller.shell.calls == []  # stayed on the detail view
     app_main.state = singleton_state
+
+
+def test_close_app_dialog_does_not_pop_what_sits_above_it():
+    """A SnackBar above the registered dialog must not be dismissed by the
+    dialog's Back handler (pop_dialog closes the topmost open dialog)."""
+    from core.dialogs import close_app_dialog, show_app_dialog
+
+    page = _FakePage()
+    dialog = ft.AlertDialog(title=ft.Text("Update"))
+    show_app_dialog(page, dialog)
+    snack = ft.SnackBar(ft.Text("update ready"))
+    page.show_dialog(snack)  # sits above the dialog
+
+    assert close_app_dialog(page) is True
+    # the snack stays open; the dialog itself was closed directly
+    assert snack.open is True
+    assert dialog.open is False

@@ -98,7 +98,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
                             weight=ft.FontWeight.W_600,
                             color=ft.Colors.ON_SURFACE,
                         ),
-                        ft.ProgressBar(value=percent, height=3)
+                        ft.ProgressBar(value=percent, bar_height=3)
                         if active
                         else ft.Container(height=3),
                     ],

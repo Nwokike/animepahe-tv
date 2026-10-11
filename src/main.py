@@ -959,16 +959,6 @@ async def main(page: ft.Page):
 
     page.on_error = _on_page_error
 
-    # Unhandled exceptions in event handlers land here — the only place a
-    # crash is visible to the user at all. Console line (via logger) plus a
-    # snack, so a broken tap never looks like a dead app.
-    def _on_page_error(e):
-        message = str(getattr(e, "data", None) or e)
-        logger.error("unhandled page error: %s", message)
-        show_snack(page, "Something went wrong.", bgcolor=AppColors.ERROR)
-
-    page.on_error = _on_page_error
-
     methods = ControllerMethods()
     methods.load_latest = lambda page_num=1: spawn(
         controller.load_latest(page_num), name="load-latest"

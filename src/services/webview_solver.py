@@ -311,7 +311,7 @@ class WebViewSolver:
             width=dialog_width,
             height=dialog_height,
             border_radius=8,
-            clip_behavior="antiAlias",
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         )
 
         dialog_content = ft.Column(

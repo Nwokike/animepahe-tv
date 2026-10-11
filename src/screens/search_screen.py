@@ -118,7 +118,10 @@ def _result_card(anime, on_select, col: dict | None = None) -> ft.Control:
             style=card_button_style(padding=4, radius=16),
             animate_scale=card_focus_scale(),
             col=col,
-            on_click=lambda e: on_select(anime),
+            # The session STRING, not the Anime object: open_anime/load_anime
+            # compare it against release/anime sessions and hash it into a
+            # dict lookup — passing the dataclass broke detail from search.
+            on_click=lambda e: on_select(anime.session),
         )
     )
 

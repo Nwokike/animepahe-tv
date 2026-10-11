@@ -293,7 +293,9 @@ class HLSProxy:
         merged = {"User-Agent": USER_AGENT}
         merged.update(headers or {})
         try:
-            resp = await self._http_client.get(target_url, headers=merged)
+            resp = await self._http_client.get(
+                target_url, headers=merged, follow_redirects=True
+            )
         except Exception as ex:
             raise PlaylistFetchError(target_url, ex) from ex
         if resp.status_code != 200:
@@ -503,7 +505,9 @@ class HLSProxy:
             return
 
         try:
-            resp = await self._http_client.get(target_url, headers=upstream_headers)
+            resp = await self._http_client.get(
+                target_url, headers=upstream_headers, follow_redirects=True
+            )
         except Exception as ex:
             logger.warning("Upstream playlist request failed: %s", ex)
             await self._send_response(
@@ -714,7 +718,10 @@ class HLSProxy:
 
         try:
             resp = await self._http_client.get(
-                target_url, headers=upstream_headers, stream=True
+                target_url,
+                headers=upstream_headers,
+                stream=True,
+                follow_redirects=True,
             )
         except Exception as ex:
             logger.warning("Upstream stream request failed: %s", ex)

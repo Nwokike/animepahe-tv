@@ -489,6 +489,16 @@ async def _async_close_player():
 
     from state.app_state import state
 
+    # Save + stop the native player FIRST: this runs for programmatic closes
+    # (Next/Previous, controller.close_player) as well as Back, and skipping
+    # it loses the resume position and lets audio bleed into the next episode.
+    player = _active_player
+    if player is not None:
+        try:
+            await asyncio.wait_for(player.handle_close(), timeout=3.0)
+        except Exception:
+            pass
+
     mount = _active_mount
     _active_mount = None
     _active_player = None

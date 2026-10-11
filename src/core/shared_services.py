@@ -33,7 +33,12 @@ class SharedServices:
         import asyncio
 
         try:
-            await asyncio.wait_for(self.launcher.launch_url(url), timeout=timeout)
+            await asyncio.wait_for(
+                self.launcher.launch_url(
+                    url, mode=ft.LaunchMode.EXTERNAL_APPLICATION
+                ),
+                timeout=timeout,
+            )
             return True
         except asyncio.TimeoutError:
             # A hand-off to another app never returns on some platforms.

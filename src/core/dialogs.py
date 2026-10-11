@@ -22,12 +22,25 @@ def show_app_dialog(page: ft.Page, dialog) -> None:
 
 
 def close_app_dialog(page: ft.Page) -> bool:
-    """Close the registered dialog if one is open. True if one was."""
-    if getattr(page, "_app_dialog", None) is None:
+    """Close the registered dialog if one is open. True if one was.
+
+    Only pops when the registered dialog is still the topmost open one:
+    pop_dialog() closes whatever sits on top, so an unconditional pop would
+    dismiss a SnackBar above our dialog and orphan the dialog itself.
+    """
+    dialog = getattr(page, "_app_dialog", None)
+    if dialog is None:
         return False
     setattr(page, "_app_dialog", None)
     try:
-        page.pop_dialog()
+        top = next(
+            (d for d in reversed(page._dialogs.controls) if d.open), None
+        )
+        if top is dialog:
+            page.pop_dialog()
+        else:
+            dialog.open = False
+            dialog.update()
     except Exception as ex:
         logger.debug("close_app_dialog: %s", ex)
     return True

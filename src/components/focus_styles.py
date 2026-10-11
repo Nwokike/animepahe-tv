@@ -104,9 +104,10 @@ def attach_focus_zoom(button: ft.Control, scale: float = 1.04) -> ft.Control:
 
 def _safe_scale(button: ft.Control, value: float) -> None:
     try:
-        setattr(button, "scale", value)
+        button.scale = value
+        button.update()
     except RuntimeError:
-        pass  # frozen control: the border already carries focus
+        pass  # frozen/unmounted: the FOCUSED border already carries focus
 
 
 __all__ = [
