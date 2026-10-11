@@ -177,9 +177,10 @@ def _parse_details(html: str, session: str) -> Anime | None:
     poster = text(r'anime-poster[^>]*>\s*<a href="([^"]+)"') or text(
         r'header[^>]*>\s*<img[^>]*data-src="([^"]+)"'
     )
-    synopsis = text(r'class="anime-synopsis[^"]*"[^>]*>(.*?)</div>') or text(
+    synopsis_raw = text(r'class="anime-synopsis[^"]*"[^>]*>(.*?)</div>') or text(
         r'anime-summary[^>]*>\s*<div[^>]*>(.*?)</div>'
     )
+    synopsis = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", synopsis_raw)).strip()
     # anime-info holds only <p> rows (no nested divs) — the first
     # closing div is its own.
     info_html_m = re.search(r'class="anime-info">(.*?)</div>', html, re.S)
@@ -191,11 +192,11 @@ def _parse_details(html: str, session: str) -> Anime | None:
         )
         return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
 
-    # The anchor's visible text is the clean genre name (the title
-    # attribute carries a "X movies" suffix).
+    # The anchor wraps an <li> — capture the whole anchor and strip
+    # tags for the clean name (the title attribute carries "X movies").
     genres = [
-        re.sub(r"\s+", " ", g).strip()
-        for g in re.findall(r'anime-genre.*?<a[^>]*>([^<]+)</a>', html, re.S)
+        re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", g)).strip()
+        for g in re.findall(r'anime-genre.*?<a[^>]*>(.*?)</a>', html, re.S)
     ]
     external = re.findall(r'href="(https://(?:anilist\.co|myanimelist\.net)/anime/(\d+))"', html)
     ani_id = next((int(i) for url, i in external if "anilist" in url), 0)
