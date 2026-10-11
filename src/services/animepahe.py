@@ -367,6 +367,11 @@ class AnimePaheScraper:
         for el in extract_data_src_elements(resp.text):
             src = el.get("data-src", "").strip()
             if "kwik" in src.lower():
+                fansub = el.get("data-fansub", "")
+                # The codec qualifier the site serves on the button itself
+                # (Juro appends " AV1" to the server name the same way).
+                if el.get("data-av1") == "1" and "AV1" not in fansub.upper():
+                    fansub = f"{fansub} AV1".strip()
                 sources.append(
                     Source(
                         url=src,
@@ -374,9 +379,30 @@ class AnimePaheScraper:
                             el.get("data-resolution", 0) or el.get("data-res", 0) or 0
                         ),
                         audio=el.get("data-audio", "") or el.get("data-lang", "jpn"),
-                        fansub=el.get("data-fansub", ""),
+                        fansub=fansub,
                     )
                 )
+        # The download menu rides the same page: pickDownload anchors carry
+        # {Fansub} · {quality}p ({size}MB) [BD] with pahe.win links. Zipped
+        # positionally with the buttons (udb's approach) they attach real
+        # file sizes to each rendition.
+        # The anchors are direct children — the first </div> closes the
+        # menu itself.
+        download_m = re.search(r'id="pickDownload"(.*?)</div>', resp.text, re.S)
+        if download_m:
+            anchors = re.findall(
+                r'href="(https://pahe\.win/[^"]+)"[^>]*>(.*?)</a>',
+                download_m.group(1),
+                re.S,
+            )
+            size_by_index = {}
+            for i, (href, label) in enumerate(anchors):
+                size_m = re.search(r"\(([\d.]+MB)\)", re.sub(r"<[^>]+>", "", label))
+                if size_m:
+                    size_by_index[i] = size_m.group(1)
+            for i, source in enumerate(sources):
+                if i in size_by_index:
+                    source.size = size_by_index[i]
         logger.info("SOURCES_DATA_SRC found %d kwik sources", len(sources))
         return sources
 

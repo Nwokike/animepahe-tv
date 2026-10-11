@@ -533,7 +533,12 @@ class AppController:
             logger.warning("no sources — external player fallback")
             await self._open_external_player(anime_session, episode_session)
             return
-        sources = sorted(sources, key=lambda s: s.resolution, reverse=True)
+        # SUB (JPN) group first, DUB (ENG) after — each best-first.
+        # Dubs exist as separate renditions; today they render mixed.
+        sources = sorted(
+            sources,
+            key=lambda s: (str(s.audio or "").lower().startswith("eng"), -s.resolution),
+        )
         state.selected_source = sources[0]
 
         # 2. Resolve the best source -> m3u8 -> variants. Providers with
@@ -1046,7 +1051,10 @@ class AppController:
         if not sources:
             self._show_error_snackbar("No stream found for this episode.")
             return
-        sources = sorted(sources, key=lambda s: s.resolution, reverse=True)
+        sources = sorted(
+            sources,
+            key=lambda s: (str(s.audio or "").lower().startswith("eng"), -s.resolution),
+        )
 
         choices: list[dict] = []
         for src in sources:

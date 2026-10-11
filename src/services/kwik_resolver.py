@@ -56,11 +56,18 @@ class KwikResolver:
         return self._client
 
     def _headers(self, kwik_url: str) -> dict:
+        # The Referer follows the issued URL's host — the kwik family
+        # rotates (kwik.cx -> kwik.si -> kwik.pw documented) and a stale
+        # host Referer is exactly what CDNs reject.
+        import re as _re
+
+        host_m = _re.search(r"https?://(kwik\.[a-z]+)/", kwik_url)
+        referer = f"https://{host_m.group(1)}/" if host_m else "https://kwik.cx/"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://kwik.cx/",
+            "Referer": referer,
         }
         ddos = self._ddos
         if ddos is not None and getattr(ddos, "_solved", False):

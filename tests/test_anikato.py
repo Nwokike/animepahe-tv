@@ -422,3 +422,48 @@ def test_animepahe_anime_uses_ddos_get():
     provider = AnimePaheProvider(scraper=type("S", (), {"ddos": FakeDdos(), "BASE": "https://animepahe.com"})())
     anime = asyncio.run(provider.anime("some-session"))
     assert anime is not None and anime.title == "T"
+
+
+def test_kwik_referer_follows_the_issued_host():
+    """The kwik family rotates (cx -> si -> pw) — a stale-host Referer is
+    what CDNs reject. The resolver must derive it from the URL."""
+    from services.kwik_resolver import KwikResolver
+
+    resolver = KwikResolver(ddos_solver=None)
+    assert resolver._headers("https://kwik.si/e/abc")["Referer"] == "https://kwik.si/"
+    assert resolver._headers("https://kwik.cx/e/abc")["Referer"] == "https://kwik.cx/"
+    # unparseable host keeps the historical default
+    assert resolver._headers("not-a-kwik-url")["Referer"] == "https://kwik.cx/"
+
+
+def test_play_page_scrape_carries_av1_and_download_sizes():
+    import asyncio
+
+    from services.animepahe import AnimePaheScraper
+
+    PLAY_PAGE = """
+    <div id="resolutionMenu">
+      <button data-src="https://kwik.si/e/av1one" data-resolution="1080" data-audio="jpn" data-fansub="SubsPlease" data-av1="1"></button>
+      <button data-src="https://kwik.si/e/plain" data-resolution="720" data-audio="jpn" data-fansub="SubsPlease"></button>
+    </div>
+    <div id="pickDownload">
+      <a href="https://pahe.win/abc123">SubsPlease · 1080p (293MB) [BD]</a>
+      <a href="https://pahe.win/def456">SubsPlease · 720p (176MB)</a>
+    </div>
+    """
+
+    class FakeDdos:
+        async def get(self, url):
+            class R:
+                status_code = 200
+                text = PLAY_PAGE
+
+            return R()
+
+    scraper = AnimePaheScraper()
+    scraper.ddos = FakeDdos()
+    sources = asyncio.run(scraper._sources_data_src("a", "e"))
+    assert sources[0].fansub.endswith("AV1")  # the codec qualifier rides the name
+    assert sources[0].resolution == 1080
+    assert sources[0].size == "293MB"  # zipped positionally from pickDownload
+    assert sources[1].size == "176MB"
