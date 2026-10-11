@@ -92,6 +92,7 @@ class AppController:
         # keeps AnimePahe (whose catalog is Cloudflare-walled) as the
         # safety net — its breaker trips on walled calls while its files
         # still get attempted. Per-request failover, never locked.
+        from services.providers.base import owner_of
         from services.providers.anikato import AniKatoProvider
         from services.providers.animeout import AnimeOutProvider
         from services.providers.animepahe_provider import AnimePaheProvider
@@ -106,6 +107,7 @@ class AppController:
                 AnimePaheProvider(self.scraper),
             ]
         )
+        self._owner_of = owner_of
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
         self._search_gen = 0
@@ -530,13 +532,11 @@ class AppController:
         sources = sorted(sources, key=lambda s: s.resolution, reverse=True)
         state.selected_source = sources[0]
 
-        # 2. Resolve the best source -> m3u8 -> variants.
+        # 2. Resolve the best source -> m3u8 -> variants. Providers with
+        # the kwik_resolve capability (AnimePahe) need the Kwik unpack;
+        # every other provider's URLs are already playable.
         self._resolve_stage(gen, "Resolving stream…")
-        try:
-            m3u8 = await self.kwik.resolve(sources[0].url)
-        except Exception as ex:
-            logger.error("kwik resolve(%s) failed: %s", sources[0].url, ex)
-            m3u8 = None
+        m3u8 = await self._resolve_source(sources[0], anime_session)
         if gen != self._play_gen:
             return
         if not m3u8:
@@ -545,7 +545,7 @@ class AppController:
             return
         self._resolved_m3u8 = m3u8
         self._resolve_stage(gen, "Loading qualities…")
-        variants = await self._fetch_variants(m3u8)
+        variants = await self._fetch_variants(m3u8, sources[0].headers)
         if gen != self._play_gen:
             return
 
@@ -567,10 +567,14 @@ class AppController:
             label = f"{src.resolution}p - {audio_label}"
             if src.fansub:
                 label += f" ({src.fansub})"
-            choices.append({"label": label, "kind": "source", "url": src.url})
+            choices.append(
+                {"label": label, "kind": "source", "url": src.url, "headers": src.headers}
+            )
 
         if len(choices) <= 1:
-            await self._open_player(m3u8, variants, anime_session, episode_session)
+            await self._open_player(
+                m3u8, variants, anime_session, episode_session, sources[0].headers
+            )
             return
         state.quality_choices = choices
         state.quality_dialog_open = True
@@ -579,16 +583,30 @@ class AppController:
             "variants": variants,
             "anime_session": anime_session,
             "episode_session": episode_session,
+            "headers": sources[0].headers,
         }
         state.episodes_version += 1
 
-    async def _fetch_variants(self, m3u8: str) -> list[dict]:
+    async def _resolve_source(self, source, anime_session: str) -> str | None:
+        """Source URL -> playable URL, per the owning provider's
+        capabilities. kwik_resolve providers (AnimePahe) unpack through
+        Kwik; others are already playable (anikato m3u8s, kusonime
+        files). None means resolution failed."""
+        provider = self.router.get(self._owner_of(anime_session))
+        if provider is not None and provider.capabilities.get("kwik_resolve"):
+            try:
+                return await self.kwik.resolve(source.url)
+            except Exception as ex:
+                logger.error("kwik resolve(%s) failed: %s", source.url, ex)
+                return None
+        return source.url or None
+
+    async def _fetch_variants(self, m3u8: str, headers: dict | None = None) -> list[dict]:
         """Master-playlist variants through the proxy (correct headers),
         falling back to a direct fetch when the proxy isn't running."""
+        headers = headers or {"User-Agent": KWIK_USER_AGENT, "Referer": "https://kwik.cx/"}
         if self.hls_proxy is not None:
-            return await self.hls_proxy.fetch_variants(
-                m3u8, headers={"Referer": "https://kwik.cx/"}
-            )
+            return await self.hls_proxy.fetch_variants(m3u8, headers=headers)
         from components.player.immersive_player import (
             KWIK_USER_AGENT,
             _stream_variants,
@@ -596,13 +614,7 @@ class AppController:
 
         try:
             client = self.kwik._get_client()
-            resp = await client.get(
-                m3u8,
-                headers={
-                    "User-Agent": KWIK_USER_AGENT,
-                    "Referer": "https://kwik.cx/",
-                },
-            )
+            resp = await client.get(m3u8, headers=headers)
             if resp.status_code == 200 and resp.text:
                 return _stream_variants(resp.text)
         except Exception as ex:
@@ -622,6 +634,7 @@ class AppController:
                 pending.get("variants") or [],
                 pending["anime_session"],
                 pending["episode_session"],
+                pending.get("headers"),
             )
             return
         pending_external = bool(pending.get("external"))
@@ -648,9 +661,20 @@ class AppController:
         # (see _build_quality_dialog).
         state.quality_resolving = True
         state.busy_version += 1
+        from core.state import Source as _Source
+
+        choice_source = _Source(
+            url=choice["url"],
+            resolution=0,
+            audio="",
+            fansub="",
+            headers=choice.get("headers") or {},
+        )
         try:
-            m3u8 = await self.kwik.resolve(choice["url"])
-            variants = await self._fetch_variants(m3u8) if m3u8 else []
+            m3u8 = await self._resolve_source(choice_source, pending["anime_session"])
+            variants = (
+                await self._fetch_variants(m3u8, choice.get("headers")) if m3u8 else []
+            )
         except Exception as ex:
             logger.error("quality choice resolve failed: %s", ex)
             self._show_error_snackbar("Couldn't switch to that quality.")
@@ -664,6 +688,7 @@ class AppController:
             variants,
             pending["anime_session"],
             pending["episode_session"],
+            choice.get("headers"),
         )
 
     async def _open_player(
@@ -672,30 +697,36 @@ class AppController:
         variants: list[dict],
         anime_session: str,
         episode_session: str,
+        source_headers: dict | None = None,
     ):
-        """Open the in-app player on a resolved m3u8.
+        """Open the in-app player on a resolved stream.
 
-        The resource handed to the player is the PROXY url, not the CDN
-        url: the hosts fingerprint TLS and reject the video backends'
-        client (a raw m3u8 fails with "Failed to open"). ``source_*``
-        travels with the spec so the player can rebuild a proxied url when
-        the viewer pins a quality variant or an audio track.
+        HLS resources route through the loopback proxy (the hosts
+        fingerprint TLS and reject the video backends' client — a raw
+        m3u8 fails with "Failed to open"); direct files (kusonime's
+        .mkv) play as-is. ``source_*`` carries the CHOSEN SOURCE's own
+        headers (anikato's m3u8s need Referer megaplay.buzz; animepahe's
+        need the kwik pair) so the player and the proxy rebuilds send
+        exactly what the CDN requires.
         """
         from components.player.immersive_player import KWIK_USER_AGENT
 
         anime = await self._resolve_anime(anime_session)
         # Clear any previous open-failure so it can't blink over the new one.
         state.player_error = None
-        headers = {
+        headers = dict(source_headers) if source_headers else {
             "User-Agent": KWIK_USER_AGENT,
             "Referer": "https://kwik.cx/",
         }
+        referer = headers.get("Referer", "https://kwik.cx/")
         play_url = resource
-        if self.hls_proxy is not None:
+        # Only HLS routes through the proxy; progressive files (a .mkv
+        # from kusonime) play directly with their own headers.
+        if self.hls_proxy is not None and ".m3u8" in resource:
             try:
                 play_url = self.hls_proxy.get_proxy_url(
                     resource,
-                    referer="https://kwik.cx/",
+                    referer=referer,
                     headers=headers,
                 )
             except Exception as ex:
@@ -703,7 +734,7 @@ class AppController:
         state.player_spec = {
             "resource": play_url,
             "source_url": resource,
-            "source_referer": "https://kwik.cx/",
+            "source_referer": referer,
             "source_headers": headers,
             "variants": variants,
             "proxied": self.hls_proxy is not None,
@@ -764,7 +795,9 @@ class AppController:
             label = f"{src.resolution}p - {audio_label}"
             if src.fansub:
                 label += f" ({src.fansub})"
-            choices.append({"label": label, "kind": "source", "url": src.url})
+            choices.append(
+                {"label": label, "kind": "source", "url": src.url, "headers": src.headers}
+            )
 
         state.selected_source = sources[0]
         if len(choices) <= 1:
@@ -791,11 +824,7 @@ class AppController:
         """Resolve one kwik source and hand the m3u8 to KTV, exactly as the
         old app did (TimeoutError counts as launch success)."""
         self._resolve_stage(self._play_gen, "Resolving stream…")
-        try:
-            m3u8 = await self.kwik.resolve(source.url)
-        except Exception as ex:
-            logger.error("external: resolve failed: %s", ex)
-            m3u8 = None
+        m3u8 = await self._resolve_source(source, anime_session)
         if not m3u8:
             self._show_error_snackbar("Failed to resolve the stream.")
             return
@@ -883,11 +912,7 @@ class AppController:
             self._show_error_snackbar("No stream found for this episode.")
             self._finish_download_start(episode_session)
             return
-        try:
-            m3u8 = await self.kwik.resolve(sources[0].url)
-        except Exception as ex:
-            logger.error("download: resolve failed: %s", ex)
-            m3u8 = None
+        m3u8 = await self._resolve_source(sources[0], anime_session)
         if not m3u8:
             self._show_error_snackbar("Couldn't resolve the stream for download.")
             self._finish_download_start(episode_session)
