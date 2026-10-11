@@ -372,6 +372,8 @@ def _use_player_overlay(state, controller) -> None:
             source_referer=spec.get("source_referer"),
             source_headers=spec.get("source_headers"),
             proxied=spec.get("proxied", False),
+            subtitles=spec.get("subtitles") or [],
+            skip=spec.get("skip") or {},
         )
         # The controller owns the proxy; the player needs it to rebuild a
         # url when a quality or an audio track is pinned.

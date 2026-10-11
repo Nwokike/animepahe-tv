@@ -165,3 +165,36 @@ def test_vrf_bare_retry_fallback_exists():
     assert "vrf=" in method_src  # still sent first, as the site's JS does
     assert "except Exception:" in method_src  # bare retry on rejection
     assert "style=list" in method_src
+
+
+def test_player_window_math_accepts_both_shapes():
+    from components.player.immersive_player import ImmersivePlayer as _IP  # noqa: F401
+
+    """The skip chip's window helper: getSources serves objects, the
+    per-episode skip_data serves arrays — both must work."""
+    from components.player.immersive_player import ImmersivePlayer
+
+    assert ImmersivePlayer._window({"start": 30, "end": 119}) == (30.0, 119.0)
+    assert ImmersivePlayer._window([1280, 1369]) == (1280.0, 1369.0)
+    assert ImmersivePlayer._window({}) is None
+    assert ImmersivePlayer._window([1]) is None
+    assert ImmersivePlayer._window("junk") is None
+
+
+def test_player_active_window_prefers_sources_falls_back():
+    from components.player.immersive_player import ImmersivePlayer
+
+    player = ImmersivePlayer.__new__(ImmersivePlayer)  # no _build
+    player.skip = {
+        "intro": {"start": 30, "end": 119},
+        "outro": {},
+        "episode_intro": [],
+        "episode_outro": [1280, 1369],
+    }
+    inside = player._active_window(60)
+    assert inside == (30.0, 119.0)
+    outside = player._active_window(200)
+    assert outside is None
+    # episode-array fallback when getSources served nothing
+    player.skip = {"intro": {}, "outro": {}, "episode_intro": [], "episode_outro": [1280, 1369]}
+    assert player._active_window(1300) == (1280.0, 1369.0)

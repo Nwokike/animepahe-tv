@@ -112,6 +112,8 @@ class ImmersivePlayer(ft.Stack):
         source_referer: str | None = None,
         source_headers: dict | None = None,
         proxied: bool = False,
+        subtitles: list | None = None,
+        skip: dict | None = None,
     ):
         super().__init__(expand=True)
         self.resource = resource
@@ -128,6 +130,11 @@ class ImmersivePlayer(ft.Stack):
         self.source_referer = source_referer
         self.source_headers = source_headers or {}
         self.proxied = proxied
+        # Subtitle tracks + skip windows exactly as the source served them
+        # (anikato carries both; animepahe carries neither — hardsubs).
+        self.subtitles = subtitles or []
+        self.skip = skip or {}
+        self._subtitle_applied = False
         self.hls_proxy = None  # set by the shell mount; see _use_player_overlay
 
         self._is_closing = False
@@ -238,10 +245,29 @@ class ImmersivePlayer(ft.Stack):
             on_complete=self._on_complete,
         )
 
+        # Skip-intro/outro chip: KTV-styled toast, hidden until the
+        # position enters a declared window.
+        self.skip_chip = ft.Container(
+            content=ft.Text(
+                "Skip Intro",
+                size=13,
+                weight=ft.FontWeight.W_700,
+                color=ft.Colors.WHITE,
+            ),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.BLACK),
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.WHITE)),
+            right=24,
+            bottom=88,
+            visible=False,
+            on_click=self._on_skip_chip,
+        )
         self.controls = [
             ft.Container(expand=True, bgcolor=ft.Colors.BLACK),
             self.video,
             self.overlay,
+            self.skip_chip,
         ]
 
     def _build_controls(self) -> fv.AdaptiveVideoControls:
@@ -830,7 +856,7 @@ class ImmersivePlayer(ft.Stack):
             page = None
         if page is None or self._is_closing:
             return
-        if len(variants) <= 1 and len(tracks) < 2:
+        if len(variants) <= 1 and len(tracks) < 2 and not self.subtitles:
             return
 
         from core.dialogs import show_app_dialog
@@ -896,6 +922,31 @@ class ImmersivePlayer(ft.Stack):
             )
             sections.append(ft.Column(rows, tight=True, spacing=6))
 
+        if self.subtitles:
+            def _pick_subtitle(index):
+                _close()
+                self.apply_subtitle(index)
+
+            sub_rows = [
+                ft.FilledButton(
+                    content="Off",
+                    on_click=lambda e: _pick_subtitle(None),
+                )
+            ]
+            for i, track in enumerate(self.subtitles):
+                label = track.get("label") or f"Track {i + 1}"
+                if track.get("default"):
+                    label += " (default)"
+                sub_rows.append(
+                    ft.OutlinedButton(
+                        content=label,
+                        on_click=lambda e, idx=i: _pick_subtitle(idx),
+                    )
+                )
+            sections.append(ft.Container(height=8))
+            sections.append(ft.Text("Subtitles", size=13, weight=ft.FontWeight.W_700))
+            sections.append(ft.Column(sub_rows, tight=True, spacing=6))
+
         show_app_dialog(
             page,
             ft.AlertDialog(
@@ -908,6 +959,31 @@ class ImmersivePlayer(ft.Stack):
                 actions_alignment=ft.MainAxisAlignment.END,
             ),
         )
+
+    def apply_subtitle(self, index: int | None) -> None:
+        """Off (None) clears the track; an index applies that source
+        track. The URLs in self.subtitles are already proxy-routed by the
+        controller, so they carry the headers the subtitle host needs."""
+        try:
+            if index is None:
+                self.video.subtitle_track = None
+            else:
+                track = self.subtitles[index]
+                self.video.subtitle_track = fv.VideoSubtitleTrack(src=track["url"])
+            self.video.update()
+        except Exception as ex:
+            logger.warning("subtitle switch failed: %s", ex)
+
+    def _apply_default_subtitle(self) -> None:
+        """The source's own default track (anikato marks English) applies
+        automatically once, on first load."""
+        if self._subtitle_applied or not self.subtitles:
+            return
+        self._subtitle_applied = True
+        for i, track in enumerate(self.subtitles):
+            if track.get("default"):
+                self.apply_subtitle(i)
+                return
 
     @staticmethod
     def _seconds(payload) -> float:
@@ -925,6 +1001,7 @@ class ImmersivePlayer(ft.Stack):
         logger.info("player ready")
         self._hide_overlay()
         self._check_and_trigger_seek()
+        self._apply_default_subtitle()
 
     def _on_duration_change(self, e):
         seconds = self._seconds(getattr(e, "data", None))
@@ -941,6 +1018,76 @@ class ImmersivePlayer(ft.Stack):
             if not self._overlay_hidden:
                 self._hide_overlay()
                 self._check_and_trigger_seek()
+            self._update_skip_chip(seconds)
+
+    # ------------------------------------------------------------------
+    # Skip-intro / skip-outro (windows exactly as the source declared them)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _window(pair) -> tuple[float, float] | None:
+        """Accepts {'start','end'} objects or [start, end] arrays — the
+        two shapes sources serve. Returns (start, end) or None."""
+        if isinstance(pair, dict):
+            try:
+                return (float(pair["start"]), float(pair["end"]))
+            except (KeyError, TypeError, ValueError):
+                return None
+        if isinstance(pair, (list, tuple)) and len(pair) >= 2:
+            try:
+                return (float(pair[0]), float(pair[1]))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _active_window(self, seconds: float):
+        """The window the position is inside, with its seek target."""
+        intro = self._window(self.skip.get("intro"))
+        if intro and intro[0] < seconds < intro[1] - 1:
+            return intro
+        outro = self._window(self.skip.get("outro"))
+        if outro and outro[0] < seconds < outro[1] - 1:
+            return outro
+        # Per-episode arrays are the fallback shape (anikato's
+        # ajax/server skip_data) when getSources served nothing.
+        ep_intro = self._window(self.skip.get("episode_intro"))
+        if ep_intro and ep_intro[0] < seconds < ep_intro[1] - 1:
+            return ep_intro
+        ep_outro = self._window(self.skip.get("episode_outro"))
+        if ep_outro and ep_outro[0] < seconds < ep_outro[1] - 1:
+            return ep_outro
+        return None
+
+    def _update_skip_chip(self, seconds: float) -> None:
+        window = self._active_window(seconds)
+        is_intro = window is not None and (
+            window == self._window(self.skip.get("intro"))
+            or window == self._window(self.skip.get("episode_intro"))
+        )
+        visible = window is not None
+        label = "Skip Intro" if is_intro else "Skip Outro"
+        changed = visible != self.skip_chip.visible or (
+            visible and self.skip_chip.content.value != label
+        )
+        if not changed:
+            return
+        self.skip_chip.visible = visible
+        self.skip_chip.content.value = label
+        try:
+            self.skip_chip.update()
+        except Exception:
+            pass
+
+    async def _on_skip_chip(self, e=None):
+        window = self._active_window(self._last_position)
+        if not window:
+            return
+        start, end = window
+        # Land 1s past the window so the chip does not re-flash.
+        try:
+            await self.video.seek(end + 1)
+        except Exception as ex:
+            logger.warning("skip seek failed: %s", ex)
 
     def _on_error(self, e):
         err_msg = str(getattr(e, "data", None) or e)
