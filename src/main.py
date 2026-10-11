@@ -87,13 +87,25 @@ class AppController:
 
         self.store = get_store()
         self.scraper = AnimePaheScraper()
-        # The data layer: the ROUTER. AnimePahe slots in as provider #1
-        # (a thin adapter over the untouched scraper); further complete
-        # providers register here and fail over per request.
+        # The data layer: the ROUTER. Every provider is a complete app in
+        # its own way; the auto order runs the OPEN sources first and
+        # keeps AnimePahe (whose catalog is Cloudflare-walled) as the
+        # safety net — its breaker trips on walled calls while its files
+        # still get attempted. Per-request failover, never locked.
+        from services.providers.anikato import AniKatoProvider
+        from services.providers.animeout import AnimeOutProvider
         from services.providers.animepahe_provider import AnimePaheProvider
+        from services.providers.kusonime import KusonimeProvider
         from services.router import ProviderRouter
 
-        self.router = ProviderRouter([AnimePaheProvider(self.scraper)])
+        self.router = ProviderRouter(
+            [
+                AniKatoProvider(),
+                AnimeOutProvider(),
+                KusonimeProvider(),
+                AnimePaheProvider(self.scraper),
+            ]
+        )
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
         self._search_gen = 0
