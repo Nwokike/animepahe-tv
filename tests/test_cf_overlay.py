@@ -79,7 +79,8 @@ def test_blocked_keeps_live_body_and_adds_scrim():
 
 def test_verify_button_calls_retry():
     controller = _FakeController()
-    card = _cf_overlay_card(controller)
+    state = AppState()
+    card = _cf_overlay_card(state, controller)
     button = next(
         c
         for c in _walk(card)

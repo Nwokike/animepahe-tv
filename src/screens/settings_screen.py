@@ -127,11 +127,11 @@ def SettingsScreen() -> ft.Control:
             page.update(log_text, telemetry_text)
 
         def _copy(e):
-            import flet as _ft
+            from core.shared_services import get_shared_services
 
-            clipboard = _ft.Clipboard()
-            page.services.append(clipboard)
-            page.run_task(_do_copy, page, clipboard, log_text.value)
+            page.run_task(
+                get_shared_services(page).set_clipboard, log_text.value
+            )
 
         def _clear(e):
             in_memory_log_handler.clear_logs()
@@ -216,17 +216,5 @@ def SettingsScreen() -> ft.Control:
     )
 
 
-async def _do_copy(page, clipboard, text: str):
-    from flet import context
-
-    try:
-        await clipboard.set(text)
-    except Exception:
-        pass
-    finally:
-        try:
-            current = context.page
-            if current is not None and clipboard in current.services:
-                current.services.remove(clipboard)
-        except Exception:
-            pass
+# (_do_copy was the per-tap Clipboard dance; settings now uses the shared
+# service from core.shared_services, mounted once at init.)

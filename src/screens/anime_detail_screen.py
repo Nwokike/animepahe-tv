@@ -11,6 +11,7 @@ its own anime by session — today it reads state.episodes like the old view.
 import flet as ft
 
 from components.banner_ad import build_banner_ad
+from components.empty_state import EmptyState
 from components.focus_styles import (
     attach_focus_zoom,
     card_button_style,
@@ -118,6 +119,7 @@ def AnimeDetailScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.episodes_version
+    _ = state.busy_version  # download-start spinners, quality resolving
 
     from flet import context as flet_context
 
@@ -141,6 +143,13 @@ def AnimeDetailScreen() -> ft.Control:
             content=ft.ProgressRing(color=AppColors.PRIMARY),
             alignment=ft.Alignment.CENTER,
             expand=True,
+        )
+
+    if not episodes:
+        return EmptyState(
+            "No episodes found",
+            message="This series may have no releases yet — try again later.",
+            icon=ft.Icons.MOVIE_FILTER_ROUNDED,
         )
 
     backdrop = ft.Stack(
@@ -191,6 +200,10 @@ def AnimeDetailScreen() -> ft.Control:
                 size=18,
                 color=AppColors.SUCCESS,
             )
+        if ep.session in state.starting_downloads:
+            # Source + kwik resolve before the job starts — spin instead of
+            # looking like the tap did nothing.
+            return ft.ProgressRing(width=16, height=16, stroke_width=2)
         if ep.session in download_progress:
             return ft.ProgressRing(width=16, height=16, stroke_width=2)
         return ft.IconButton(

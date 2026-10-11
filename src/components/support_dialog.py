@@ -14,12 +14,14 @@ import flet as ft
 
 from core.config import SUPPORT_URL
 from core.dialogs import show_app_dialog
+from core.shared_services import get_shared_services
 
 logger = logging.getLogger(__name__)
 
 
 def show_support_dialog(page: ft.Page):
     """'Contact Support & Feedback' — Close / Open."""
+    shared = get_shared_services(page)
 
     def _dismiss():
         setattr(page, "_app_dialog", None)
@@ -30,12 +32,8 @@ def show_support_dialog(page: ft.Page):
 
     async def _open(e):
         _dismiss()
-        try:
-            await asyncio.wait_for(
-                ft.UrlLauncher().launch_url(SUPPORT_URL), timeout=1.0
-            )
-        except Exception as ex:
-            logger.warning("support link launch failed: %s", ex)
+        if not await shared.launch_url(SUPPORT_URL):
+            logger.warning("support link failed to open")
         page.update()
 
     def dismiss(e):

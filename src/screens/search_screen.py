@@ -10,13 +10,19 @@ title/year/type/score, 4px border reserve for the focus ring.
 import flet as ft
 
 from components.banner_ad import build_banner_ad
+from components.empty_state import EmptyState
 from components.focus_styles import (
     attach_focus_zoom,
     card_button_style,
     card_focus_scale,
 )
 from components.pagination import pager as ft_pager
-from core.constants import LBL_CF_BLOCKED_SEARCH, MAX_SEARCH_QUERY_LENGTH
+from core.constants import (
+    LBL_CF_BLOCKED_SEARCH,
+    LBL_OFFLINE,
+    LBL_SEARCH_EMPTY,
+    MAX_SEARCH_QUERY_LENGTH,
+)
 from core.theme import AppColors
 from hooks.use_debounce import use_debounce
 from state.app_state import AppStateCtx
@@ -142,6 +148,11 @@ def SearchScreen() -> ft.Control:
         # would queue a duplicate request and jump the results twice.
         if state.is_loading:
             return
+        # Network check first — offline is not the same as the CF gate,
+        # and telling an offline user to "verify you're human" is wrong.
+        if not state.is_online:
+            _warn_offline()
+            return
         # The original gated search behind the CF check too — a request
         # while blocked would just fail and look like "no results".
         if state.cf_blocked:
@@ -159,6 +170,9 @@ def SearchScreen() -> ft.Control:
         set_query(q)
         if state.is_loading:
             return
+        if not state.is_online:
+            _warn_offline()
+            return
         if state.cf_blocked:
             from core.notify import show_snack
 
@@ -169,6 +183,15 @@ def SearchScreen() -> ft.Control:
             )
             return
         controller.load_search(q, 1)
+
+    def _warn_offline():
+        from core.notify import show_snack
+
+        show_snack(
+            page,
+            LBL_OFFLINE,
+            bgcolor=AppColors.ERROR,
+        )
 
     # Suggestions: recent history filtered by what has been typed (debounced).
     history = state.search_history or []
@@ -183,10 +206,20 @@ def SearchScreen() -> ft.Control:
 
     field = ft.TextField(
         hint_text="Search anime...",
-        border_radius=16,
+        # 1.0.4 API: border_radius/border_color/focused_border_color are
+        # deprecated on TextField — a per-ControlState border map is the
+        # supported shape now (the deprecation warnings came from here).
+        border={
+            ft.ControlState.DEFAULT: ft.OutlineInputBorder(
+                border_radius=16,
+                side=ft.BorderSide(1, ft.Colors.TRANSPARENT),
+            ),
+            ft.ControlState.FOCUSED: ft.OutlineInputBorder(
+                border_radius=16,
+                side=ft.BorderSide(1.5, AppColors.PRIMARY),
+            ),
+        },
         bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
-        border_color=ft.Colors.TRANSPARENT,
-        focused_border_color=AppColors.PRIMARY,
         focused_bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
         prefix_icon=ft.Icons.SEARCH_ROUNDED,
         content_padding=20,
@@ -301,48 +334,32 @@ def SearchScreen() -> ft.Control:
             expand=True,
         )
     elif state.search_query:
-        results = ft.Container(
-            content=ft.Column(
-                [
-                    ft.Icon(ft.Icons.SEARCH_OFF_ROUNDED, size=56, color=ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text(
-                        f"No results found for '{state.search_query}'",
-                        size=15,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=12,
-            ),
-            alignment=ft.Alignment.CENTER,
-            expand=True,
+        results = EmptyState(
+            f"No results found for '{state.search_query}'",
+            message="Check the spelling or try a different title.",
+            icon=ft.Icons.SEARCH_OFF_ROUNDED,
         )
     else:
-        results = ft.Container(
-            content=ft.Column(
-                [
-                    ft.Icon(ft.Icons.SEARCH_ROUNDED, size=56, color=ft.Colors.ON_SURFACE_VARIANT),
-                    ft.Text(
-                        "Search for anime to get started",
-                        size=15,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=12,
-            ),
-            alignment=ft.Alignment.CENTER,
-            expand=True,
+        results = EmptyState(
+            "Search for anime to get started",
+            message=LBL_SEARCH_EMPTY,
+            icon=ft.Icons.SEARCH_ROUNDED,
         )
 
-    return ft.Column(
-        [
-            header,
-            ft.Row([ft.Container(expand=True), clear_btn], spacing=8),
-            suggestion_rows,
-            ft.Container(content=results, expand=True),
-        ],
-        spacing=8,
+    # Column has no `padding` field in flet 1.0.4 — the screen inset lives
+    # on the wrapper Container (passing it to Column raises TypeError the
+    # moment the component re-renders).
+    return ft.Container(
+        content=ft.Column(
+            [
+                header,
+                ft.Row([ft.Container(expand=True), clear_btn], spacing=8),
+                suggestion_rows,
+                ft.Container(content=results, expand=True),
+            ],
+            spacing=8,
+            expand=True,
+        ),
         expand=True,
         padding=ft.Padding.only(left=16, right=16, top=16, bottom=8),
     )

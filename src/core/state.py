@@ -2,7 +2,7 @@ import flet as ft
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Anime:
     id: int
     title: str
@@ -16,7 +16,7 @@ class Anime:
     session: str
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Episode:
     id: int
     anime_id: int
@@ -30,7 +30,7 @@ class Episode:
     filler: bool
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Source:
     url: str
     resolution: int
@@ -38,7 +38,7 @@ class Source:
     fansub: str
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class LatestRelease:
     anime_id: int
     anime_title: str
@@ -67,6 +67,8 @@ class AppState:
     player_error: str | None = None
     cache: object | None = None
     cf_blocked: bool = False
+    is_online: bool = True
+    connectivity_version: int = 0
     update_available: bool = False
     update_data: dict | None = None
     # Version counters: bumped by the controller when a collection is
@@ -98,10 +100,21 @@ class AppState:
     download_progress: dict | None = None
     downloads_version: int = 0
 
+    # Long-running action feedback (KTV's rule: anything that takes more
+    # than a beat shows a spinner, or the app looks dead).
+    is_resolving: bool = False
+    resolve_stage: str = ""
+    cf_retrying: bool = False
+    quality_resolving: bool = False
+    starting_downloads: set = None
+    # Bumped whenever any busy flag flips, so components re-render.
+    busy_version: int = 0
+
     def __init__(self):
         self.search_results = []
         self.episodes = []
         self.update_data = None
+        self.starting_downloads = set()
 
 
 state = AppState()

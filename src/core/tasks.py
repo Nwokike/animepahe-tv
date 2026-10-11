@@ -19,7 +19,9 @@ def spawn(coro, name: str = "bg-task") -> asyncio.Task:
         except asyncio.CancelledError:
             return
         if exc is not None:
-            logger.warning("Background task %r failed: %s", name, exc)
+            logger.warning(
+                "Background task %r failed: %s", name, exc, exc_info=exc
+            )
 
     task.add_done_callback(_done)
     return task

@@ -22,6 +22,7 @@ from core.config import (
     KTV_UPTODOWN_URL,
 )
 from core.dialogs import show_app_dialog
+from core.shared_services import get_shared_services
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def _button_style():
 
 def show_ktv_install_dialog(page: ft.Page):
     """Play Store / Uptodown / Not now — shown when the deep link fails."""
+    shared = get_shared_services(page)
 
     def _dismiss_dialog():
         # Clear the Back-handler registration whether the pop lands or not.
@@ -52,22 +54,12 @@ def show_ktv_install_dialog(page: ft.Page):
 
     async def open_store(e):
         _dismiss_dialog()
-        try:
-            await asyncio.wait_for(
-                ft.UrlLauncher().launch_url(KTV_PLAY_STORE_URL), timeout=1.0
-            )
-        except Exception:
-            pass
+        await shared.launch_url(KTV_PLAY_STORE_URL)
         page.update()
 
     async def open_uptodown(e):
         _dismiss_dialog()
-        try:
-            await asyncio.wait_for(
-                ft.UrlLauncher().launch_url(KTV_UPTODOWN_URL), timeout=1.0
-            )
-        except Exception:
-            pass
+        await shared.launch_url(KTV_UPTODOWN_URL)
         page.update()
 
     def dismiss(e):
@@ -133,13 +125,9 @@ async def launch_external(
     """
     deep_link = build_deep_link(m3u8_url, title)
     logger.info("launching external player: %s", title)
-    try:
-        await asyncio.wait_for(ft.UrlLauncher().launch_url(deep_link), timeout=1.0)
+    shared = get_shared_services(page)
+    if await shared.launch_url(deep_link):
         return True
-    except asyncio.TimeoutError:
-        logger.info("external player launched (timeout is expected success)")
-        return True
-    except Exception as ex:
-        logger.warning("external player launch failed: %s", ex)
-        show_ktv_install_dialog(page)
-        return False
+    logger.warning("external player launch failed — offering install dialog")
+    show_ktv_install_dialog(page)
+    return False

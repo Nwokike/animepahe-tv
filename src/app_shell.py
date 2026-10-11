@@ -12,6 +12,7 @@ both AdMob policy and TV focus design call out as wrong.
 """
 
 import flet as ft
+from flet import context as flet_context
 
 from core.tasks import spawn
 from core.theme import AppColors
@@ -102,10 +103,17 @@ def AppShell() -> ft.Control:
     # re-renders; screens open sheets through the controller instead of
     # calling page.show_dialog ad hoc.
     active_dialog, set_active_dialog = ft.use_state(None)
-    if state.quality_dialog_open and active_dialog is None:
+    # The quality dialog also rebuilds when its resolving flag flips, so the
+    # spinner/disabled state lands without remounting the whole shell.
+    dialog_resolving, set_dialog_resolving = ft.use_state(False)
+    if state.quality_dialog_open and (
+        active_dialog is None or dialog_resolving != state.quality_resolving
+    ):
         set_active_dialog(_build_quality_dialog(state, controller))
+        set_dialog_resolving(state.quality_resolving)
     if not state.quality_dialog_open and active_dialog is not None:
         set_active_dialog(None)
+        set_dialog_resolving(False)
     try:
         ft.use_dialog(active_dialog)
     except RuntimeError:
@@ -119,13 +127,23 @@ def AppShell() -> ft.Control:
         controller._app_controller.ui_state = {
             "dialog_open": active_dialog is not None,
             "view": active_view,
+            "player_open": state.player_open,
         }
 
-    if state.player_open:
-        body = _build_player(state, controller)
-        chrome = None
-        show_nav = False
-    elif active_view == "anime":
+    # The player mounts imperatively into page.overlay rather than being
+    # rendered here: controls built inside a @ft.component render are frozen
+    # after mount, and the player rewrites itself constantly (overlay
+    # visibility, retry buttons, playback rate, quality swap). KTV mounts
+    # its player in a ft.View for the same reason; page.views is gone in
+    # flet 1.0.4, so page.overlay is the equivalent top-level slot.
+    _use_player_overlay(state, controller)
+
+    # Stream resolution takes seconds — the overlay is how the tap is
+    # acknowledged (KTV's rule: anything slower than a beat gets a spinner).
+    _ = state.busy_version
+    _use_resolve_overlay(state, controller)
+
+    if active_view == "anime":
         body = AnimeDetailScreen()
         chrome = _detail_appbar(controller)
         show_nav = False
@@ -144,8 +162,7 @@ def AppShell() -> ft.Control:
     rail_destinations = [
         ft.NavigationRailDestination(icon=icon, label=label)
         for icon, label in zip(_TAB_ICONS, _TABS, strict=True)
-    ]
-    # The bar takes NavigationBarDestination objects — feeding it rail
+    ]    # The bar takes NavigationBarDestination objects — feeding it rail
     # destinations serializes the wrong wire type and the bottom bar
     # renders empty on phones.
     bar_destinations = [
@@ -194,40 +211,200 @@ def AppShell() -> ft.Control:
     )
 
 
-# Reference to the live player so the FocusScope back key can run its
-# bounded position save before the shell flips state. Without this, a
-# remote/system Back discards the resume position for that episode.
+# The live player (so Back can run its bounded position save), the overlay
+# node mounted for it, and the key currently mounted — without the first a
+# remote Back discards the resume position; without the rest, the overlay
+# leaks or shows a stale stage.
 _active_player = None
+_active_mount = None
+_active_key = None
 
 
-def _build_player(state, controller) -> ft.Control:
-    """The in-app player branch, wrapped in FocusScope so Back/Escape
-    always reaches it (without autofocus the overlay swallows the first
-    remote press). A pre-open failure (e.g. a deleted download) short-circuits
-    to the error card instead of a blank player."""
-    from components.player.immersive_player import ImmersivePlayer
-    from hooks.use_focus_scope import FocusScope
+def _play_adjacent(delta: int, controller) -> None:
+    """Next/previous episode from inside the player (module level so the
+    overlay mount can reach it)."""
+    from core.tasks import spawn
 
-    spec = getattr(state, "player_spec", None) or {}
-    from services.store import get_store
+    app_controller = getattr(controller, "_app_controller", None)
+    if app_controller is not None:
+        spawn(app_controller.play_adjacent(delta), name="play-adjacent")
+
+
+def _in_overlay(page, node) -> bool:
+    """Identity membership — controls are dataclasses, so ``in`` compares by
+    value and would match a structurally-equal node."""
+    return node is not None and any(node is m for m in page.overlay)
+
+
+_resolve_mount = None
+_resolve_stage_shown = None
+
+
+def _use_resolve_overlay(state, controller) -> None:
+    """Mount the "Resolving stream…" stage into page.overlay.
+
+    Imperative (same reasoning as the player): it must be replaceable when
+    the stage text changes without re-rendering the whole shell, and it has
+    to sit above the detail screen the tap came from.
+    """
+    global _resolve_mount, _resolve_stage_shown
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+    if page is None:
+        return
+
+    stage = state.resolve_stage if state.is_resolving else None
+    if stage is None:
+        if _resolve_mount is not None and _in_overlay(page, _resolve_mount):
+            page.overlay.remove(_resolve_mount)
+            page.update()
+        _resolve_mount = None
+        _resolve_stage_shown = None
+        return
+
+    if stage == _resolve_stage_shown and _in_overlay(page, _resolve_mount):
+        return  # already showing this stage
+
+    if _resolve_mount is not None and _in_overlay(page, _resolve_mount):
+        page.overlay.remove(_resolve_mount)
+
+    _resolve_mount = ft.Container(
+        expand=True,
+        bgcolor=ft.Colors.with_opacity(0.7, ft.Colors.BLACK),
+        alignment=ft.Alignment.CENTER,
+        content=ft.Column(
+            [
+                ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4),
+                ft.Container(height=16),
+                ft.Text(
+                    stage,
+                    size=15,
+                    weight=ft.FontWeight.W_600,
+                    color=ft.Colors.WHITE,
+                ),
+                ft.Container(height=8),
+                ft.TextButton(
+                    content="Cancel",
+                    on_click=lambda e: controller.cancel_resolve(),
+                ),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+            tight=True,
+        ),
+    )
+    _resolve_stage_shown = stage
+    page.overlay.append(_resolve_mount)
+    page.update()
+
+
+def _unmount_player_overlay(page) -> None:
+    global _active_player, _active_mount, _active_key
+
+    mount, _active_mount, _active_player, _active_key = (
+        _active_mount,
+        None,
+        None,
+        None,
+    )
+    if mount is not None and page is not None and _in_overlay(page, mount):
+        page.overlay.remove(mount)
+        page.update()
+
+
+def _use_player_overlay(state, controller) -> None:
+    """Mount/unmount the player in page.overlay as playback state changes.
+
+    Controls built inside a @ft.component render are frozen after mount,
+    and ImmersivePlayer rewrites itself constantly (overlay visibility,
+    retry buttons, playback rate, quality swap). KTV mounts its player in
+    a ft.View for exactly this reason; page.views is gone in flet 1.0.4, so
+    page.overlay is the equivalent top-level slot. The key comparison is
+    what makes retries and episode switches remount instead of reusing a
+    stale stage.
+    """
+    global _active_player, _active_mount, _active_key
+
+    from flet import context as flet_context
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+    if page is None:
+        return
+
+    if not state.player_open:
+        _unmount_player_overlay(page)
+        return
 
     error = getattr(state, "player_error", None)
+    spec = getattr(state, "player_spec", None) or {}
     if error:
-        return _build_player_error(state, controller, error)
+        key = ("error", error)
+    else:
+        key = ("play", spec.get("episode_session"), spec.get("resource"))
 
-    global _active_player
+    if key == _active_key and _in_overlay(page, _active_mount):
+        return  # already showing exactly this stage
+    _unmount_player_overlay(page)
 
-    player = ImmersivePlayer(
-        resource=spec.get("resource", ""),
-        title=spec.get("title", ""),
-        http_headers=spec.get("headers"),
-        resume_key=spec.get("episode_session"),
-        store=get_store(),
-        variants=spec.get("variants") or [],
-        on_close=lambda: _close_player(),
-    )
-    _active_player = player
-    return FocusScope(content=player, on_back=_player_back)
+    if error:
+        mount = _build_player_error(state, controller, error)
+        player = None
+    else:
+        from components.player.immersive_player import ImmersivePlayer
+        from services.store import get_store
+
+        player = ImmersivePlayer(
+            resource=spec.get("resource", ""),
+            title=spec.get("title", ""),
+            http_headers=spec.get("source_headers"),
+            resume_key=spec.get("episode_session"),
+            store=get_store(),
+            variants=spec.get("variants") or [],
+            on_close=lambda: _close_player(),
+            on_next=lambda: _play_adjacent(1, controller),
+            on_previous=lambda: _play_adjacent(-1, controller),            source_url=spec.get("source_url"),
+            source_referer=spec.get("source_referer"),
+            source_headers=spec.get("source_headers"),
+            proxied=spec.get("proxied", False),
+        )
+        # The controller owns the proxy; the player needs it to rebuild a
+        # url when a quality or an audio track is pinned.
+        app_controller = getattr(controller, "_app_controller", None)
+        player.hls_proxy = getattr(app_controller, "hls_proxy", None)
+        # A plain KeyboardListener, NOT hooks.use_focus_scope.FocusScope:
+        # FocusScope is a @ft.component, and its rendered subtree is frozen
+        # after mount — the exact bug this overlay mount avoids.
+        mount = ft.KeyboardListener(
+            content=player,
+            autofocus=True,
+            on_key_down=_make_back_handler(),
+        )
+
+    _active_player, _active_mount, _active_key = player, mount, key
+    page.overlay.append(mount)
+    page.update()
+
+
+_BACK_KEYS = {"Back", "Escape", "BrowserBack", "Go Back", "Browser Back"}
+
+
+def _make_back_handler():
+    """Back/Escape handler for the overlay player (same key set as
+    hooks.use_focus_scope, but as a plain handler — not a component)."""
+
+    def _handler(e: ft.KeyboardEvent):
+        if e.key in _BACK_KEYS:
+            page = flet_context.page
+            if page is not None:
+                page.run_task(_player_back)
+
+    return _handler
 
 
 def _build_player_error(state, controller, message: str) -> ft.Control:
@@ -306,13 +483,30 @@ async def _player_back():
 
 
 async def _async_close_player():
-    global _active_player
+    global _active_player, _active_mount, _active_key
+
+    from flet import context as flet_context
 
     from state.app_state import state
 
+    mount = _active_mount
+    _active_mount = None
     _active_player = None
+    _active_key = None
     state.player_open = False
     state.episodes_version += 1
+    # Unmount the overlay node the shell mounted imperatively.
+    if mount is not None:
+        try:
+            page = flet_context.page
+        except Exception:
+            page = None
+        if page is not None and _in_overlay(page, mount):
+            try:
+                page.overlay.remove(mount)
+                page.update()
+            except Exception:
+                pass
 
 
 def _close_player():
@@ -321,7 +515,7 @@ def _close_player():
     page = flet_context.page
     if page is None:
         return
-    page.run_task(_player_back())
+    page.run_task(_player_back)
 
 
 def _detail_appbar(controller) -> ft.Control:
@@ -358,19 +552,59 @@ def _placeholder(title: str, message: str) -> ft.Control:
 
 
 def _build_quality_dialog(state, controller) -> ft.Control:
-    """Select Quality & Audio — restored from the original build, extended
-    with the m3u8 variants the player can switch to."""
+    """Select Quality & Audio — every site source the scraper found, best
+    first, exactly the list the original build showed. Nothing is filtered:
+    an anime with 3 qualities in 2 languages shows all of them. The best
+    pick is simply filled in as the recommended default, and the m3u8
+    variants of whatever is chosen live in the player's own settings sheet.
+    """
     choices = state.quality_choices or []
-    buttons = [
-        ft.OutlinedButton(
-            content=choice["label"],
-            on_click=lambda e, i=i: controller.choose_quality(i),
+    # A site-source choice re-resolves through kwik (seconds): disable the
+    # buttons and show the spinner while it happens.
+    resolving = bool(getattr(state, "quality_resolving", False))
+    buttons = []
+    for i, choice in enumerate(choices):
+        is_first = i == 0
+        buttons.append(
+            (
+                ft.FilledButton(
+                    content=choice["label"],
+                    icon=ft.Icons.RECOMMEND_ROUNDED,
+                    disabled=resolving,
+                    style=ft.ButtonStyle(
+                        bgcolor=AppColors.PRIMARY,
+                        color=ft.Colors.WHITE,
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                    ),
+                    on_click=lambda e, i=i: controller.choose_quality(i),
+                )
+                if is_first
+                else ft.OutlinedButton(
+                    content=choice["label"],
+                    disabled=resolving,
+                    on_click=lambda e, i=i: controller.choose_quality(i),
+                )
+            )
         )
-        for i, choice in enumerate(choices)
-    ]
     return ft.AlertDialog(
         modal=True,
-        title=ft.Text("Select Quality & Audio", weight=ft.FontWeight.BOLD),
+        title=ft.Row(
+            [
+                ft.Text(
+                    "Select Quality & Audio",
+                    weight=ft.FontWeight.W_600,
+                    expand=True,
+                ),
+                ft.ProgressRing(
+                    width=16,
+                    height=16,
+                    stroke_width=2,
+                    visible=resolving,
+                ),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
         content=ft.Column(controls=buttons, tight=True, spacing=8),
         actions=[
             ft.TextButton(

@@ -30,6 +30,10 @@ from state.controller_ctx import ControllerMethods, ControllerMethodsCtx
 
 logger = logging.getLogger(__name__)
 
+# UI updates per second for live download progress (segment callbacks fire
+# far more often than a human can read).
+_PROGRESS_FLUSH_SECONDS = 0.5
+
 
 def _anime_dict(anime) -> dict:
     """Anime dataclass -> the detail header's dict."""
@@ -58,6 +62,13 @@ class AppController:
         # The shell-owned ControllerMethods (set in main()); the global Back
         # handler routes through its navigation closures.
         self.shell: ControllerMethods | None = None
+        self._latest_gen = 0
+        self._episodes_gen = 0
+        self._play_lock = asyncio.Lock()
+        self._play_gen = 0
+        # Download progress throttle state (see _on_download_progress).
+        self._pending_progress: dict = {}
+        self._progress_flush_task = None
 
     async def init(self):
         self.page.title = APP_NAME
@@ -82,6 +93,25 @@ class AppController:
 
         self.focus_manager = FocusManager(self.page)
         self.focus_manager.set_back_handler(self._handle_global_back)
+        self._mount_connectivity()
+        # One launcher + one clipboard for the whole app (call sites used to
+        # construct their own per tap).
+        from core.shared_services import mount_shared_services
+
+        self.shared = mount_shared_services(self.page)
+        # The loopback HLS proxy is what makes playback work: the stream
+        # hosts fingerprint TLS and reject the video backends' client, so a
+        # raw m3u8 fails to open. The proxy fetches with Chrome
+        # impersonation + the right headers and rewrites the playlist, which
+        # is also what makes quality/audio switching possible.
+        from services.hls_proxy import HLSProxy
+
+        self.hls_proxy = HLSProxy()
+        try:
+            await self.hls_proxy.start()
+        except Exception as ex:
+            logger.error("HLS proxy failed to start: %s — playing direct", ex)
+            self.hls_proxy = None
         from services.downloads import DownloadManager
 
         self.downloads = DownloadManager(store=self.store)
@@ -138,6 +168,47 @@ class AppController:
             state.update_available = True
             state.update_data = update_data
 
+    # ------------------------------------------------------------------
+    # Connectivity (native listener — no probe polling)
+    # ------------------------------------------------------------------
+
+    def _mount_connectivity(self):
+        """Track online state so an offline user is told they're offline,
+        not told to verify they're human (the old CF gate conflated the
+        two: a dead network set cf_blocked)."""
+        from flet import ConnectivityType
+
+        connectivity = ft.Connectivity()
+        connectivity.on_change = self._on_connectivity_change
+        self.page.services.append(connectivity)
+
+        async def _init():
+            try:
+                result = await connectivity.get_connectivity()
+                state.is_online = ConnectivityType.NONE not in result
+                logger.info("connectivity initial: online=%s", state.is_online)
+            except Exception as ex:
+                logger.debug("connectivity init failed: %s", ex)
+
+        spawn(_init(), name="connectivity-init")
+
+    def _on_connectivity_change(self, e):
+        from flet import ConnectivityType
+
+        was_online = state.is_online
+        state.is_online = ConnectivityType.NONE not in e.connectivity
+        if was_online and not state.is_online:
+            logger.warning("Connectivity lost")
+            state.connectivity_version += 1
+            self._show_error_snackbar("You're offline. Check your connection.")
+        elif not was_online and state.is_online:
+            logger.info("Connectivity restored")
+            state.connectivity_version += 1
+            # A network blip must not leave the CF gate latched on: probe
+            # the feed again now that we're back.
+            if state.cf_blocked:
+                spawn(self.retry_cloudflare(), name="cf-retry-on-reconnect")
+
     def _show_error_snackbar(self, message: str = "Network error"):
         """Surface a failure to the user (guarded: never raises, never kills
         a real dialog). All failure paths funnel through here."""
@@ -193,6 +264,11 @@ class AppController:
         if lock.locked():
             return
 
+        # Generation counter: a slow response for an older page must never
+        # overwrite a newer one's results (load_search's pattern).
+        self._latest_gen += 1
+        gen = self._latest_gen
+
         async with lock:
             state.is_loading = True
             state.latest_page = page_num
@@ -200,6 +276,9 @@ class AppController:
 
             try:
                 results, has_more = await self.scraper.latest_releases(page_num)
+                if gen != self._latest_gen:
+                    logger.info("load_latest discarding stale page=%d", page_num)
+                    return
                 logger.info(
                     "load_latest page=%d got %d items, has_more=%s",
                     page_num,
@@ -211,21 +290,31 @@ class AppController:
                 if page_num == 1 and results:
                     state.cf_blocked = False
             except Exception as ex:
+                if gen != self._latest_gen:
+                    return
                 logger.error("load_latest page=%d failed: %s", page_num, ex)
                 state.latest_releases = []
                 state.latest_has_more = False
                 if page_num == 1:
                     self._show_error_snackbar("Couldn't load the latest releases.")
             finally:
-                state.is_loading = False
-                if page_num == 1 and not state.latest_releases:
-                    state.cf_blocked = True
-                state.latest_version += 1
+                if gen == self._latest_gen:
+                    state.is_loading = False
+                    # Only a confirmed-online empty feed is a Cloudflare gate.
+                    # An offline user used to get the SHIELD card here and told
+                    # to verify they're human — a network blip is not a challenge.
+                    if page_num == 1 and not state.latest_releases and state.is_online:
+                        state.cf_blocked = True
+                    state.latest_version += 1
 
     async def retry_cloudflare(self):
         """Clear the Cloudflare session + caches, then reload the home feed."""
         state.cf_blocked = False
         state.latest_version += 1
+        # The Verify button spins for the whole re-challenge: it can take
+        # several seconds on a cold WebView solve.
+        state.cf_retrying = True
+        state.busy_version += 1
         try:
             await self.scraper.ddos.reset()
             self.scraper.clear_cache()
@@ -233,12 +322,20 @@ class AppController:
         except Exception as ex:
             logger.error("retry_cloudflare failed: %s", ex)
             self._show_error_snackbar("Couldn't refresh the session.")
+        finally:
+            state.cf_retrying = False
+            state.busy_version += 1
         await self.load_latest(1)
 
     async def load_episodes(self, anime_session: str, page_num: int = 1):
         lock = self._get_lock(f"episodes_{anime_session}")
         if lock.locked():
             return
+
+        # Generation counter per session: switching anime mid-flight must
+        # not let the older detail screen's response land last.
+        self._episodes_gen += 1
+        gen = self._episodes_gen
 
         async with lock:
             state.is_loading = True
@@ -248,6 +345,9 @@ class AppController:
 
             try:
                 episodes, has_more = await self.scraper.episodes(anime_session, page_num)
+                if gen != self._episodes_gen:
+                    logger.info("load_episodes discarding stale page for %s", anime_session)
+                    return
                 logger.info(
                     "load_episodes session=%s page=%d got %d",
                     anime_session,
@@ -258,22 +358,72 @@ class AppController:
                 state.episodes_has_more = has_more
                 state.cf_blocked = False
             except Exception as ex:
+                if gen != self._episodes_gen:
+                    return
                 logger.error("load_episodes session=%s failed: %s", anime_session, ex)
                 state.episodes = []
                 state.episodes_has_more = False
                 self._show_error_snackbar("Couldn't load the episode list.")
             finally:
-                state.is_loading = False
-                state.episodes_version += 1
+                if gen == self._episodes_gen:
+                    state.is_loading = False
+                    state.episodes_version += 1
 
     async def play_episode(self, anime_session: str, episode_session: str):
         # Resolve the stream, then open the in-app player. The ktv:// deep
         # link stays as the fallback for when resolution fails.
+        # The lock dedupes a double-tap on the same episode (otherwise two
+        # resolutions race and the second quality dialog wins).
+        if self._play_lock.locked():
+            logger.info("play_episode already resolving, ignoring tap")
+            return
+        async with self._play_lock:
+            await self._play_episode(anime_session, episode_session)
+
+    async def _play_episode(self, anime_session: str, episode_session: str):
         state.current_anime_session = anime_session
         state.current_episode_session = episode_session
         state.episodes_version += 1
 
+        # Resolution takes seconds (play-page fetch + kwik unpack + the m3u8
+        # variants). Show the "Resolving stream…" stage the whole way, and
+        # honour a Cancel from the overlay via the play generation.
+        gen = self._begin_resolve("Finding sources…")
+        try:
+            await self._play_episode_resolve(anime_session, episode_session, gen)
+        finally:
+            if gen == self._play_gen:
+                self._end_resolve()
+
+    def _begin_resolve(self, stage: str) -> int:
+        self._play_gen += 1
+        state.is_resolving = True
+        state.resolve_stage = stage
+        state.busy_version += 1
+        return self._play_gen
+
+    def _resolve_stage(self, gen: int, stage: str) -> None:
+        if gen == self._play_gen:
+            state.resolve_stage = stage
+            state.busy_version += 1
+
+    def _end_resolve(self) -> None:
+        state.is_resolving = False
+        state.resolve_stage = ""
+        state.busy_version += 1
+
+    def cancel_resolve(self) -> None:
+        """Cancel from the resolving overlay: bump the generation so the
+        in-flight resolution discards its result."""
+        self._play_gen += 1
+        self._end_resolve()
+
+    async def _play_episode_resolve(
+        self, anime_session: str, episode_session: str, gen: int
+    ):
         anime = await self._resolve_anime(anime_session)
+        if gen != self._play_gen:
+            return
         ep = next((e for e in state.episodes if e.session == episode_session), None)
         if anime and ep:
             record = {
@@ -296,6 +446,8 @@ class AppController:
             await show_interstitial(self.page)
         except Exception as ex:
             logger.warning("interstitial skip: %s", ex)
+        if gen != self._play_gen:
+            return
 
         # 1. Stream sources — sorted best-first, as the original did.
         try:
@@ -304,6 +456,8 @@ class AppController:
             logger.error("sources(%s/%s) failed: %s", anime_session, episode_session, ex)
             self._show_error_snackbar("Couldn't load the stream sources.")
             sources = []
+        if gen != self._play_gen:
+            return
         if not sources:
             logger.warning("no sources — external player fallback")
             await self._open_external_player(anime_session, episode_session)
@@ -312,28 +466,32 @@ class AppController:
         state.selected_source = sources[0]
 
         # 2. Resolve the best source -> m3u8 -> variants.
+        self._resolve_stage(gen, "Resolving stream…")
         try:
             m3u8 = await self.kwik.resolve(sources[0].url)
         except Exception as ex:
             logger.error("kwik resolve(%s) failed: %s", sources[0].url, ex)
             m3u8 = None
+        if gen != self._play_gen:
+            return
         if not m3u8:
             logger.warning("kwik resolve failed — external player fallback")
             await self._open_external_player(anime_session, episode_session)
             return
         self._resolved_m3u8 = m3u8
+        self._resolve_stage(gen, "Loading qualities…")
         variants = await self._fetch_variants(m3u8)
+        if gen != self._play_gen:
+            return
 
-        # 3. Quality choices: m3u8 variants first ("Auto" = top), then any
-        #    additional site sources that differ in resolution/audio/fansub.
+        # 3. Quality choices: EVERY site source, sorted best-first — exactly
+        #    what the original listed ("1080p - SUB (JPN) (SubsPlease)").
+        #    Nothing is filtered or dropped: the best is simply marked as
+        #    the recommended pick. The m3u8 variants of the chosen source
+        #    are the in-player quality options instead (house-player
+        #    parity), so they don't belong in this list.
         choices: list[dict] = []
-        if len(variants) > 1:
-            choices.append(
-                {"label": f"Auto ({variants[-1]['label']})", "kind": "variant", "index": 0}
-            )
-            for i, v in enumerate(variants):
-                choices.append({"label": v["label"], "kind": "variant", "index": i + 1})
-        for src in sources[1:]:
+        for src in sources:
             audio_label = src.audio or "jpn"
             label = f"{src.resolution}p - {audio_label}"
             if src.fansub:
@@ -354,7 +512,16 @@ class AppController:
         state.episodes_version += 1
 
     async def _fetch_variants(self, m3u8: str) -> list[dict]:
-        from components.player.immersive_player import KWIK_USER_AGENT, _stream_variants
+        """Master-playlist variants through the proxy (correct headers),
+        falling back to a direct fetch when the proxy isn't running."""
+        if self.hls_proxy is not None:
+            return await self.hls_proxy.fetch_variants(
+                m3u8, headers={"Referer": "https://kwik.cx/"}
+            )
+        from components.player.immersive_player import (
+            KWIK_USER_AGENT,
+            _stream_variants,
+        )
 
         try:
             client = self.kwik._get_client()
@@ -387,32 +554,24 @@ class AppController:
             )
             return
         choice = choices[choice_index]
-        variants = pending.get("variants") or []
-        if choice["kind"] == "source":
-            # Re-resolve this site source, then play its own variants.
-            try:
-                m3u8 = await self.kwik.resolve(choice["url"])
-                if m3u8:
-                    variants = await self._fetch_variants(m3u8)
-            except Exception as ex:
-                logger.error("quality switch resolve failed: %s", ex)
-                self._show_error_snackbar("Couldn't switch to that source.")
-                m3u8 = None
-            await self._open_player(
-                m3u8 or pending["m3u8"],
-                variants,
-                pending["anime_session"],
-                pending["episode_session"],
-            )
-            return
-        index = choice["index"]
-        if index == 0 or not variants:
-            await self._open_player(
-                pending["m3u8"], variants, pending["anime_session"], pending["episode_session"]
-            )
-            return
+        # Every entry is a site source (kwik url): re-resolve it, fetch its
+        # own variants, and play. The dialog buttons spin while it happens
+        # (see _build_quality_dialog).
+        state.quality_resolving = True
+        state.busy_version += 1
+        try:
+            m3u8 = await self.kwik.resolve(choice["url"])
+            variants = await self._fetch_variants(m3u8) if m3u8 else []
+        except Exception as ex:
+            logger.error("quality choice resolve failed: %s", ex)
+            self._show_error_snackbar("Couldn't switch to that quality.")
+            m3u8 = None
+            variants = []
+        finally:
+            state.quality_resolving = False
+            state.busy_version += 1
         await self._open_player(
-            variants[index - 1]["uri"],
+            m3u8 or pending["m3u8"],
             variants,
             pending["anime_session"],
             pending["episode_session"],
@@ -425,25 +584,52 @@ class AppController:
         anime_session: str,
         episode_session: str,
     ):
+        """Open the in-app player on a resolved m3u8.
+
+        The resource handed to the player is the PROXY url, not the CDN
+        url: the hosts fingerprint TLS and reject the video backends'
+        client (a raw m3u8 fails with "Failed to open"). ``source_*``
+        travels with the spec so the player can rebuild a proxied url when
+        the viewer pins a quality variant or an audio track.
+        """
         from components.player.immersive_player import KWIK_USER_AGENT
 
         anime = await self._resolve_anime(anime_session)
         # Clear any previous open-failure so it can't blink over the new one.
         state.player_error = None
+        headers = {
+            "User-Agent": KWIK_USER_AGENT,
+            "Referer": "https://kwik.cx/",
+        }
+        play_url = resource
+        if self.hls_proxy is not None:
+            try:
+                play_url = self.hls_proxy.get_proxy_url(
+                    resource,
+                    referer="https://kwik.cx/",
+                    headers=headers,
+                )
+            except Exception as ex:
+                logger.warning("proxy url build failed; playing direct: %s", ex)
         state.player_spec = {
-            "resource": resource,
+            "resource": play_url,
+            "source_url": resource,
+            "source_referer": "https://kwik.cx/",
+            "source_headers": headers,
             "variants": variants,
+            "proxied": self.hls_proxy is not None,
             "title": (anime or {}).get("title") or "AnimePahe",
             "episode_session": episode_session,
             "anime_session": anime_session,
-            "headers": {
-                "User-Agent": KWIK_USER_AGENT,
-                "Referer": "https://kwik.cx/",
-            },
         }
         state.player_open = True
         state.episodes_version += 1
-        logger.info("player opening for %s/%s", anime_session, episode_session)
+        logger.info(
+            "player opening for %s/%s via %s",
+            anime_session,
+            episode_session,
+            "proxy" if self.hls_proxy is not None else "direct",
+        )
 
     async def close_player(self):
         state.player_open = False
@@ -517,14 +703,20 @@ class AppController:
 
         anime = await self._resolve_anime(anime_session)
         ep = next((e for e in state.episodes if e.session == episode_session), None)
+        # The button shows a spinner until the job actually starts — the
+        # source + kwik resolve before it can take seconds.
+        state.starting_downloads.add(episode_session)
+        state.busy_version += 1
         try:
             sources = await self.scraper.sources(anime_session, episode_session)
         except Exception as ex:
             logger.error("download: sources failed: %s", ex)
             self._show_error_snackbar("Couldn't start the download.")
+            self._finish_download_start(episode_session)
             return
         if not sources:
             self._show_error_snackbar("No stream found for this episode.")
+            self._finish_download_start(episode_session)
             return
         try:
             m3u8 = await self.kwik.resolve(sources[0].url)
@@ -533,6 +725,7 @@ class AppController:
             m3u8 = None
         if not m3u8:
             self._show_error_snackbar("Couldn't resolve the stream for download.")
+            self._finish_download_start(episode_session)
             return
 
         metadata = {
@@ -559,6 +752,12 @@ class AppController:
             },
             metadata,
         )
+        self._finish_download_start(episode_session)
+
+    def _finish_download_start(self, episode_session: str) -> None:
+        state.starting_downloads.discard(episode_session)
+        state.busy_version += 1
+        state.downloads_version += 1
 
     async def cancel_download(self, episode_session: str):
         self.downloads.cancel(episode_session)
@@ -607,9 +806,28 @@ class AppController:
         state.episodes_version += 1
 
     def _on_download_progress(self, episode_session: str, progress: dict):
-        state.download_progress = dict(state.download_progress or {})
-        state.download_progress[episode_session] = progress
-        state.downloads_version += 1
+        """Segment-level progress, throttled to ~2 UI updates/second.
+
+        Each segment callback used to bump downloads_version, re-rendering
+        the whole downloads tree per chunk. Now the latest value is cached
+        and a single flusher runs while any job is active.
+        """
+        self._pending_progress[episode_session] = progress
+        if self._progress_flush_task is None or self._progress_flush_task.done():
+            self._progress_flush_task = spawn(
+                self._flush_download_progress(), name="download-progress-flush"
+            )
+
+    async def _flush_download_progress(self):
+        while self._pending_progress:
+            await asyncio.sleep(_PROGRESS_FLUSH_SECONDS)
+            pending, self._pending_progress = self._pending_progress, {}
+            if not pending:
+                return
+            merged = dict(state.download_progress or {})
+            merged.update(pending)
+            state.download_progress = merged
+            state.downloads_version += 1
 
     async def _resolve_anime(self, anime_session: str) -> dict | None:
         """Title/poster/metadata for an anime, cheapest source first.
@@ -741,6 +959,16 @@ async def main(page: ft.Page):
 
     page.on_error = _on_page_error
 
+    # Unhandled exceptions in event handlers land here — the only place a
+    # crash is visible to the user at all. Console line (via logger) plus a
+    # snack, so a broken tap never looks like a dead app.
+    def _on_page_error(e):
+        message = str(getattr(e, "data", None) or e)
+        logger.error("unhandled page error: %s", message)
+        show_snack(page, "Something went wrong.", bgcolor=AppColors.ERROR)
+
+    page.on_error = _on_page_error
+
     methods = ControllerMethods()
     methods.load_latest = lambda page_num=1: spawn(
         controller.load_latest(page_num), name="load-latest"
@@ -767,6 +995,9 @@ async def main(page: ft.Page):
         controller.choose_quality(index), name="choose-quality"
     )
     methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
+    methods.cancel_resolve = lambda: spawn(
+        controller.cancel_resolve(), name="cancel-resolve"
+    )
     methods.play_adjacent = lambda delta: spawn(
         controller.play_adjacent(delta), name="play-adjacent"
     )

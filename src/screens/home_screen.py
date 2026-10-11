@@ -25,6 +25,7 @@ from core.constants import (
     LBL_CF_BLOCKED_BODY,
     LBL_CF_BLOCKED_TITLE,
     LBL_CF_VERIFY_BUTTON,
+    LBL_OFFLINE_BODY,
 )
 from core.theme import AppColors
 from state.app_state import AppStateCtx
@@ -298,7 +299,7 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
     )
 
 
-def _cf_overlay_card(controller) -> ft.Control:
+def _cf_overlay_card(state, controller) -> ft.Control:
     """The SHIELD card the original showed over the live grid (not instead
     of it — the scrim keeps the app's context visible)."""
     return ft.Container(
@@ -325,8 +326,15 @@ def _cf_overlay_card(controller) -> ft.Control:
                 ),
                 ft.Container(height=20),
                 ft.FilledButton(
-                    content=LBL_CF_VERIFY_BUTTON,
-                    icon=ft.Icons.VERIFIED_ROUNDED,
+                    content=ft.ProgressRing(
+                        width=16, height=16, stroke_width=2, color=ft.Colors.WHITE
+                    )
+                    if getattr(state, "cf_retrying", False)
+                    else LBL_CF_VERIFY_BUTTON,
+                    icon=None
+                    if getattr(state, "cf_retrying", False)
+                    else ft.Icons.VERIFIED_ROUNDED,
+                    disabled=bool(getattr(state, "cf_retrying", False)),
                     style=ft.ButtonStyle(
                         bgcolor=AppColors.PRIMARY,
                         color=ft.Colors.WHITE,
@@ -369,10 +377,42 @@ def _cf_gate(body: ft.Control, state, controller) -> ft.Control:
                 expand=True,
                 bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
                 alignment=ft.Alignment.CENTER,
-                content=_cf_overlay_card(controller),
+                content=_cf_overlay_card(state, controller),
             ),
         ],
         expand=True,
+    )
+
+
+def _offline_banner() -> ft.Control:
+    """Offline strip, shown above the header when the network is down.
+
+    Deliberately distinct from the CF gate: offline means "nothing will
+    load", the gate means "verify to continue" — the old build showed the
+    SHIELD card for both.
+    """
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(
+                    ft.Icons.WIFI_OFF_ROUNDED,
+                    size=18,
+                    color=ft.Colors.ON_INVERSE_SURFACE,
+                ),
+                ft.Text(
+                    LBL_OFFLINE_BODY,
+                    size=12,
+                    color=ft.Colors.ON_INVERSE_SURFACE,
+                    expand=True,
+                    max_lines=1,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.Padding.symmetric(horizontal=16, vertical=8),
+        bgcolor=ft.Colors.INVERSE_SURFACE,
     )
 
 
@@ -444,6 +484,7 @@ def HomeScreen() -> ft.Control:
 
     body = ft.Column(
         [
+            _offline_banner() if not state.is_online else ft.Container(width=0),
             _header(state, page, controller, _toggle_theme, theme_icon),
             ft.Container(
                 content=ft.Column(

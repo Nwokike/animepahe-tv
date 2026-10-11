@@ -20,6 +20,7 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
+from core.shared_services import get_shared_services
 from core.tasks import spawn
 from core.theme import AppColors
 
@@ -52,14 +53,8 @@ PROMO_APPS = (
 ROTATE_SECONDS = 8
 
 
-def _open_url(url: str):
-    async def _open(e=None):
-        try:
-            await ft.UrlLauncher().launch_url(url)
-        except Exception:
-            pass
-
-    return _open
+async def _open_url(page, url: str):
+    await get_shared_services(page).launch_url(url)
 
 
 @ft.component
@@ -108,7 +103,7 @@ def PromoHero() -> ft.Control:
     def _pin_and_open(e):
         set_pinned(True)
         if app["url"]:
-            page.run_task(_open_url(app["url"]))
+            page.run_task(_open_url, page, app["url"])
         else:
             from components.support_dialog import show_support_dialog
 

@@ -8,6 +8,7 @@ screen; this screen only lists and manages what exists.
 import flet as ft
 
 from components.banner_ad import build_banner_ad
+from components.empty_state import EmptyState
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -133,32 +134,10 @@ def DownloadsScreen() -> ft.Control:
 
     downloads = state.downloads or {}
     if not downloads:
-        return ft.Container(
-            content=ft.Column(
-                [
-                    ft.Icon(
-                        ft.Icons.CLOUD_DOWNLOAD_ROUNDED,
-                        size=64,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                    ft.Text(
-                        "Downloads appear here",
-                        size=17,
-                        weight=ft.FontWeight.W_600,
-                        color=ft.Colors.ON_SURFACE,
-                    ),
-                    ft.Text(
-                        "Tap the download icon on any episode to save it for offline.",
-                        size=13,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                        text_align=ft.TextAlign.CENTER,
-                    ),
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=10,
-            ),
-            alignment=ft.Alignment.CENTER,
-            expand=True,
+        return EmptyState(
+            "Downloads appear here",
+            message="Tap the download icon on any episode to save it for offline.",
+            icon=ft.Icons.CLOUD_DOWNLOAD_ROUNDED,
         )
 
     # Group by anime session, newest first.
@@ -233,10 +212,15 @@ def DownloadsScreen() -> ft.Control:
         )
 
     sections.append(build_banner_ad(page))
-    return ft.Column(
-        controls=sections,
-        spacing=12,
+    # Column takes no padding in flet 1.0.4 — the screen inset lives on the
+    # wrapper so the scrollable keeps its margin.
+    return ft.Container(
+        content=ft.Column(
+            controls=sections,
+            spacing=12,
+            expand=True,
+            scroll=ft.ScrollMode.AUTO,
+        ),
         expand=True,
-        scroll=ft.ScrollMode.AUTO,
         padding=ft.Padding.all(16),
     )

@@ -85,7 +85,16 @@ def _stream_variants(m3u8_text: str) -> list[dict]:
 
 
 class ImmersivePlayer(ft.Stack):
-    """A Stack: black container, video, loading/error overlay."""
+    """A Stack: black container, video, loading/error overlay.
+
+    Ported from the house player (KTV) with its playback core: the resource
+    is a LOOPBACK PROXY url (services/hls_proxy.py) that injects the
+    UA + Referer the stream hosts require and rewrites the playlist, and
+    ``source_url``/``source_referer``/``source_headers`` let the player
+    rebuild that url when the viewer pins a quality variant or an audio
+    rendition. flet-video gets ``http_headers`` too — the local socket
+    doesn't care, but the direct-URL fallback path does.
+    """
 
     def __init__(
         self,
@@ -99,6 +108,10 @@ class ImmersivePlayer(ft.Stack):
         on_next=None,
         on_previous=None,
         variants: list[dict] | None = None,
+        source_url: str | None = None,
+        source_referer: str | None = None,
+        source_headers: dict | None = None,
+        proxied: bool = False,
     ):
         super().__init__(expand=True)
         self.resource = resource
@@ -110,12 +123,22 @@ class ImmersivePlayer(ft.Stack):
         self.on_close = on_close
         self.on_next = on_next
         self.on_previous = on_previous
+        # Source identity for quality/audio pinning (None for local files).
+        self.source_url = source_url or resource
+        self.source_referer = source_referer
+        self.source_headers = source_headers or {}
+        self.proxied = proxied
+        self.hls_proxy = None  # set by the shell mount; see _use_player_overlay
 
         self._is_closing = False
         self._is_final_error = False
         self._overlay_hidden = False
         self._position_saved = False
-        self._current_variant_index = 0
+        self._current_variant = None
+        self._current_audio = None
+        self._variants_cache: list[dict] | None = None
+        self._audio_cache: list[dict] | None = None
+        self._reconnect_count = 0
 
         self._initial_resume_position: float | None = None
         self._pending_seek: float | None = None
@@ -124,6 +147,7 @@ class ImmersivePlayer(ft.Stack):
         self._watchdog_task: asyncio.Task | None = None
         self._checkpoint_task: asyncio.Task | None = None
         self._speed_index = SPEEDS.index(1.0)
+        self._speed_rate = 1.0
 
         self._build()
 
@@ -180,8 +204,18 @@ class ImmersivePlayer(ft.Stack):
             playlist_mode=fv.PlaylistMode.NONE,
             fill_color=ft.Colors.BLACK,
             fit=ft.BoxFit.CONTAIN,
-            title="AnimePahe",
+            title=self.title or "AnimePahe",
             controls=self._build_controls(),
+            subtitle_configuration=fv.VideoSubtitleConfiguration(
+                text_style=ft.TextStyle(
+                    size=16,
+                    color=ft.Colors.WHITE,
+                    weight=ft.FontWeight.W_600,
+                    bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                ),
+                text_align=ft.TextAlign.CENTER,
+                visible=True,
+            ),
             configuration=fv.VideoConfiguration(
                 enable_hardware_acceleration=True,
                 mpv_properties={
@@ -213,40 +247,27 @@ class ImmersivePlayer(ft.Stack):
     def _build_controls(self) -> fv.AdaptiveVideoControls:
         """Fresh control instances per branch — sharing across the touch and
         desktop/TV trees double-mounts them."""
-        quality_state = {"text": "Auto"}
-        speed_state = {"text": "1.0x"}
+        from core.tasks import spawn
 
-        def _quality_label() -> str:
-            if not self.variants:
-                return "Auto"
-            if self._current_variant_index == 0:
-                return "Auto"
-            return self.variants[self._current_variant_index - 1]["label"]
+        # Chips render their label immediately; the stream probe refreshes
+        # the text (and is the only thing that reveals them).
+        self.quality_texts = []
+        self.audio_texts = []
 
         def _cycle_speed(e=None):
             self._speed_index = (self._speed_index + 1) % len(SPEEDS)
             rate = SPEEDS[self._speed_index]
-            speed_state["text"] = f"{rate}x"
-            self.video.playback_rate = rate
-            self.video.update()
+            self._speed_rate = rate
+            for text in self.speed_texts:
+                text.value = f"{rate}x"
+            try:
+                self.video.playback_rate = rate
+                self.video.update()
+            except Exception:
+                pass
 
-        def _cycle_quality(e=None):
-            from core.tasks import spawn
-
-            if not self.variants:
-                return
-            self._current_variant_index = (self._current_variant_index + 1) % (
-                len(self.variants) + 1
-            )
-            index = self._current_variant_index
-            if index == 0:
-                spawn(self._swap_media(self.resource, "Auto quality"), name="quality-switch")
-            else:
-                variant = self.variants[index - 1]
-                spawn(
-                    self._swap_media(variant["uri"], f"Quality: {variant['label']}"),
-                    name="quality-switch",
-                )
+        def _open_settings(e=None):
+            spawn(self.open_stream_settings(), name="player-settings")
 
         def _bar(desktop: bool) -> list:
             items = [
@@ -254,20 +275,41 @@ class ImmersivePlayer(ft.Stack):
                 fv.VideoPositionIndicator(),
                 fv.VideoSpacer(),
             ]
-            if self.variants:
-                items.append(
-                    ft.Container(
-                        content=ft.Text(quality_state["text"], size=12),
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=4),
-                        border_radius=6,
-                        ink=True,
-                        tooltip="Quality",
-                        on_click=_cycle_quality,
-                    )
-                )
+            # Quality chip: hidden until the probe proves the stream has
+            # variants — an empty picker is worse than no chip.
+            quality_text = ft.Text("Auto", size=12)
+            self.quality_texts.append(quality_text)
+            quality_chip = ft.Container(
+                content=quality_text,
+                padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+                border_radius=6,
+                ink=True,
+                tooltip="Stream quality",
+                on_click=_open_settings,
+                visible=False,
+            )
+            self.quality_chip = quality_chip
+            items.append(quality_chip)
+
+            audio_text = ft.Text("Audio", size=12)
+            self.audio_texts.append(audio_text)
+            audio_chip = ft.Container(
+                content=audio_text,
+                padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+                border_radius=6,
+                ink=True,
+                tooltip="Audio track",
+                on_click=_open_settings,
+                visible=False,
+            )
+            self.audio_chip = audio_chip
+            items.append(audio_chip)
+
+            speed_text = ft.Text("1.0x", size=12)
+            self.speed_texts = [speed_text]
             items.append(
                 ft.Container(
-                    content=ft.Text(speed_state["text"], size=12),
+                    content=speed_text,
                     padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                     border_radius=6,
                     ink=True,
@@ -377,8 +419,10 @@ class ImmersivePlayer(ft.Stack):
     # ------------------------------------------------------------------
 
     async def _start_playback(self):
+        from core.tasks import spawn
+
         self._show_progress("Loading stream...")
-        self.resource = self.resource
+        self._reconnect_count = 0
         try:
             self.video.playlist = [
                 fv.VideoMedia(self.resource, http_headers=self.http_headers)
@@ -387,12 +431,18 @@ class ImmersivePlayer(ft.Stack):
             await self.video.play()
             self._start_watchdog()
             self._start_checkpoints()
+            # Quality/audio options exist only once playback is running:
+            # probe the master through the proxy, then reveal the pickers.
+            spawn(self._probe_stream_options(), name="stream-probe")
         except Exception as ex:
             logger.exception("start_playback failed")
             self._show_final_error(f"Could not start playback: {ex}")
 
     def _manual_retry(self):
+        if self._is_closing:
+            return
         self._is_final_error = False
+        self._reconnect_count = 0
         self._show_progress("Reconnecting stream...")
         from core.tasks import spawn
 
@@ -409,18 +459,114 @@ class ImmersivePlayer(ft.Stack):
 
         spawn(_retry(), name="player-retry")
 
-    async def _swap_media(self, url: str, message: str):
-        """Restart the single-item playlist, restoring position.
+    # ------------------------------------------------------------------
+    # Quality / audio pinning (through the proxy)
+    # ------------------------------------------------------------------
+
+    def _resource_url_for(self, variant: int | None, audio: str | None) -> str:
+        """Rebuild the playback URL for a (variant, audio) pinning choice."""
+        if self.hls_proxy is not None and self.source_url.startswith(
+            ("http://", "https://")
+        ):
+            try:
+                return self.hls_proxy.get_proxy_url(
+                    self.source_url,
+                    referer=self.source_referer,
+                    headers=self.source_headers,
+                    variant=variant,
+                    audio=audio,
+                )
+            except Exception as ex:
+                logger.warning("proxy rebuild failed, keeping current url: %s", ex)
+        return self.resource
+
+    @property
+    def can_switch_quality(self) -> bool:
+        return self.hls_proxy is not None and self.source_url.startswith(
+            ("http://", "https://")
+        )
+
+    async def list_variants(self) -> list[dict]:
+        """HLS master variants (cached). Empty for media playlists."""
+        if self._variants_cache is not None:
+            return self._variants_cache
+        if not self.can_switch_quality:
+            return []
+        try:
+            variants = await asyncio.wait_for(
+                self.hls_proxy.fetch_variants(
+                    self.source_url, headers=self.source_headers
+                ),
+                timeout=8.0,
+            )
+        except Exception:
+            variants = []
+        self._variants_cache = variants or []
+        return self._variants_cache
+
+    async def list_audio_tracks(self) -> list[dict]:
+        """External HLS audio renditions (cached)."""
+        if self._audio_cache is not None:
+            return self._audio_cache
+        if not self.can_switch_quality:
+            return []
+        try:
+            tracks = await asyncio.wait_for(
+                self.hls_proxy.fetch_audio_tracks(
+                    self.source_url, headers=self.source_headers
+                ),
+                timeout=8.0,
+            )
+        except Exception:
+            tracks = []
+        self._audio_cache = tracks or []
+        return self._audio_cache
+
+    async def _probe_stream_options(self) -> None:
+        """Probe variants/audio once playing; reveal the quality chip when
+        the stream actually has options to pick."""
+        if not self.can_switch_quality or self._is_closing:
+            return
+        variants = await self.list_variants()
+        # Unconditional: single-variant streams can still carry 2+ audio
+        # renditions, so audio must be probed regardless.
+        tracks = await self.list_audio_tracks()
+        if self._is_closing:
+            return
+        if len(variants) > 1 or len(tracks) >= 2:
+            self.variants = variants
+            self.audio_tracks = tracks
+            self._refresh_option_labels()
+            try:
+                self.video.update()
+            except Exception:
+                pass
+
+    async def apply_variant(self, index: int | None) -> None:
+        """Pin a quality variant (None = Auto)."""
+        self._current_variant = index
+        await self._swap_media(
+            "Auto quality" if index is None else "Switching quality..."
+        )
+
+    async def apply_audio(self, name: str | None) -> None:
+        """Pin an audio rendition (None = manifest default)."""
+        self._current_audio = name
+        await self._swap_media("Default audio" if name is None else "Switching audio...")
+
+    async def _swap_media(self, message: str):
+        """Restart the playlist on the currently pinned resource, restoring
+        position for seekable streams.
 
         Position/duration reads are bounded: a hung native bridge must not
         wedge the switcher. VOD restores; a live stream stays at the edge.
         """
+        if self._is_closing or not self.video:
+            return
+        new_url = self._resource_url_for(self._current_variant, self._current_audio)
         position = None
         duration = None
-        for getter, attr in (
-            (self.video.get_current_position, "position"),
-            (self.video.get_duration, "duration"),
-        ):
+        for getter in (self.video.get_current_position, self.video.get_duration):
             try:
                 value = await asyncio.wait_for(
                     asyncio.create_task(getter()), timeout=0.8
@@ -447,15 +593,58 @@ class ImmersivePlayer(ft.Stack):
         if dur_sec > 0 and pos_sec > 3:
             self._pending_seek = pos_sec
 
-        self.resource = url
+        self.resource = new_url
         self._show_progress(message)
         try:
-            self.video.playlist = [fv.VideoMedia(url, http_headers=self.http_headers)]
+            self.video.playlist = [
+                fv.VideoMedia(new_url, http_headers=self.http_headers)
+            ]
             self.video.update()
             await self.video.play()
             self._start_watchdog()
-        except Exception:
-            self._show_final_error("Quality switch failed. Retry or go back.")
+            self._restore_speed_after_swap()
+        except Exception as ex:
+            logger.error("Stream switch failed: %s", ex)
+            self._show_final_error("Switch failed. Retry or go back.")
+
+    def _restore_speed_after_swap(self):
+        """A playlist swap resets the playback rate to 1.0 — reapply the
+        user's chosen speed (KTV parity)."""
+        if self._speed_rate != 1.0:
+            try:
+                self.video.playback_rate = self._speed_rate
+                self.video.update()
+            except Exception:
+                pass
+
+    def _refresh_option_labels(self) -> None:
+        """Sync the quality/audio chip text with the current pins, and
+        reveal the chips now that the probe proved there are options."""
+        if not hasattr(self, "quality_texts"):
+            return
+        if self._current_variant is None:
+            value = "Auto"
+        else:
+            current = next(
+                (
+                    v
+                    for v in (self._variants_cache or [])
+                    if v.get("index") == self._current_variant
+                ),
+                None,
+            )
+            value = current["label"] if current else f"V{self._current_variant + 1}"
+        has_quality = len(self._variants_cache or []) > 1
+        has_audio = len(self._audio_cache or []) >= 2
+        for text in self.quality_texts:
+            text.value = value if has_quality else "Auto"
+        if hasattr(self, "quality_chip"):
+            self.quality_chip.visible = has_quality
+        if hasattr(self, "audio_texts"):
+            for text in self.audio_texts:
+                text.value = self._current_audio or "Default"
+        if hasattr(self, "audio_chip"):
+            self.audio_chip.visible = has_audio
 
     # ------------------------------------------------------------------
     # Overlay + watchdog
@@ -480,7 +669,25 @@ class ImmersivePlayer(ft.Stack):
         self.back_error_btn.visible = True
         self.overlay.visible = True
         self._overlay_hidden = False
+        self._enable_tap_to_close()
         self.update()
+
+    def _enable_tap_to_close(self):
+        """A tap on the dead overlay goes Back — the error card is not a
+        trap (KTV parity). Wired once; the handler stays for the life of
+        the player."""
+        if getattr(self, "_tap_to_close_wired", False):
+            return
+        self._tap_to_close_wired = True
+
+        def _tap(_):
+            if self._is_final_error:
+                self._on_back()
+
+        try:
+            self.overlay.on_click = _tap
+        except Exception:
+            pass
 
     def _hide_overlay(self):
         self._overlay_hidden = True
@@ -592,6 +799,102 @@ class ImmersivePlayer(ft.Stack):
     # Event handlers
     # ------------------------------------------------------------------
 
+    async def open_stream_settings(self) -> None:
+        """In-player Stream Quality & Audio picker (KTV parity).
+
+        Only opens when the stream actually has options: a dialog listing a
+        single quality is noise. Both sections are built from the live
+        master playlist through the proxy.
+        """
+        from flet import context as flet_context
+
+        variants = await self.list_variants()
+        tracks = await self.list_audio_tracks()
+        try:
+            page = flet_context.page
+        except Exception:
+            page = None
+        if page is None or self._is_closing:
+            return
+        if len(variants) <= 1 and len(tracks) < 2:
+            return
+
+        from core.dialogs import show_app_dialog
+
+        def _close():
+            setattr(page, "_app_dialog", None)
+            try:
+                page.pop_dialog()
+            except Exception:
+                pass
+
+        def _pick_variant(index):
+            from core.tasks import spawn
+
+            _close()
+            spawn(self.apply_variant(index), name="apply-variant")
+
+        def _pick_audio(name):
+            from core.tasks import spawn
+
+            _close()
+            spawn(self.apply_audio(name), name="apply-audio")
+
+        sections: list[ft.Control] = []
+        if len(variants) > 1:
+            rows = [
+                ft.OutlinedButton(
+                    content=v["label"],
+                    on_click=lambda e, i=v["index"]: _pick_variant(i),
+                )
+                for v in variants
+            ]
+            rows.insert(
+                0,
+                ft.FilledButton(
+                    content="Auto (adaptive)",
+                    on_click=lambda e: _pick_variant(None),
+                ),
+            )
+            sections.append(
+                ft.Text("Quality", size=13, weight=ft.FontWeight.W_700)
+            )
+            sections.append(ft.Column(rows, tight=True, spacing=6))
+        if len(tracks) >= 2:
+            rows = [
+                ft.OutlinedButton(
+                    content=t["name"]
+                    + (f" ({t['language']})" if t["language"] else ""),
+                    on_click=lambda e, n=t["name"]: _pick_audio(n),
+                )
+                for t in tracks
+            ]
+            rows.insert(
+                0,
+                ft.FilledButton(
+                    content="Default audio",
+                    on_click=lambda e: _pick_audio(None),
+                ),
+            )
+            sections.append(ft.Container(height=8))
+            sections.append(
+                ft.Text("Audio", size=13, weight=ft.FontWeight.W_700)
+            )
+            sections.append(ft.Column(rows, tight=True, spacing=6))
+
+        show_app_dialog(
+            page,
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Stream Settings", weight=ft.FontWeight.BOLD),
+                content=ft.Column(sections, tight=True, spacing=8),
+                actions=[
+                    ft.TextButton(content="Close", on_click=lambda e: _close())
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            ),
+        )
+
     @staticmethod
     def _seconds(payload) -> float:
         value = getattr(payload, "in_seconds", None)
@@ -626,11 +929,33 @@ class ImmersivePlayer(ft.Stack):
                 self._check_and_trigger_seek()
 
     def _on_error(self, e):
-        logger.warning("player error: %s", getattr(e, "data", e))
-        if not self._overlay_hidden:
-            self._show_final_error("Playback error. Retry or go back.")
+        err_msg = str(getattr(e, "data", None) or e)
+        logger.warning("player error: %s", err_msg)
+        if self._is_closing:
+            return
+        # "Cannot seek" fires at the live edge and after a VOD swap — it is
+        # not a playback failure, and raising the error card over it would
+        # interrupt a healthy stream (KTV swallows it the same way).
+        if "Cannot seek" in err_msg or "force-seekable" in err_msg:
+            logger.debug("swallowed seek error: %s", err_msg)
+            return
+        if self._is_final_error:
+            return
+        self._show_final_error(
+            "Unable to load stream. Check your connection or retry."
+        )
 
     def _on_complete(self, e=None):
+        """Auto-advance only when the position is near the end.
+
+        A stall or a premature complete at 0s must not jump to the next
+        episode and lose the user's place (KTV's 5s rule).
+        """
+        if self._last_duration > 0 and self._last_position < self._last_duration - 5:
+            logger.info(
+                "complete ignored: %.0fs of %.0fs", self._last_position, self._last_duration
+            )
+            return
         if self.on_next is not None:
             self.on_next()
 

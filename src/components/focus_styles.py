@@ -92,11 +92,21 @@ def attach_focus_zoom(button: ft.Control, scale: float = 1.04) -> ft.Control:
 
     Assigned after construction on the local object (KTV's documented
     idiom): the handlers close over the button itself, so the scale change
-    targets the exact control the remote just focused.
+    targets the exact control the remote just focused. The setattr is
+    guarded — a card built inside a component tree is frozen after mount,
+    and the FOCUSED border from ``card_button_style`` is the primary cue;
+    the zoom is a bonus, never a crash.
     """
-    button.on_focus = lambda e: setattr(button, "scale", scale)
-    button.on_blur = lambda e: setattr(button, "scale", 1.0)
+    button.on_focus = lambda e: _safe_scale(button, scale)
+    button.on_blur = lambda e: _safe_scale(button, 1.0)
     return button
+
+
+def _safe_scale(button: ft.Control, value: float) -> None:
+    try:
+        setattr(button, "scale", value)
+    except RuntimeError:
+        pass  # frozen control: the border already carries focus
 
 
 __all__ = [

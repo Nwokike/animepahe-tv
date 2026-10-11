@@ -32,4 +32,8 @@ LBL_CF_BLOCKED_BODY = "Search and browsing are disabled until you verify."
 LBL_CF_VERIFY_BUTTON = "Verify You're Human"
 LBL_CF_BLOCKED_SEARCH = "Please verify you're human first."
 
+LBL_OFFLINE_TITLE = "You're Offline"
+LBL_OFFLINE_BODY = "Connect to the internet to browse and watch."
+LBL_OFFLINE = "You're offline. Check your connection."
+
 MAX_SEARCH_QUERY_LENGTH = 200

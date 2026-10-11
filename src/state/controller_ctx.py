@@ -37,5 +37,9 @@ class ControllerMethods:
     load_search: object = lambda query, page=1: None
     clear_search_history: object = lambda: None
 
+    # Long-running actions
+    choose_quality: object = lambda index: None
+    cancel_resolve: object = lambda: None
+
 
 ControllerMethodsCtx = ft.create_context(ControllerMethods())

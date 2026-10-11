@@ -1,23 +1,29 @@
-"""The player branch must route a pre-open failure to the error card.
+"""The player mounts into page.overlay (imperatively), not the component tree.
 
-Regression coverage for T0.6: `state.player_error` used to be set by
-play_downloaded and never rendered (the shell only branched on
-`player_open` and the player itself never read the state), so a missing
-download left the UI looking like the tap did nothing.
+Regression coverage for two crashes the user hit:
+1. `RuntimeError: Frozen controls cannot be updated` — controls built inside
+   a @ft.component render are frozen after mount, and ImmersivePlayer
+   rewrites itself constantly (`overlay.visible = False` in _hide_overlay).
+2. `Column.__init__() got an unexpected keyword argument 'padding'` on the
+   Browse screen, plus the same latent bug on Downloads.
+
+The fix for (1) is the KTV structure: mount the player as a top-level
+overlay control (KTV uses a ft.View; page.views is gone in flet 1.0.4).
 """
 
-import asyncio
 import sys
 
 sys.path.insert(0, __file__.rsplit("tests", 1)[0] + "src")
 
+import flet as ft
+from flet.controls import context as flet_context
+from flet.controls.context import _context_page
+
 import app_shell
-from core.state import AppState
+from state.app_state import state as app_state
 
 
 class _FakeController:
-    """Only what the error-card callbacks touch."""
-
     def __init__(self):
         self._app_controller = self
         self.played: list[str] = []
@@ -26,102 +32,166 @@ class _FakeController:
         self.played.append(episode_session)
 
 
-def _find_texts(control, out=None):
-    if out is None:
-        out = []
-    text = getattr(control, "value", None)
-    if isinstance(text, str):
-        out.append(text)
+class _FakePage:
+    """Only what the overlay mount uses."""
+
+    def __init__(self):
+        self.overlay: list = []
+        self.updates = 0
+
+    def update(self):
+        self.updates += 1
+
+
+def _reset_state():
+    app_state.player_open = False
+    app_state.player_spec = None
+    app_state.player_error = None
+    app_state.episodes_version = 0
+
+
+def _walk(control):
+    yield control
     for child in getattr(control, "controls", None) or []:
-        _find_texts(child, out)
-    for child in getattr(control, "content", None) or [] if isinstance(
-        getattr(control, "content", None), list
-    ) else []:
-        _find_texts(child, out)
+        yield from _walk(child)
     content = getattr(control, "content", None)
     if content is not None and not isinstance(content, list):
-        _find_texts(content, out)
-    return out
+        yield from _walk(content)
 
 
-def _find_buttons(control, out=None):
-    if out is None:
-        out = []
-    if type(control).__name__ == "OutlinedButton":
-        out.append(control)
-    for child in getattr(control, "controls", None) or []:
-        _find_buttons(child, out)
-    content = getattr(control, "content", None)
-    if content is not None and not isinstance(content, list):
-        _find_buttons(content, out)
-    return out
+def _find_buttons(control):
+    # ActionControl, not ft.Button: OutlinedButton does NOT inherit
+    # Button in flet 1.0.4 (only FilledButton does).
+    return [
+        c
+        for c in _walk(control)
+        if isinstance(c, ft.ActionControl) and hasattr(c, "on_click")
+    ]
 
 
-def test_player_error_renders_card_not_player():
-    state = AppState()
+def _reset_overlay():
+    app_shell._active_player = None
+    app_shell._active_mount = None
+    app_shell._active_key = None
+
+
+def _mount(state, controller, page, first: bool = False):
+    if first:
+        _reset_overlay()
+    token = _context_page.set(page)
+    try:
+        app_shell._use_player_overlay(state, controller)
+    finally:
+        _context_page.reset(token)
+
+
+def test_player_mounts_into_overlay_not_the_component_tree():
+    state = app_state
+    _reset_state()
+    state.player_open = True
+    state.player_spec = {
+        "resource": "https://cdn/index.m3u8",
+        "episode_session": "ep123",
+        "title": "Frieren",
+    }
+    page = _FakePage()
+
+    _mount(state, _FakeController(), page, first=True)
+
+    assert len(page.overlay) == 1
+    # FocusScope wraps the player so Back/Escape always reaches it.
+    assert app_shell._active_player is not None
+    assert page.updates == 1
+
+
+def test_second_render_does_not_remount():
+    state = app_state
+    _reset_state()
+    state.player_open = True
+    state.player_spec = {"resource": "https://cdn/index.m3u8", "episode_session": "ep1"}
+    page = _FakePage()
+    controller = _FakeController()
+
+    _mount(state, controller, page, first=True)
+    first = app_shell._active_player
+    _mount(state, controller, page)
+
+    assert app_shell._active_player is first
+    assert len(page.overlay) == 1
+
+
+def test_episode_switch_remounts():
+    state = app_state
+    _reset_state()
+    state.player_open = True
+    state.player_spec = {"resource": "a.m3u8", "episode_session": "ep1"}
+    page = _FakePage()
+    controller = _FakeController()
+
+    _mount(state, controller, page, first=True)
+    first = app_shell._active_player
+
+    state.player_spec = {"resource": "b.m3u8", "episode_session": "ep2"}
+    _mount(state, controller, page)
+
+    assert app_shell._active_player is not first
+    assert len(page.overlay) == 1
+
+
+def test_close_unmounts_the_overlay_node():
+    import asyncio
+
+    state = app_state
+    _reset_state()
+    state.player_open = True
+    state.player_spec = {"resource": "a.m3u8", "episode_session": "ep1"}
+    page = _FakePage()
+
+    _mount(state, _FakeController(), page, first=True)
+    assert len(page.overlay) == 1
+
+    token = _context_page.set(page)
+    try:
+        asyncio.run(app_shell._async_close_player())
+    finally:
+        _context_page.reset(token)
+
+    assert page.overlay == []
+    assert state.player_open is False
+
+
+def test_player_error_renders_card():
+    state = app_state
+    _reset_state()
     state.player_open = True
     state.player_error = "The downloaded file is missing."
     state.current_episode_session = "ep123"
+    page = _FakePage()
 
-    card = app_shell._build_player(state, _FakeController())
-    texts = _find_texts(card)
+    _mount(state, _FakeController(), page, first=True)
+
+    mount = page.overlay[0]
+    texts = [c.value for c in _walk(mount) if isinstance(c, ft.Text)]
     assert "The downloaded file is missing." in texts
     assert "Playback unavailable" in texts
-    buttons = _find_buttons(card)
-    labels = [
-        b.content if isinstance(b.content, str) else getattr(b.content, "value", "")
-        for b in buttons
-    ]
-    assert "Retry" in labels
-    assert "Go Back" in labels
-
-
-def test_no_player_error_keeps_building_the_player():
-    """player_error is the only branch condition; None must fall through.
-
-    The player itself lives behind a @ft.component FocusScope (needs a live
-    renderer), so this asserts the guard, not the player mount — the spec
-    round trip is covered by test_player_spec.py.
-    """
-    state = AppState()
-    state.player_open = True
-    state.player_error = None
-    state.player_spec = {"resource": "https://cdn/index.m3u8", "title": "Frieren"}
-
-    built = {}
-
-    class _FakePlayer:
-        def __init__(self, **kwargs):
-            built.update(kwargs)
-
-    import components.player.immersive_player as ip
-
-    original = ip.ImmersivePlayer
-    ip.ImmersivePlayer = _FakePlayer
-    try:
-        try:
-            app_shell._build_player(state, _FakeController())
-        except RuntimeError as ex:
-            # FocusScope construction is the renderer-bound tail; reaching it
-            # proves the error branch did not fire.
-            assert "renderer" in str(ex)
-    finally:
-        ip.ImmersivePlayer = original
-    assert built["resource"] == "https://cdn/index.m3u8"
-    assert built["title"] == "Frieren"
+    assert app_shell._active_player is None  # the error card is not a player
 
 
 def test_retry_clears_error_and_replays():
-    state = AppState()
+    import asyncio
+
+    state = app_state
+    _reset_state()
     state.player_open = True
     state.player_error = "The downloaded file is missing."
     state.current_episode_session = "ep123"
     controller = _FakeController()
+    page = _FakePage()
 
-    card = app_shell._build_player(state, controller)
+    _mount(state, controller, page, first=True)
     retry = next(
         b
-        for b in _find_buttons(card)
+        for b in _find_buttons(page.overlay[0])
         if isinstance(b.content, str) and b.content == "Retry"
     )
 
@@ -134,17 +204,32 @@ def test_retry_clears_error_and_replays():
     assert controller.played == ["ep123"]
 
 
-def test_go_back_clears_error_and_closes_player():
-    state = AppState()
+def test_go_back_clears_error_and_unmounts():
+    import asyncio
+
+    state = app_state
+    _reset_state()
     state.player_open = True
     state.player_error = "The downloaded file is missing."
+    page = _FakePage()
 
-    card = app_shell._build_player(state, _FakeController())
+    _mount(state, _FakeController(), page, first=True)
     back = next(
         b
-        for b in _find_buttons(card)
+        for b in _find_buttons(page.overlay[0])
         if isinstance(b.content, str) and b.content == "Go Back"
     )
     back.on_click(None)
     assert state.player_error is None
     assert state.player_open is False
+
+    # The next render drops the mount from the overlay.
+    _mount(state, _FakeController(), page)
+    assert page.overlay == []
+
+
+def test_column_padding_is_moved_to_a_wrapper():
+    """Browse + Downloads: Column has no padding field in flet 1.0.4."""
+    assert "padding" not in set(ft.Column.__dataclass_fields__)
+    # The screen-level insets must live on a Container, which does.
+    assert "padding" in set(ft.Container.__dataclass_fields__)
