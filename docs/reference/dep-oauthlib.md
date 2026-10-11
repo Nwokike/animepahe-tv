@@ -174,3 +174,55 @@ Evidence:
 Scope note: the assignment mentions "flet publish/auth features" — verified
 that only the **auth** half involves oauthlib. Flet's pubsub/publish path has
 no oauthlib wiring (see §2 table).
+
+## 7. App improvement opportunities
+
+**Short answer: none. There is no evidence-backed way oauthlib improves this
+app, and the owner should not spend effort on it.**
+
+Wiring evidence (all verified against installed source):
+
+1. oauthlib's only consumer in the venv is
+   `.venv/Lib/site-packages/flet/auth/authorization_service.py`, via three
+   `from oauthlib.oauth2 import WebApplicationClient` imports (lines 94, 120,
+   208) used by `get_authorization_data()`, `request_token(code: str)`, and
+   `__refresh_token()`. That class serves exactly one caller chain:
+   `Page.login()` → `AuthorizationService`.
+2. The app never enters that chain: grep of `src/` for
+   `login|logout|auth|OAuth|AuthorizationService|OAuthProvider|OAuthToken`
+   returns zero matches; a second grep for
+   `oauth|openid|bearer token|refresh_token|authorization code|client_secret`
+   (case-insensitive) also returns zero matches.
+3. The app's actual network layer is `primp`-based scraping
+   (`src/services/*.py` — `animepahe.py`, `router.py`, `kwik_resolver.py`,
+   `ddos_solver.py`, `hls_proxy.py`, providers, etc.). The "session" strings
+   in `src/services/animepahe.py` (e.g. `anime_session`, `data-session`) are
+   AnimePahe site URL tokens, not OAuth artifacts. AnimePahe, Kwik, and the
+   provider mirrors expose no OAuth authorization/token endpoints, so there is
+   no standards-based flow (`WebApplicationClient.prepare_request_uri` /
+   `prepare_request_body` / `prepare_refresh_body`) to point at them.
+4. `AuthorizationService.__refresh_token` (lines 188–232) only fires when a
+   flet `OAuthToken` with both `expires_at` and `refresh_token` set goes
+   stale — a state the app can never construct without first calling
+   `page.login()` with a configured `OAuthProvider` (subclasses at
+   `flet/auth/providers/*.py`: Auth0, Azure, GitHub, Google). None is
+   configured or imported.
+
+Why not repurpose it anyway (considered and rejected):
+
+- Token-refresh helper for scraper cookies? Rejected: `Client` in
+  `oauthlib/oauth2/rfc6749/clients/base.py` implements RFC 6749
+  `grant_type=refresh_token` form-encoding against a token endpoint plus
+  HTTPS enforcement (`InsecureTransportError`); the scrapers hold opaque
+  site cookies/cloudflare clearance, not expiring bearer tokens with refresh
+  tokens, so the abstraction does not fit and would add indirection over a
+  plain `primp` re-request.
+- User-login feature via `page.login()`? Rejected: the app is an anonymous
+  streaming client with no user accounts, no backend, and no OAuth provider
+  to register against; adding one would be a product decision with server
+  costs, not a dependency win.
+
+Unverified items: none. Every claim above cites a file and signature checked
+in this pass; there is no speculative remainder. Recommendation: leave
+oauthlib alone as flet's transitive dependency — no pin, no import, no
+follow-up.

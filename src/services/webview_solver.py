@@ -230,7 +230,8 @@ class WebViewSolver:
                 await _try_resolve(msg[7:].strip(), current_url=current_url)
 
         async def on_url_change(e):
-            current_url = e.url
+            # flet_webview 0.85.3 events carry payloads in .data, not .url.
+            current_url = e.data or "" if not isinstance(e.data, dict) else str(e.data)
             logger.info("WebView page started: %s", current_url)
             # When we land on animepahe, try native cookie reader if challenge token is not present
             if _cookie_manager and "animepahe" in current_url and "__cf_chl" not in current_url:
@@ -241,7 +242,7 @@ class WebViewSolver:
         is_tv = page.platform == ft.PagePlatform.ANDROID_TV
 
         async def on_page_ended(e):
-            logger.info("WebView page load finished: %s", e.url)
+            logger.info("WebView page load finished: %s", e.data)
             # NOTE: we intentionally do NOT inject viewport/scale CSS or mutate
             # document.title here. Cloudflare's Turnstile challenge is a JS app
             # that watches the DOM; mutating it trips its integrity checks and
@@ -252,14 +253,22 @@ class WebViewSolver:
         webview = WebView(
             url=url,
             expand=True,
-            # Equivalent of the old set_javascript_mode(UNRESTRICTED) call.
-            javascript_mode="unrestricted",
-            # Equivalent of disable_zoom() without disturbing the challenge DOM.
-            zoom_enabled=False,
             on_console_message=on_console,
             on_page_started=on_url_change,
-            on_page_finished=on_page_ended,
+            on_page_ended=on_page_ended,
         )
+        # 0.85.3's WebView rejects the old flet-webview-all constructor
+        # kwargs; javascript_mode and zoom have real methods instead.
+        try:
+            from flet_webview import JavaScriptMode
+
+            await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
+        except Exception as ex:
+            logger.warning("webview set_javascript_mode failed: %s", ex)
+        try:
+            await webview.disable_zoom()
+        except Exception as ex:
+            logger.warning("webview disable_zoom failed: %s", ex)
 
         async def poll_cookies():
             while not result_future.done():

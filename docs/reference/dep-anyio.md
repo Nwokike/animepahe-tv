@@ -451,3 +451,136 @@ open_receive_channels, tasks_waiting_send, tasks_waiting_receive)`
 - `to_thread.py` — `run_sync` signature + `abandon_on_cancel` contract.
 - `from_thread.py` — `run/run_sync/BlockingPortal` for the reverse direction.
 - `streams/memory.py` — send/receive/nowait/clone/close/statistics semantics.
+
+## 9. App improvement opportunities
+
+Evidence-backed ways the installed anyio 4.14.1 can improve this app. Each item
+names the app code it applies to and cites the anyio source + signature verified
+in sections 1–8. Dependency note: anyio is already importable from the project
+venv (verified: `anyio.__file__` resolves under `.venv/Lib/site-packages/anyio/`)
+but is **not** in `pyproject.toml dependencies` (only flet/flet-video/
+flet-webview/flet-yandex-ads/flet-notifications/primp) — items below that import
+anyio directly require adding it (it already ships transitively via
+flet → httpx → anyio, so no new wheel, just a pin).
+
+### 9.1 Deadline-scoped startup probes (router.py:259-289)
+
+Today `probe_all()` wraps `asyncio.gather(..., return_exceptions=True)` in
+`asyncio.wait_for(..., timeout=STARTUP_PROBE_BUDGET)` and `_probe_one()` wraps
+each probe in `asyncio.wait_for(..., timeout=STARTUP_PROBE_TIMEOUT)`. Two
+verified weaknesses of this shape: `asyncio.wait_for` cancels the inner task on
+timeout but the outer `results = [None] * len(...)` fallback then records a
+breaker failure for **every** provider including ones that were about to succeed
+(router.py:272-278), and a foreign `CancelledError` from `wait_for` is
+indistinguishable from a real cancel for the `except Exception` in `_probe_one`.
+anyio's alternative, verified in `_core/_tasks.py:132-175`: `with
+move_on_after(STARTUP_PROBE_BUDGET): async with tg: tg.start_soon(probe...)` —
+on expiry the scope exits silently (`cancelled_caught=True`, no exception), each
+finished probe records its own health, unfinished ones are cancelled by scope
+exit (`_deliver_cancellation`, `_backends/_asyncio.py:581-625`), and per-probe
+`with fail_after(4.0):` raises a plain `TimeoutError` (catchable separately from
+cancellation, `_core/_tasks.py:156-157`) instead of `asyncio.TimeoutError`.
+Expected effect: slow-but-alive providers stop collecting spurious breaker
+failures at startup. Caveat: per section 3, the task group and its scope must be
+entered/exited in the same task that spawns the probes.
+
+### 9.2 True cancellation for in-flight loads (gen-counter pattern, main.py:291-479)
+
+Today `load_latest` / `load_episodes` / `_play_episode_resolve` use generation
+counters (`self._latest_gen`, `self._episodes_gen`, `self._play_gen`): a
+superseded load runs to completion doing network I/O and its result is discarded
+at `gen != self._X_gen` checkpoints (e.g. main.py:308-310, 378-380, 529-530).
+`cancel_resolve()` (main.py:475-479) only bumps the counter — the kwik unpack +
+m3u8 fetch continue in the background. anyio's `TaskHandle.cancel()`, verified
+in `_core/_tasks.py:288-300`, cancels the task's private scope
+(`self._cancel_scope.cancel()` unless finished) so the next checkpoint inside
+the superseded coroutine raises promptly, while `handle.status` / `handle.wait()`
+(verified lines 310-409) let the new generation observe completion without
+`gen !=` checks after every await. The `_play_episode_resolve` chain — which has
+~8 explicit stale-gen checkpoints — collapses to one `with CancelScope()` per
+resolution plus `handle.cancel()` on supersede, with `cancelled_caught`
+(`_backends/_asyncio.py:681-683`) distinguishing user-cancel from real failure.
+Expected effect: navigating away mid-resolve frees the network/parse work
+immediately instead of after it finishes. Constraint (section 3, rule 2): the
+scope owning a resolution must be entered and exited by the same task — the
+current fire-and-forget `spawn()` call sites (app_shell.py:92-97, main.py:162)
+cannot share one scope object across tasks; each resolution needs its own scope
+owned by its own task, with supersede delivered via `handle.cancel()`.
+
+### 9.3 Parallel router failover with first-answer-wins (router.py:166-199)
+
+Today `_run()` tries providers strictly sequentially: `result = await
+getattr(provider, op)(*args)` in a `for` loop, so a hung-but-not-failing
+provider costs its full latency before the next is tried (no per-provider
+timeout exists on this path — only the startup probes have one). anyio's task
+group, verified in `_backends/_asyncio.py:755-824`, gives the structured shape:
+`async with create_task_group() as tg:` + `tg.start_soon(attempt, provider)` for
+each breaker-allowed provider; the first non-empty result calls `tg.cancel()`
+(verified `TaskGroup.cancel`, `abc/_tasks.py:91-102`, added 4.14.0), which
+delivers cancellation to the still-running attempts via the group scope, and
+`__aexit__` collects losers' exceptions into the group outcome. Combined with
+`move_on_after` per attempt (section 9.1), worst-case latency becomes
+max(fastest-answer, per-attempt deadline) instead of the sum of sequential
+latencies. This preserves the documented design (router.py:1-21: editorial order,
+breaker gating, empty-is-not-an-answer, last-empty-is-final) — order is kept by
+preferring the earliest editorial result among those that answered, not by
+waiting in order. Trade-off to record: parallel attempts multiply upstream load;
+keep the sequential order for cheap ops and race only the slow ones (`sources`,
+`episodes_for_title`).
+
+### 9.4 Bounded download concurrency via CapacityLimiter (downloads.py:150-267)
+
+Today `DownloadManager.start()` spawns one unbounded `asyncio.create_task` per
+episode plus up to `PARALLEL_SEGMENTS = 6` segment workers per job via
+`asyncio.gather(*workers)` (downloads.py:259-267), and cancellation is a
+cooperative `asyncio.Event` polled at `while queue and not cancel.is_set()`
+(downloads.py:327) — an in-flight `primp` fetch is never interrupted, and N
+queued episodes run N×6 concurrent fetches. anyio's `CapacityLimiter`, verified
+in `_core/_synchronization.py:528-643` and `_backends/_asyncio.py:2018-2136`,
+bounds this structurally: one limiter (e.g. total_tokens=6) shared by all jobs,
+`async with limiter:` around each segment fetch — excess workers queue FIFO in
+`_wait_queue` and are woken in order (`_notify_next_waiter`, lines 2070-2074),
+double-borrow and foreign-release raise `RuntimeError` (catching worker bugs),
+and `total_tokens` is writable so the limit can follow connectivity. Combined
+with 9.2, `DownloadManager.cancel()` can call `handle.cancel()` so the
+in-flight `client.get(...)`await point raises instead of draining the queue.
+Expected effect: constant peak connection count regardless of queued episodes;
+cancel stops network activity at the next checkpoint. Note: `primp` fetches are
+sync-driven under the hood here (`_download_file` writes chunks with blocking
+`f.write` inside `async for`, downloads.py:403-406) — bounding concurrency also
+bounds the event-loop stalls from those writes.
+
+### 9.5 Off-loop file writes via to_thread.run_sync (downloads.py:392-447)
+
+`_download_file`, `_atomic_write`, `_read_manifest`, and the completion
+`os.listdir`/`os.path.getsize` sweep (downloads.py:291-296, 392-447) all do
+blocking filesystem I/O inline on the flet asyncio loop — including a sync
+`f.write(chunk)` per received chunk. anyio's verified contract
+(`to_thread.py:25-65`, backend `_asyncio.py:2537-2596`, default limiter 40 at
+lines 3034-3040): `await to_thread.run_sync(self._atomic_write, path, body)`
+runs the write in a reused worker thread under the default 40-thread limiter,
+with `abandon_on_cancel=False` (default) shielding the wait so cancellation is
+deferred until the write completes and the result is still delivered. Wrapping
+only the write/flush/replace calls (not the network awaits) keeps the change
+small: expected effect is removing per-chunk loop stalls during segment
+download, which currently compete with UI frame callbacks on the same loop.
+
+### Unverified (checked, no evidence for a claim)
+
+- HTTP/2 or connection-pool reuse through anyio: anyio ships no HTTP client;
+  the app's HTTP path is `primp.AsyncClient` (+ `httpx` inside flet). Checked
+  `anyio/_core/_sockets.py` exports — only raw TCP/UDP/UNIX sockets and TLS
+  streams, no pool. No improvement claim.
+- Replacing `core/tasks.py:spawn()` done-callback logging with task groups: a
+  task group requires its owner task to stay in the `async with` until children
+  finish (`_asyncio.py:755-824`), but `spawn()` call sites are fire-and-forget
+  from event handlers that return immediately — adopting groups there would
+  require restructuring handler lifetimes. Checked, not recommended without
+  that restructure.
+- `shield=True` on the resolve overlay's wait: shielding only defers outside
+  cancellation at that await point (`_effectively_cancelled` walk,
+  `_asyncio.py:552-563`) and does not bound or speed up resolution itself. No
+  standalone improvement; useful only inside 9.2.
+- Any performance numbers (latency reduction, throughput gain): not measured in
+  this pass — the venv introspection covered API presence and semantics only.
+  Treat all "expected effect" statements above as mechanism-based, not benchmarked.
