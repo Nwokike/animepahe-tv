@@ -109,6 +109,7 @@ class ProviderRouter:
         # Editorial priority order — first answering provider wins.
         self._providers: list[Provider] = list(providers or [])
         self._clock = clock or time.monotonic
+        self._pin: str | None = None
         self._breakers: dict[str, _Breaker] = {}
         self._health: dict[str, ProviderHealth] = {}
         for provider in self._providers:
@@ -129,6 +130,15 @@ class ProviderRouter:
             if provider.name == name:
                 return provider
         return None
+
+    def set_pin(self, name: str | None) -> None:
+        """'auto' (None) keeps the editorial order; a provider name sends
+        it first for every operation — still with full failover."""
+        self._pin = None if not name or name == "auto" else name
+
+    @property
+    def pin(self) -> str | None:
+        return self._pin
 
     @property
     def provider_names(self) -> list[str]:
@@ -153,6 +163,7 @@ class ProviderRouter:
     # ------------------------------------------------------------------
 
     async def _run(self, op: str, *args, force: bool = False, owner: str | None = None):
+        owner = owner or self._pin
         providers = self._providers
         if owner:
             providers = [p for p in providers if p.name == owner] + [

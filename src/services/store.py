@@ -394,3 +394,13 @@ class JsonStore:
             entries = {}
         entries[episode_key] = time.time()
         await self.put_section("early_access", entries)
+
+    # ------------------------------------------------------------------
+    # Content source (auto vs pinned provider)
+    # ------------------------------------------------------------------
+
+    async def get_backend(self) -> str:
+        return str(await self.section("backend", "auto"))
+
+    async def save_backend(self, name: str) -> None:
+        await self.put_section("backend", str(name or "auto"))

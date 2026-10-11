@@ -108,6 +108,8 @@ class AppController:
             ]
         )
         self._owner_of = owner_of
+        # Restore the user's content-source preference (auto or pinned).
+        self.router.set_pin(await self.store.get_backend())
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
         self._search_gen = 0
@@ -751,6 +753,25 @@ class AppController:
             "proxy" if self.hls_proxy is not None else "direct",
         )
 
+    def sources_status(self) -> dict:
+        """Settings: per-provider live health as plain dicts."""
+        return {
+            name: {
+                "state": rec.state,
+                "latency_ms": rec.latency_ms,
+                "last_error": rec.last_error,
+                "checked_at": rec.checked_at,
+            }
+            for name, rec in self.router.health().items()
+        }
+
+    async def set_backend_pin(self, name: str):
+        """Settings: 'auto' or a provider name. Applies immediately and
+        persists — the router still fails over when the pin is down."""
+        self.router.set_pin(name)
+        await self.store.save_backend(name)
+        logger.info("content source pinned to: %s", self.router.pin or "auto")
+
     async def close_player(self):
         state.player_open = False
         state.episodes_version += 1
@@ -1230,6 +1251,10 @@ async def main(page: ft.Page):
 
     # The shell's player branch reaches the controller through this handle
     # (its ControllerMethods copy is the shell-owned navigation half).
+    methods.sources_status = controller.sources_status
+    methods.set_backend_pin = lambda name: spawn(
+        controller.set_backend_pin(name), name="set-backend-pin"
+    )
     methods._app_controller = controller
     controller.shell = methods
 

@@ -238,9 +238,90 @@ def SettingsScreen() -> ft.Control:
         ),
     )
 
+
+    # ------------------------------------------------------------------
+    # Content source — auto (recommended) vs pinned provider, with live
+    # per-provider status. The router still fails over when a pinned
+    # source is down; the pin only changes who goes first.
+    # ------------------------------------------------------------------
+    controller_ref = getattr(controller, "_app_controller", None) or controller
+    backend, set_backend = ft.use_state("auto")
+    source_status, set_source_status = ft.use_state({})
+
+    def _load_backend():
+        from services.store import get_store
+
+        async def _read():
+            set_backend(await get_store().get_backend())
+            set_source_status(controller_ref.sources_status())
+
+        from core.tasks import spawn
+
+        spawn(_read(), name="load-backend")
+
+    ft.use_effect(_load_backend, [])
+
+    def _on_backend_change(e):
+        name = e.control.value or "auto"
+        set_backend(name)
+        from core.tasks import spawn
+
+        spawn(controller.set_backend_pin(name), name="save-backend-pin")
+
+    provider_names = (controller_ref.router.provider_names if controller_ref else []) or []
+    backend_dropdown = ft.Dropdown(
+        value=backend,
+        options=[ft.dropdown.Option("auto", "Automatic (recommended)")]
+        + [ft.dropdown.Option(name, name.capitalize()) for name in provider_names],
+        on_change=_on_backend_change,
+        text_size=13,
+        content_padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+    )
+    backend_row = _setting_row(
+        ft.Icons.LAYERS_ROUNDED,
+        "Content source",
+        "Automatic tries every source in order and never locks. Pinning only changes who goes first.",
+        trailing=backend_dropdown,
+    )
+
+    _STATE_COLORS = {
+        "closed": AppColors.SUCCESS,
+        "half_open": AppColors.WARNING,
+        "open": AppColors.ERROR,
+        "unknown": AppColors.WARNING,
+    }
+    status_rows = []
+    for name in provider_names:
+        rec = (source_status or {}).get(name) or {}
+        state_name = rec.get("state") or "unknown"
+        latency = rec.get("latency_ms")
+        latency_text = f"{latency:.0f} ms" if latency else "—"
+        error = rec.get("last_error") or ""
+        subtitle = f"{state_name} · {latency_text}" + (f" · {error[:60]}" if error else "")
+        status_rows.append(
+            _setting_row(
+                ft.Icons.CIRCLE,
+                name.capitalize(),
+                subtitle,
+                trailing=ft.Container(
+                    width=10,
+                    height=10,
+                    border_radius=5,
+                    bgcolor=_STATE_COLORS.get(state_name, AppColors.WARNING),
+                ),
+            )
+        )
+    source_section = [
+        _section_header("CONTENT SOURCE"),
+        _settings_card([backend_row]),
+        _settings_card(status_rows) if status_rows else ft.Container(height=0),
+    ]
+
     return ft.Column(
         controls=[
+            *source_section,
             _section_header("PLAYBACK"),
+
             _settings_card([external_player_row]),
             _section_header("DIAGNOSTICS"),
             _settings_card([terminal_row]),
