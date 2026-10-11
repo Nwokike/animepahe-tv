@@ -15,6 +15,9 @@ class Anime:
     poster: str
     session: str
     synopsis: str = ""
+    genres: list = field(default_factory=list)
+    mal_id: int = 0
+    anilist_id: int = 0
 
 
 @dataclass(unsafe_hash=True)

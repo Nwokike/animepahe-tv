@@ -126,6 +126,14 @@ class AnimePaheProvider:
             return results
         return await self.scraper.sources(anime_session, episode_session)
 
+    async def anime(self, session: str) -> Anime | None:
+        """The /anime/{session} details page — synopsis, genres, studios,
+        aired range, external ids (the detail screen's Phase-3 note)."""
+        resp = await self.scraper.ddos.get(f"{self.scraper.BASE}/anime/{session}")
+        if resp is None or resp.status_code != 200:
+            return None
+        return _parse_details(resp.text, session)
+
     async def episodes_for_title(self, title: str) -> list[Episode]:
         results, _ = await self.scraper.search(title, 1)
         for anime in results:
@@ -148,3 +156,66 @@ class AnimePaheProvider:
 
     async def close(self) -> None:
         await self.scraper.close()
+
+
+def _parse_details(html: str, session: str) -> Anime | None:
+    """The /anime/{session} page, per the three-convergent-selectors map
+    (Juro / CloudStream-3 / consumet agree on every field). Pure function —
+    fixture-tested; nothing invented when a field is absent."""
+    import re
+
+    def text(pattern: str) -> str:
+        m = re.search(pattern, html, re.S)
+        return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
+
+    title = text(
+        r'title-wrapper[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>'
+    ) or text(r'header[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>')
+    if not title:
+        return None
+    jp_title = text(r'<h2\.japanese[^>]*>([^<]+)</h2>')
+    poster = text(r'anime-poster[^>]*>\s*<a href="([^"]+)"') or text(
+        r'header[^>]*>\s*<img[^>]*data-src="([^"]+)"'
+    )
+    synopsis = text(r'class="anime-synopsis[^"]*"[^>]*>(.*?)</div>') or text(
+        r'anime-summary[^>]*>\s*<div[^>]*>(.*?)</div>'
+    )
+    # anime-info holds only <p> rows (no nested divs) — the first
+    # closing div is its own.
+    info_html_m = re.search(r'class="anime-info">(.*?)</div>', html, re.S)
+    info_html = info_html_m.group(1) if info_html_m else ""
+
+    def info(label: str) -> str:
+        m = re.search(label + r":\s*</b>\s*([^<]+)", info_html, re.I) or re.search(
+            label + r":\s*([^<\n]+)", info_html, re.I
+        )
+        return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
+
+    # The anchor's visible text is the clean genre name (the title
+    # attribute carries a "X movies" suffix).
+    genres = [
+        re.sub(r"\s+", " ", g).strip()
+        for g in re.findall(r'anime-genre.*?<a[^>]*>([^<]+)</a>', html, re.S)
+    ]
+    external = re.findall(r'href="(https://(?:anilist\.co|myanimelist\.net)/anime/(\d+))"', html)
+    ani_id = next((int(i) for url, i in external if "anilist" in url), 0)
+    mal_id = next((int(i) for url, i in external if "myanimelist" in url), 0)
+    id_m = re.search(r"release&id=(\d+)&l=", html)
+    episodes_raw = info("Episodes")
+    year_m = re.search(r"(19|20)\d{2}", info("Aired") or info("Season"))
+    return Anime(
+        id=int(id_m.group(1)) if id_m else 0,
+        title=title[:200],
+        type=info("Type"),
+        episodes=int(episodes_raw) if episodes_raw.isdigit() else 0,
+        status=info("Status"),
+        season=info("Season"),
+        year=int(year_m.group(0)) if year_m else 0,
+        score=0.0,  # the page carries no score — MAL/AniList do
+        poster=poster[:500],
+        session=session,
+        synopsis=synopsis[:1200],
+        genres=genres,
+        mal_id=mal_id,
+        anilist_id=ani_id,
+    )

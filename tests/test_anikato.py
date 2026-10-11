@@ -348,3 +348,77 @@ def test_animepahe_links_without_anime_id_goes_straight_to_scrape():
     provider = AnimePaheProvider(scraper=FakeScraper())
     sources = asyncio.run(provider.sources("pahe-anime", "unknown-ep"))
     assert sources[0].resolution == 1080
+
+
+# ---------------------------------------------------------------------
+# AnimePahe details page (Phase 2) — selector evidence from the map
+# ---------------------------------------------------------------------
+
+def test_animepahe_details_parses_the_page():
+    import asyncio
+
+    from services.providers.animepahe_provider import AnimePaheProvider, _parse_details
+
+    # Representative markup per the map's three-convergent selectors.
+    DETAILS_HTML = """
+    <div class="title-wrapper"><h1><span>Shangri-La Frontier</span></h1></div>
+    <h2 class="japanese">シャングリラ・フロンティア</h2>
+    <div class="anime-poster"><a href="https://img.example/slf.jpg"></a></div>
+    <div class="anime-synopsis">Fortune favours the players.<br/>Second line.</div>
+    <div class="anime-info">
+      <p><b>Type:</b> TV</p>
+      <p><b>Episodes:</b> 25</p>
+      <p><b>Status:</b> Currently Airing</p>
+      <p><b>Aired:</b> Oct 1, 2023 to Mar 24, 2024</p>
+      <p><b>Season:</b> Fall 2023</p>
+      <p><b>Studio:</b> C2C</p>
+    </div>
+    <div class="anime-genre"><ul>
+      <a title="Action movies"><li>Action</li></a>
+      <a title="Adventure movies"><li>Adventure</li></a>
+    </ul></div>
+    <div class="external-links">
+      <a href="https://anilist.co/anime/166531" target="_blank"></a>
+      <a href="https://myanimelist.net/anime/56621" target="_blank"></a>
+    </div>
+    <script>release&id=4471&l=2</script>
+    """
+    anime = _parse_details(DETAILS_HTML, "shangri-la-frontier")
+    assert anime is not None
+    assert anime.title == "Shangri-La Frontier"
+    assert anime.type == "TV"
+    assert anime.episodes == 25
+    assert anime.status == "Currently Airing"
+    assert anime.season == "Fall 2023"
+    assert anime.year == 2023
+    assert anime.synopsis.startswith("Fortune favours")
+    assert "Action" in anime.genres and "Adventure" in anime.genres
+    assert anime.anilist_id == 166531
+    assert anime.mal_id == 56621
+    assert anime.id == 4471  # the numeric id m=links needs
+    assert anime.session == "shangri-la-frontier"
+
+
+def test_animepahe_details_garbage_returns_none():
+    from services.providers.animepahe_provider import _parse_details
+
+    assert _parse_details("<html>totally not a details page</html>", "s") is None
+
+
+def test_animepahe_anime_uses_ddos_get():
+    import asyncio
+
+    from services.providers.animepahe_provider import AnimePaheProvider
+
+    class FakeDdos:
+        async def get(self, url):
+            class R:
+                status_code = 200
+                text = DETAILS_FIXTURE
+
+            return R()
+
+    DETAILS_FIXTURE = "<div class='title-wrapper'><h1><span>T</span></h1></div>"
+    provider = AnimePaheProvider(scraper=type("S", (), {"ddos": FakeDdos(), "BASE": "https://animepahe.com"})())
+    anime = asyncio.run(provider.anime("some-session"))
+    assert anime is not None and anime.title == "T"
