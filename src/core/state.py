@@ -39,6 +39,12 @@ class Source:
     # Per-source request headers the player/proxy must send (e.g. the
     # Referer a CDN requires). Empty = this source needs nothing special.
     headers: dict = field(default_factory=dict)
+    # Subtitle tracks exactly as the source serves them:
+    # [{label, url, default?}] — never reordered or filtered.
+    subtitles: list = field(default_factory=list)
+    # Skip windows as the source declares them: {"intro": {...},
+    # "outro": {...}} — shapes vary per source (arrays or objects).
+    skip: dict = field(default_factory=dict)
 
 
 @dataclass(unsafe_hash=True)

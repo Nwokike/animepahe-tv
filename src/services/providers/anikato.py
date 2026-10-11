@@ -182,8 +182,11 @@ class AniKatoProvider:
     capabilities = {
         "files": True,
         "episodes": True,
-        "episode_stills": True,
+        "episode_stills": False,  # the episode list has zero <img> —
+        # snapshots fall back to the poster (documented in the backend map)
         "kwik_resolve": False,  # its source URLs are ready m3u8s
+        "subtitles": True,
+        "skip": True,
     }
 
     def __init__(self, client=None):
@@ -271,11 +274,19 @@ class AniKatoProvider:
         cached = self._cache_get(key)
         if cached is not None:
             return cached
-        html = await self._get_text(
-            f"{BASE}/ajax/episode/list/{anime_id}?style=list&vrf={_vrf(anime_id)}",
-            xhr=True,
-        )
-        data = json.loads(html)
+        # The VRF is kept as the site's own JS sends it, but the backend
+        # map proved it is NOT server-enforced — on any rejection, retry
+        # bare before giving up.
+        try:
+            body = await self._get_text(
+                f"{BASE}/ajax/episode/list/{anime_id}?style=list&vrf={_vrf(anime_id)}",
+                xhr=True,
+            )
+        except Exception:
+            body = await self._get_text(
+                f"{BASE}/ajax/episode/list/{anime_id}?style=list", xhr=True
+            )
+        data = json.loads(body)
         if data.get("status") != 200:
             raise RuntimeError(f"anikato episode list: {data.get('result')}")
         entries = _parse_episode_list(data.get("result") or "")
@@ -329,8 +340,9 @@ class AniKatoProvider:
         self._cache_put(key, servers, CACHE_TTL_EPISODES)
         return servers
 
-    async def _resolve_link(self, link_id: str) -> tuple[str, str, str] | None:
-        """link-id -> megaplay embed -> (realid, type, s)."""
+    async def _resolve_link(self, link_id: str) -> tuple[str, str, str, dict] | None:
+        """link-id -> megaplay embed -> (realid, type, s, skip_data). The
+        per-episode skip windows ride the same response."""
         key = f"link_{link_id[:40]}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -339,13 +351,18 @@ class AniKatoProvider:
         data = json.loads(html)
         if data.get("status") != 200:
             return None
-        url = str((data.get("result") or {}).get("url") or "")
+        result = data.get("result") or {}
+        url = str(result.get("url") or "")
         params = _megaplay_params(url) if url else None
         if params:
-            self._cache_put(key, params, CACHE_TTL_EPISODES)
-        return params
+            skip = result.get("skip_data") or {}
+            self._cache_put(key, (*params, skip), CACHE_TTL_EPISODES)
+            return (*params, skip)
+        return None
 
-    async def _manifest_for(self, realid: str, kind: str, s: str) -> str:
+    async def _manifest_for(self, realid: str, kind: str, s: str) -> tuple[str, list, dict]:
+        """getSources -> (manifest URL, subtitle tracks, intro/outro).
+        Nothing is reordered or filtered — the payload travels as served."""
         key = f"manifest_{realid}_{kind}_{s}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -364,13 +381,26 @@ class AniKatoProvider:
         )
         if resp.status_code != 200:
             raise RuntimeError(f"megaplay getSources HTTP {resp.status_code}")
-        enc = str(resp.json().get("enc") or "")
+        payload = resp.json()
+        enc = str(payload.get("enc") or "")
         if not enc:
             raise RuntimeError("megaplay getSources: empty enc")
         manifest = _decrypt_manifest(enc)
-        if manifest:
-            self._cache_put(key, manifest, CACHE_TTL_EPISODES)
-        return manifest
+        if not manifest:
+            raise RuntimeError("megaplay getSources: manifest decrypt empty")
+        tracks = [
+            {"label": str(t.get("label") or ""), "url": str(t.get("file") or ""),
+             "default": bool(t.get("default"))}
+            for t in (payload.get("tracks") or [])
+            if t.get("file")
+        ]
+        windows = {
+            "intro": payload.get("intro") or {},
+            "outro": payload.get("outro") or {},
+        }
+        result = (manifest, tracks, windows)
+        self._cache_put(key, result, CACHE_TTL_EPISODES)
+        return result
 
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
         _, slug = split_session(anime_session)
@@ -386,17 +416,26 @@ class AniKatoProvider:
         servers = await self._server_links(ids_token)
         results: list[Source] = []
         for kind, link_id in servers:
-            params = await self._resolve_link(link_id)
-            if not params:
+            resolved = await self._resolve_link(link_id)
+            if not resolved:
                 continue
-            realid, megaplay_kind, s = params
+            realid, megaplay_kind, s, ep_skip = resolved
             try:
-                manifest = await self._manifest_for(realid, megaplay_kind, s)
+                manifest, tracks, windows = await self._manifest_for(realid, megaplay_kind, s)
             except Exception as ex:
                 logger.info("anikato manifest failed (%s/%s): %s", realid, megaplay_kind, ex)
                 continue
             if not manifest:
                 continue
+            # Both skip levels travel: the getSources object form is what
+            # the player prefers, the per-episode arrays stay as fallback —
+            # nothing the source serves is dropped.
+            skip = {
+                "intro": windows.get("intro") or {},
+                "outro": windows.get("outro") or {},
+                "episode_intro": (ep_skip or {}).get("intro") or [],
+                "episode_outro": (ep_skip or {}).get("outro") or [],
+            }
             results.append(
                 Source(
                     url=manifest,
@@ -404,6 +443,8 @@ class AniKatoProvider:
                     audio="eng" if kind == "dub" else "jpn",
                     fansub="AniKato",
                     headers={"Referer": MEGAPLAY_REFERER},
+                    subtitles=tracks,
+                    skip=skip,
                 )
             )
         return results
