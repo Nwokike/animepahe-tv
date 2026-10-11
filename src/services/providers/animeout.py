@@ -241,7 +241,9 @@ def _parse_episode_links(html: str, anime_id: int) -> list[Episode]:
     ``[AnimeOut] Title - 12 [hash][1080pp][SubsPlease][x265][RapidBot].mkv``.
     Multiple patterns are tried (S01E12, "- 12", "Episode 12") — different
     eras of posts use different conventions."""
-    hrefs = re.findall(r'href="(https?://[^"]+\.mkv)"', html)
+    # Posts mix double- and single-quoted anchors (the One Piece
+    # ongoing post: 2067 single-quoted vs 15 double-quoted) — match both.
+    hrefs = re.findall(r"href=['\"](https?://[^'\"]+\.mkv)['\"]", html, re.I)
     results: list[Episode] = []
     seen: set[int] = set()
     for href in hrefs:

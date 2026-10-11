@@ -312,3 +312,170 @@ Every item below exists in the installed 0.1.0 source but has no call site in
 14. **Preload-next pattern generally** — §4 shows append-early is free; we only
     ever create-then-immediately-show, so every fullscreen `show()` pays full
     load latency inside its 20 s timeout.
+
+## 7. App improvement opportunities
+
+Ranked by impact for this app (mobile + Android TV anime client; ads mounted only
+on mobile/TV per `ads.py:is_ads_supported` and `banner_ad.py:_is_supported`;
+all fullscreen flows live in `src/services/ads.py`, the banner in
+`src/components/banner_ad.py`). Each item cites the exact verified API
+(file + signature/contract) and the app surface it improves. Absence-in-app for
+every item verified by grep over `src/` (no hits for `wait_for_dismiss`,
+`on_impression`, `on_shown`, `on_dismiss`, `on_failed_to_show`,
+`cancel_loading`, `set_user_consent`/`set_location`/`set_age`,
+`show_debug_panel`, `max_height`, or any `R-M-` id; only hits for ad teardown
+are the two `await ad.destroy()` lines in `show_interstitial`/`show_app_open`).
+
+Scope note, stated explicitly with evidence: **nothing significant exists beyond
+the §6 surface.** The package's full public surface is the 13-name `__all__`
+(`__init__.py`, introspection-identical) and constructor introspection shows no
+further monetization knobs — `BannerAd` takes only `size_type`/`max_height`
+beyond base/events, fullscreen adds only the four §2b events and five methods,
+the service only the five flags and four setters/panel. Every ranked item below
+is therefore a re-framing of verified §6 gaps, not new API. Items that could not
+be verified from the installed 0.1.0 tree are segregated under Unverified.
+
+### 7.1 (Highest) Ship production unit ids — demo inventory cannot monetize
+
+- **API**: `BaseAd.unit_id: str` (`base_ad.py:21-25`, *"looks like `R-M-XXXXXX-Y`"*);
+  METADATA Usage section: *"The demo ad units … work out of the box. Replace them
+  with your own ad block IDs (`R-M-XXXXXX-Y`) from the
+  [partner interface](https://partner.yandex.com/) for production."*
+- **Improves**: `AD_INTERSTITIAL_UNIT_ID` / `AD_REWARDED_UNIT_ID` /
+  `AD_APP_OPEN_UNIT_ID` (`ads.py:28-30`) and `AD_BANNER_UNIT_ID`
+  (`banner_ad.py:26`) — all four still `demo-*-yandex`. This is the single
+  highest-impact change because every other item optimizes delivery of test
+  inventory; per-platform ids are app-side work (the parameter is a plain `str`,
+  no per-platform switching exists in the package), so add an
+  Android-vs-iOS-vs-TV id map at the call sites when the partner-interface
+  blocks are issued.
+
+### 7.2 (High) Fix the destroy-before-dismiss race on interstitial/app-open
+
+- **API**: `FullscreenAd.show()` — *"Show the loaded ad on top of the
+  application"* — paired with `wait_for_dismiss()` — *"Wait until the ad is
+  dismissed. Must be called after `show`; returns when the ad closes"*
+  (`fullscreen_ad.py:51-63`, sources re-dumped live); the package's own
+  `InterstitialAd` docstring pattern is `append → show() → wait_for_dismiss()`
+  (`interstitial_ad.py:14-19`).
+- **Improves**: `show_interstitial` (`ads.py:54-66`) and `show_app_open`
+  (`ads.py:69-81`), which call `await ad.destroy()` immediately after `show()`
+  returns without ever awaiting dismissal. `show()` resolving means *presented*,
+  not *closed* — otherwise `wait_for_dismiss()` would have no purpose — so the
+  current code can tear down a still-visible ad. Insert
+  `await ad.wait_for_dismiss()` between `show()` and `destroy()` in both
+  functions; this matches the documented pattern and protects the impression /
+  completion accounting of every fullscreen show.
+
+### 7.3 (High) Add a banner reload strategy — the only refresh mechanism in 0.1.0
+
+- **API**: `BannerAd.reload()` — *"Load a new ad into this banner"*
+  (`banner_ad.py:60-63`, source re-dumped live). Constructor introspection
+  confirms **no** auto-refresh parameter exists (only `size_type`/`max_height`
+  beyond base/events), so refresh is exclusively app-driven.
+- **Improves**: `build_banner_ad` (`banner_ad.py:41-84`), which loads once per
+  mount and never refreshes. Reload on screen revisit (or a conservative
+  foreground timer, e.g. 60–90 s) multiplies impressions per session at zero new
+  dependencies; wire `on_load`'s `BannerLoadedEvent(width, height)` to confirm
+  each rotation actually filled before counting it.
+
+### 7.4 (High) Repair the rewarded lifecycle: use the dismiss result, then destroy
+
+- **API**: `RewardedAd.wait_for_dismiss() -> Optional[RewardEvent]`
+  (`rewarded_ad.py:41-52`, source re-dumped live) — *"return the reward the user
+  earned, or `None` if the ad was not watched to the end"* — plus
+  `FullscreenAd.destroy()` (`fullscreen_ad.py:70-73`).
+- **Improves**: `build_rewarded_ad` (`ads.py:84-111`), which grants solely on the
+  `on_reward` callback, never reads the dismiss result, and never calls
+  `destroy()` or removes the control from `page.services` (the interstitial /
+  app-open paths do both at `ads.py:62-64`, `76-78`). Two changes: (a) after
+  `show()`, `reward = await ad.wait_for_dismiss()` and cross-check
+  `reward is not None` against the `on_reward` grant — currently an abandoned
+  view and a completed view are indistinguishable downstream; (b) mirror the
+  interstitial teardown (`destroy()` + services removal) so repeated grants stop
+  accumulating dead one-shot services.
+
+### 7.5 (Medium-high) Preload the next fullscreen ad instead of create-then-show
+
+- **API**: *"Loading starts automatically when the service is added to the page"*
+  (`fullscreen_ad.py:41-47`); `load()` re-arms after failure; `on_load` signals
+  readiness (`base_ad.py:27-28`).
+- **Improves**: `show_interstitial` / `show_app_open`, which pay full load latency
+  inside the 20 s `asyncio.wait_for` on every call. Create the next episode's
+  interstitial when the current episode *starts*, gate `show()` on its `on_load`,
+  and fall back to `load()`-retry on `on_load_failed(code, description)` — the
+  only handlers the interstitial/app-open paths currently lack (only the rewarded
+  ad wires them, `ads.py:104-109`). Cancels via `cancel_loading()`
+  (`fullscreen_ad.py:65-68`) on fast episode skips so stale loads don't outlive
+  their screen.
+
+### 7.6 (Medium) Collect ILRD impression telemetry on all formats
+
+- **API**: `on_impression: Optional[ft.EventHandler[ImpressionEvent]]` on both
+  `BannerAd` (`banner_ad.py:52-58`) and `FullscreenAd` (`fullscreen_ad.py:33-39`);
+  `ImpressionEvent.impression_data: str` — *"Impression-level revenue data as a
+  JSON string (ILRD)"* (`types.py:63-69`).
+- **Improves**: every ad surface — zero ILRD is captured anywhere today. Logging
+  `impression_data` per show is the cheapest input to later mediation decisions
+  (which format/episode slot actually earns) and to verifying production ids
+  fill after §7.1.
+
+### 7.7 (Medium) Wire consent/location/age setters to settings (compliance + yield)
+
+- **API**: `YandexAdsService.set_user_consent(bool)` /
+  `set_location_tracking(bool)` / `set_age_restricted(bool)` (Android only) plus
+  matching constructor flags (`yandex_ads_service.py:31-46`, `79-92`).
+- **Improves**: `build_ad_service` (`ads.py:42-51`), which hardcodes
+  `user_consent=True` with no runtime path to flip it. A settings-screen toggle
+  calling `set_user_consent()` removes the GDPR exposure; setting
+  `location_tracking` where appropriate improves targeting yield; `age_restricted`
+  covers COPPA on Android. All three setters exist and are entirely unused.
+
+### 7.8 (Lower-medium) Observe show-failures and clicks instead of swallowing them
+
+- **API**: `on_failed_to_show: EventHandler[AdErrorEvent]` (`description`) and
+  `on_shown` / `on_dismiss` (`fullscreen_ad.py:19-32`); `on_click`
+  (`base_ad.py:40-41`).
+- **Improves**: interstitial/app-open observability (failures surface only as a
+  caught-exception warning today) and banner analytics (`on_click` is a no-op
+  lambda, `banner_ad.py:60`; unwired elsewhere). `on_dismiss` is also the natural
+  hook for resuming playback or preloading the next episode's ad.
+
+### 7.9 (Low) Pass `max_height` to inline banners; use the debug panel in dev
+
+- **API**: `BannerAd.max_height: Optional[int]` — *"Maximum banner height in dp,
+  for the INLINE size type. Defaults to a third of the screen height"*
+  (`banner_ad.py:37-42`); `YandexAdsService.show_debug_panel()` —
+  *"for network and integration checks"* — and `debug_error_indicator`
+  (`yandex_ads_service.py:48-55`, `94-98`).
+- **Improves**: the `inline=True` banner path (`banner_ad.py:57`, `67-68`),
+  which currently accepts the Dart-side third-of-screen default instead of the
+  feed-row height; and dev-time integration checking (panel never invoked).
+  Small, safe, no user-facing risk.
+
+### Unverified / explicitly ruled out (no speculation)
+
+- **Whether `show()` resolves on presentation vs. dismissal at the native layer**
+  — the Dart bridge is not installed in `site-packages` (only the Python side;
+  `RECORD` proves `flutter/flet_yandex_ads/lib/src/*.dart` ships in the wheel
+  for build-time consumption). The §7.2 recommendation rests on the documented
+  Python contract (`show` + must-call-after-`wait_for_dismiss` + docstring
+  pattern), not on inspected Dart code.
+- **Revenue impact of the destroy race (§7.2)** — verified the teardown ordering
+  against the documented pattern, but that destroying a visible ad drops the
+  impression/completion server-side is native-SDK behavior, not stated in the
+  installed 0.1.0 sources. Listed as correctness-first, revenue-second.
+- **Fill-rate / eCPM numbers, TV performance, mediation yield** — no figures
+  exist anywhere in the installed tree; METADATA marks Android TV *"untested"*.
+  No quantitative monetization claim is made in §7.1–§7.9.
+- **Native and InStream formats** — ruled out, not roadmap: METADATA Limitations
+  states they *"exist only in Yandex's native SDKs"*; the Flutter plugin (and
+  hence this package) exposes exactly banner / interstitial / rewarded /
+  app-open.
+- **Refresh-interval guidance from Yandex** — no interval constant or policy
+  string in the installed sources; the §7.3 cadence suggestion is an app-side
+  choice, not a package-prescribed value.
+- **Extra targeting knobs (keywords, content URL, demographics, test-device
+  lists, non-personalized-ads enum)** — verified absent: full constructor
+  introspection shows only the three privacy flags + logging + debug indicator
+  on the service. Do not plan for them on 0.1.0.

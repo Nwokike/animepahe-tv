@@ -187,3 +187,135 @@ Facts about gaps/latent features, each tied to the source:
 5. **Playback-rate persistence — property, not method; app must persist.** `playback_rate: ft.Number = 1.0` is a settable property (assign + `update()`), there is no `set_rate()` method and no built-in persistence — remember-per-anime speed (e.g. 1.25× for fillers) must be stored app-side and reapplied on `on_load`/`on_track_change`.
 6. **Quality switching mechanics — no rendition API; rebuild-or-swap pattern.** No `quality`/`bitrate`/`variant`/`rendition` field or method on `Video`/`VideoMedia` (grep-verified). HLS multi-variant URLs therefore switch by either (a) rebuilding `video.playlist` around a new `VideoMedia(resource=<variant-or-master-url>)` and `jump_to`/`seek` back to the saved `get_current_position()`, or (b) pointing the single playlist entry at a different (master vs. pinned-variant) URL. `filter_quality` is **not** stream quality (it is texture-scaling: LOW default, MEDIUM advised on Android). `VideoConfiguration.scale/width/height` control output size, not bitrate.
 7. **Adjacent unused-but-relevant knobs worth knowing:** `muted` (start-muted) + desktop `VideoVolumeButton`/scroll-volume (no live mute method — volume changes go through the `volume` 0–100 property); `pitch` (relative pitch, default 1.0); `pause_upon_entering_background_mode=True` / `resume_upon_entering_foreground_mode=False` (background behavior is already sensible for a phone player); `fullscreen` property + `on_enter/exit_fullscreen` (programmatic fullscreen); `title` (Windows volume-mixer label); `take_screenshot(format="image/png"|"image/jpeg"|None, include_libass_subtitles=False)` (episode thumbnails); deprecated `show_controls`/`playlist_add`/`playlist_remove` (avoid — use `controls=None` and direct `playlist.append/pop`, removal slated for 0.88.0).
+
+---
+
+## 8. App improvement opportunities
+
+Every item below cites a verified source (file + signature from §§1-7).
+Items that could not be verified against the installed package are separated
+at the end. Ordered by expected impact on the anime player.
+
+1. **Load per-episode external subtitles via `VideoSubtitleTrack(src=...)`.**
+   `VideoSubtitleTrack(src: str, title: Optional[str] = None, language: Optional[str] = None, ...)`
+   (`types.py:910-994`) accepts a subtitle URL, an absolute local path
+   (non-web), or raw SRT/VTT text (`src` docstring, §5b); assign to
+   `Video.subtitle_track: Optional[VideoSubtitleTrack]` (`video.py:193-195`)
+   and style with `Video.subtitle_configuration: VideoSubtitleConfiguration`
+   (`video.py:185-190`; defaults: 32 px white-on-black54, centered, visible).
+   `VideoSubtitleTrack.auto()` / `.none()` (`types.py:985-993`) give
+   first-track vs. off for free. For sources that ship subtitle tracks
+   alongside video URLs, this is the highest-impact gap to close: it turns
+   "raw video only" episodes into fully-subtitled playback with one property
+   assignment + `update()`, no new dependency. Improves the player surface
+   (subtitle rendering, per-language selection via `title`/`language`).
+2. **Implement quality switching as playlist rebuild around variant URLs.**
+   No rendition/variant/bitrate field or method exists on `Video`/`VideoMedia`
+   (grep-verified absent, §7.6) — so the supported mechanic is: save position
+   via `async def get_current_position(self) -> ft.Duration`
+   (`video.py:351-355`), replace `video.playlist` with
+   `VideoMedia(resource=<other-variant-or-master-URL>, http_headers=...)`
+   (`types.py:59-70`), `await video.jump_to(0)` (`video.py:285-298`), then
+   `await video.seek(saved_position)` (`video.py:275-283`). `on_track_change`
+   (`video.py:217-223`, new index in `e.data`) and `on_duration_change`
+   (`video.py:233-239`) re-arm the progress UI after the swap. Improves the
+   player surface (manual/auto quality selector for HLS masters that expose
+   variant URLs).
+3. **Tune CDN/HLS robustness through `configuration.mpv_properties`.**
+   `VideoConfiguration.mpv_properties: Optional[dict[str, Union[str, int, float, bool]]]`
+   (`types.py:119-140`): bare mpv option names, bool-to-`"yes"`/`"no"`, full list
+   at the mpv manual. This is the only typed escape hatch for cache/demux
+   (`cache`, `demuxer-*`), hardware decode (`hwdec`, `hwdec-codecs`), and
+   request headers (`http-header-fields`, `user-agent`) on native backends —
+   none of which have first-class params (grep-verified, §6). Concretely:
+   pass the CDN's required `Referer`/`User-Agent` here when per-media
+   `http_headers` proves insufficient for HLS segment sub-requests (§3), and
+   raise demuxer/cache budgets for slow HLS. Improves stream-start success
+   rate and rebuffering on protected/slow CDNs. Validate each key at runtime
+   via `on_error` (`video.py:206-212`) — misspelled keys fail outside these
+   files' visibility.
+4. **Persist watch state with `on_position_change` + `get_current_position`.**
+   `on_position_change: Optional[ft.ControlEventHandler["Video"]]`
+   (`video.py:225-231`, current position as `flet.Duration` in `e.data`)
+   fires continuously during playback; `get_current_position()` /
+   `get_duration()` (`video.py:344-355`) give the same on demand, and
+   `on_duration_change` (`video.py:233-239`) marks metadata readiness.
+   Throttle-write position to watch history and resume each episode with
+   `autoplay=True` (`video.py:59-61`) + `await video.seek(saved)` after
+   `on_load` (`video.py:197-198`). `on_complete` (`video.py:215`) is the
+   autoplay-next hook. Improves continue-watching, episode-advance, and
+   progress-bar surfaces.
+5. **Persist per-anime playback rate (property, not method).**
+   `playback_rate: ft.Number = 1.0` (`video.py:140-143`) is a settable
+   property — there is no `set_rate()` method (full 15-method enumeration,
+   §4a). Store the user's speed app-side and reassign
+   `video.playback_rate = saved` + `update()` on `on_load`/`on_track_change`.
+   Related: `pitch: ft.Number = 1.0` (`video.py:173-176`) is available if
+   speed changes need pitch compensation on dubbed episodes. Improves the
+   player-preferences surface for negligible cost.
+6. **Keep `wakelock=True` (default) and set background behavior explicitly.**
+   `wakelock: bool = True` (`video.py:52-57`) already prevents display sleep
+   during playback — keep it for long episodes; only disable for
+   preview/thumbnail players. Pair with
+   `pause_upon_entering_background_mode: bool = True` (`video.py:161-164`)
+   and `resume_upon_entering_foreground_mode: bool = False`
+   (`video.py:166-171`) to define phone-background behavior (currently
+   pause-on-background, no auto-resume). Improves the mobile-playback
+   surface with zero code beyond constructor args.
+7. **Use the `controls` dict form for fullscreen + custom anime chrome.**
+   `controls: Optional[Union[VideoControls, ft.Control, dict[VideoControlsMode, ...]]]`
+   (`video.py:77-103`) defaults to `AdaptiveVideoControls()` (Material on
+   Android/iOS, MaterialDesktop on desktop, none elsewhere — `types.py:873-907`).
+   The dict form (`VideoControlsMode.NORMAL/FULLSCREEN/DEFAULT`,
+   `types.py:46-56`) allows a lean touch UI in normal mode and a richer
+   desktop bar (`VideoVolumeButton` renders **only** in
+   `MaterialDesktopVideoControls` — `types.py:287-293` note) in fullscreen,
+   with per-mode `None` to hide. Custom `ft.Control` values and bar-item
+   lists (`primary/top/bottom_button_bar`, native defaults quoted in §5a)
+   give episode-title overlays and next-episode buttons without forking the
+   player. Improves player-chrome and fullscreen surfaces.
+8. **Diagnose stream failures with `on_error` + `take_screenshot` thumbnails.**
+   `on_error` (`video.py:206-212`, info in `e.data`) is the only
+   error-reporting channel — log it with the failing `VideoMedia.resource`
+   to distinguish CDN 403s, expired HLS URLs, and codec failures.
+   `async def take_screenshot(self, format: Optional[str] = "image/png", include_libass_subtitles: bool = False) -> Optional[bytes]`
+   (`video.py:358-392`) captures PNG/JPEG (or raw BGRA with `None` on
+   native; `ValueError` otherwise) for episode thumbnails/previews.
+   Improves the diagnostics and browse/continue-watching artwork surfaces.
+
+Unverified / explicitly absent — checked and NOT in installed 0.85.3, so no
+improvement can be built on them without a different package or version:
+
+- Audio-track (dub/sub-audio) selection API: no `audio_track` field, no
+  `set_audio_track`/`get_audio_tracks` method, no `on_audio_change` event in
+  `video.py` or `types.py` (full read + grep, §§4/7.2). Multi-audio anime
+  sources require a playlist rebuild with a different stream or raw
+  `mpv_properties` (e.g. mpv `aid`), both unverified from these files alone.
+- Buffering/cache tuning as typed API: no `buffering`/`buffer_size`/`cache_*`
+  param on `Video` or `VideoConfiguration` (grep-verified, §7.3). Only
+  reachable — if at all — via unlisted `mpv_properties` keys from the mpv
+  manual (native only); `seek_bar_buffer_color` is cosmetics, not buffering.
+- Whether `VideoMedia.http_headers` are forwarded on every HLS segment/key
+  sub-request: the one-sentence docstring (`types.py:66-67`) makes no such
+  promise and no forwarding logic exists in these 3 Python files (backend
+  behavior, §3). Requires a runtime proxy test per CDN.
+- Specific `mpv_properties` key names/values for `ytdl`/`cache`/`demuxer`/
+  `user-agent`: zero such strings in the package (grep-verified, §6). Key
+  validity, value formats, and web-backend inapplicability come from the mpv
+  manual and runtime `on_error` observation, not from this package.
+- Stream-quality metadata (bitrate/resolution/rendition list): no such field
+  on `VideoMedia` (3 fields only, §3) and no quality getter method (§4a).
+  Quality choice depends on variant URLs the app itself extracts from master
+  playlists.
+- `balance` (stereo), `rate` (actual name `playback_rate`), `mute` (actual
+  name `muted`, start-muted only, no live toggle method), `on_loaded`
+  (actual name `on_load`), `on_seek` (no seek-ack event): all absent under
+  the brief's names; the verified counterparts are in §§2/4.
+
+What was checked and found **not** significant beyond §7: `title`
+(volume-mixer label), `fit`/`fill_color`/`alignment` (presentation only),
+`filter_quality` (texture scaling, not stream quality — LOW default, MEDIUM
+advised on Android), `fullscreen` programmatic toggle (mechanics, not an
+improvement), `playlist_mode`/`shuffle_playlist` (playlist looping, marginal
+for episodic anime), deprecated `show_controls`/`playlist_add`/
+`playlist_remove` (avoid — removal slated for 0.88.0).
