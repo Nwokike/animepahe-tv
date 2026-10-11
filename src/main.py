@@ -484,6 +484,16 @@ class AppController:
         if gen != self._play_gen:
             return
 
+        # External-player mode: the 1.0.9 flow, reproduced. The old app was
+        # external-only — it resolved the chosen source and handed KTV the
+        # m3u8 via ktv:// (with the install dialog on failure). The proxy is
+        # irrelevant here, so nothing is built for it.
+        if await self.store.get_external_player():
+            if gen != self._play_gen:
+                return
+            await self._play_episode_external(anime_session, episode_session)
+            return
+
         # 1. Stream sources — sorted best-first, as the original did.
         try:
             sources = await self.scraper.sources(anime_session, episode_session)
@@ -594,7 +604,25 @@ class AppController:
                 pending["episode_session"],
             )
             return
+        pending_external = bool(pending.get("external"))
         choice = choices[choice_index]
+        if pending_external:
+            # The old-app path: resolve the chosen source and hand it to KTV.
+            source = next(
+                (s for s in getattr(self, "_external_sources", []) if s.url == choice["url"]),
+                None,
+            )
+            if source is None:
+                # Rebuild the Source from the choice (the list isn't kept).
+                from core.state import Source
+
+                source = Source(
+                    url=choice["url"], resolution=0, audio="jpn", fansub=""
+                )
+            await self._resolve_and_launch_external(
+                source, pending["anime_session"], pending["episode_session"]
+            )
+            return
         # Every entry is a site source (kwik url): re-resolve it, fetch its
         # own variants, and play. The dialog buttons spin while it happens
         # (see _build_quality_dialog).
@@ -691,6 +719,82 @@ class AppController:
         nxt = episodes[target]
         await self.close_player()
         await self.play_episode(state.current_anime_session, nxt.session)
+
+    async def _play_episode_external(self, anime_session: str, episode_session: str):
+        """The 1.0.9 external flow: quality dialog (all sources), resolve the
+        chosen one, hand the m3u8 to KTV with a human title."""
+        try:
+            sources = await self.scraper.sources(anime_session, episode_session)
+        except Exception as ex:
+            logger.error("external: sources failed: %s", ex)
+            self._show_error_snackbar("Couldn't load the stream sources.")
+            return
+        if not sources:
+            self._show_error_snackbar("No stream found for this episode.")
+            return
+        sources = sorted(sources, key=lambda s: s.resolution, reverse=True)
+
+        choices: list[dict] = []
+        for src in sources:
+            audio_label = (
+                "DUB (ENG)"
+                if "eng" in (src.audio or "").lower()
+                else f"SUB ({(src.audio or 'jpn').upper()})"
+            )
+            label = f"{src.resolution}p - {audio_label}"
+            if src.fansub:
+                label += f" ({src.fansub})"
+            choices.append({"label": label, "kind": "source", "url": src.url})
+
+        state.selected_source = sources[0]
+        if len(choices) <= 1:
+            await self._resolve_and_launch_external(
+                sources[0], anime_session, episode_session
+            )
+            return
+        state.quality_choices = choices
+        state.quality_dialog_open = True
+        # Reuse the dialog portal; the choice handler routes by the current
+        # external-player setting, so it lands back here.
+        state.pending_playback = {
+            "external": True,
+            "anime_session": anime_session,
+            "episode_session": episode_session,
+            "m3u8": None,
+            "variants": [],
+        }
+        state.episodes_version += 1
+
+    async def _resolve_and_launch_external(
+        self, source, anime_session: str, episode_session: str
+    ):
+        """Resolve one kwik source and hand the m3u8 to KTV, exactly as the
+        old app did (TimeoutError counts as launch success)."""
+        self._resolve_stage(self._play_gen, "Resolving stream…")
+        try:
+            m3u8 = await self.kwik.resolve(source.url)
+        except Exception as ex:
+            logger.error("external: resolve failed: %s", ex)
+            m3u8 = None
+        if not m3u8:
+            self._show_error_snackbar("Failed to resolve the stream.")
+            return
+        self._resolved_m3u8 = m3u8
+        anime = await self._resolve_anime(anime_session)
+        ep = next(
+            (e for e in state.episodes if e.session == episode_session), None
+        )
+        from services.external_player import episode_title, launch_external
+
+        await launch_external(
+            self.page,
+            m3u8,
+            episode_title(
+                (anime or {}).get("title", "Anime"),
+                ep.episode if ep else None,
+                source.resolution,
+            ),
+        )
 
     async def _open_external_player(self, anime_session: str, episode_session: str):
         """Fallback: hand the resolved stream to KTV Player.

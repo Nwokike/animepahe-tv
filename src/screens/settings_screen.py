@@ -189,8 +189,59 @@ def SettingsScreen() -> ft.Control:
         ),
     )
 
+    # Playback target: the in-app player, or KTV Player via ktv:// (the
+    # old app's only mode). The store is the source of truth; the switch
+    # mirrors it and writes back on change.
+    external_player, set_external_player = ft.use_state(False)
+
+    def _load_external_player():
+        from services.store import get_store
+
+        async def _read():
+            enabled = await get_store().get_external_player()
+            set_external_player(enabled)
+
+        from core.tasks import spawn
+
+        spawn(_read(), name="load-external-player")
+
+    ft.use_effect(_load_external_player, [])
+
+    def _on_external_player_change(e):
+        enabled = bool(e.control.value)
+        set_external_player(enabled)
+
+        async def _save():
+            from services.store import get_store
+
+            await get_store().save_external_player(enabled)
+            from core.notify import show_snack
+
+            show_snack(
+                page,
+                "External player enabled."
+                if enabled
+                else "In-app player enabled.",
+            )
+
+        from core.tasks import spawn
+
+        spawn(_save(), name="save-external-player")
+
+    external_player_row = _setting_row(
+        ft.Icons.OPEN_IN_NEW_ROUNDED,
+        "Play in external player",
+        "Hand streams to KTV Player instead of the in-app player",
+        trailing=ft.Switch(
+            value=external_player,
+            on_change=_on_external_player_change,
+        ),
+    )
+
     return ft.Column(
         controls=[
+            _section_header("PLAYBACK"),
+            _settings_card([external_player_row]),
             _section_header("DIAGNOSTICS"),
             _settings_card([terminal_row]),
             build_banner_ad(page, inline=True),

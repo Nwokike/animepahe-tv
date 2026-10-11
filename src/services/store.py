@@ -321,6 +321,17 @@ class JsonStore:
         return True
 
     # ------------------------------------------------------------------
+    # Playback preference: hand streams to KTV Player (the old app's only
+    # mode) instead of the in-app player.
+    # ------------------------------------------------------------------
+
+    async def get_external_player(self) -> bool:
+        return bool(await self.section("external_player", False))
+
+    async def save_external_player(self, enabled: bool) -> None:
+        await self.put_section("external_player", bool(enabled))
+
+    # ------------------------------------------------------------------
     # Rewarded-ad early access (episode_key -> unlocked_at timestamp).
     # Rewards are purchasable currency: the row is all the bookkeeping
     # needed, and clearing app data resets it.
