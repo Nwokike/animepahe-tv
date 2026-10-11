@@ -571,12 +571,25 @@ class AppController:
             if src.fansub:
                 label += f" ({src.fansub})"
             choices.append(
-                {"label": label, "kind": "source", "url": src.url, "headers": src.headers}
+                {
+                    "label": label,
+                    "kind": "source",
+                    "url": src.url,
+                    "headers": src.headers,
+                    "subtitles": src.subtitles,
+                    "skip": src.skip,
+                }
             )
 
         if len(choices) <= 1:
             await self._open_player(
-                m3u8, variants, anime_session, episode_session, sources[0].headers
+                m3u8,
+                variants,
+                anime_session,
+                episode_session,
+                sources[0].headers,
+                sources[0].subtitles,
+                sources[0].skip,
             )
             return
         state.quality_choices = choices
@@ -587,6 +600,8 @@ class AppController:
             "anime_session": anime_session,
             "episode_session": episode_session,
             "headers": sources[0].headers,
+            "subtitles": sources[0].subtitles,
+            "skip": sources[0].skip,
         }
         state.episodes_version += 1
 
@@ -638,6 +653,8 @@ class AppController:
                 pending["anime_session"],
                 pending["episode_session"],
                 pending.get("headers"),
+                pending.get("subtitles"),
+                pending.get("skip"),
             )
             return
         pending_external = bool(pending.get("external"))
@@ -692,6 +709,8 @@ class AppController:
             pending["anime_session"],
             pending["episode_session"],
             choice.get("headers"),
+            choice.get("subtitles"),
+            choice.get("skip"),
         )
 
     async def _open_player(
@@ -701,6 +720,8 @@ class AppController:
         anime_session: str,
         episode_session: str,
         source_headers: dict | None = None,
+        subtitles: list | None = None,
+        skip: dict | None = None,
     ):
         """Open the in-app player on a resolved stream.
 
@@ -734,12 +755,36 @@ class AppController:
                 )
             except Exception as ex:
                 logger.warning("proxy url build failed; playing direct: %s", ex)
+        # Subtitle URLs come from a host that requires the source's own
+        # Referer — route them through the loopback proxy exactly like
+        # segments (its passthrough serves the VTT bytes with the right
+        # headers). Tracks travel exactly as the source served them.
+        spec_subtitles = list(subtitles or [])
+        if spec_subtitles and self.hls_proxy is not None:
+            proxied_tracks = []
+            for track in spec_subtitles:
+                try:
+                    proxied_tracks.append(
+                        {
+                            "label": track.get("label") or "",
+                            "url": self.hls_proxy.get_proxy_url(
+                                track["url"], referer=referer, headers=headers
+                            ),
+                            "default": bool(track.get("default")),
+                        }
+                    )
+                except Exception as ex:
+                    logger.warning("subtitle proxy build failed: %s", ex)
+            if proxied_tracks:
+                spec_subtitles = proxied_tracks
         state.player_spec = {
             "resource": play_url,
             "source_url": resource,
             "source_referer": referer,
             "source_headers": headers,
             "variants": variants,
+            "subtitles": spec_subtitles,
+            "skip": skip or {},
             "proxied": self.hls_proxy is not None,
             "title": (anime or {}).get("title") or "AnimePahe",
             "episode_session": episode_session,
@@ -880,7 +925,14 @@ class AppController:
             if src.fansub:
                 label += f" ({src.fansub})"
             choices.append(
-                {"label": label, "kind": "source", "url": src.url, "headers": src.headers}
+                {
+                    "label": label,
+                    "kind": "source",
+                    "url": src.url,
+                    "headers": src.headers,
+                    "subtitles": src.subtitles,
+                    "skip": src.skip,
+                }
             )
 
         state.selected_source = sources[0]
