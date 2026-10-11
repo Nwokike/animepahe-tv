@@ -77,10 +77,24 @@ Ranked by impact (each with evidence in dep-*.md):
 5. **Flet surface**: SearchBar, GridView, SharedPreferences, use_memo
    (dep-flet §8) — where they genuinely fit.
 
-## Phase 7 — House-app ports (pending app studies)
-From app-ktv-player.md, app-sherlock.md, app-ddgs.md (in flight): the
-player patterns, the canonical 3-way theme implementation, header/search
-craft, anything animepahe-tv lacks against its siblings.
+## Phase 7 — House-app ports (complete: app-ktv-player.md, app-sherlock.md, app-ddgs.md)
+From the three app studies, ranked and evidence-backed:
+1. **Player P0 (KTV)**: in-player fullscreen toast chip + dual dispatch
+   (snackbars are invisible in fullscreen), local subtitle picker +
+   persisted size + aspect fit, snapshot button — all verified absent.
+2. **Player P1 (KTV)**: unmount safety-net position save, mandatory-modal
+   re-show discipline, plain-function FocusScope (the @ft.component form
+   is a known crash class per our own shell comment), FocusManager
+   chaining, favorite-toggle idempotency.
+3. **House craft**: Settings theme picker + observable `theme_mode`
+   (Sherlock), `get_*` theme accessors, banner pool + interstitial
+   interval (Sherlock), history clear-confirm + relative time,
+   snackbar backstop + offline-first search branch (DDGS), storage
+   debounce/exit-flush.
+4. The theme-cycle premise corrected: it's OUR win (KTV is 2-way) —
+   parity confirmed, placement gaps only (shared-header toggle).
+Excluded with reasons: UMP consent, Sherlock-domain features, TLS
+exemptions, the playlist extension heuristic, preloaded interstitials.
 
 ## Phase 8 — Test hardening + release
 pyproject pytest ini block, F821 triage, ruff pass (29 errors, 36 files
