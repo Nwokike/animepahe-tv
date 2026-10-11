@@ -200,3 +200,93 @@ transport (socket server + Pyodide connection), not the pub-sub channel.
   data; keep `strict_map_key=True` and set `max_buffer_size` when unpacking
   anything from the network. C extension is present here, but code must also
   work under `MSGPACK_PUREPYTHON` (same API, slower).
+
+## App improvement opportunities
+
+Verdict up front: **nothing significant today** — every JSON site I checked is
+either small, human-readable-on-purpose, or a wire format we don't control.
+The numbers below are measured (via `uv run python` from the repo root), not
+estimated. Each opportunity is graded so the team can revisit if payloads grow.
+
+Benchmarks (app-shaped payloads, C ext active, best-of-5 × 200 reps):
+
+| Payload | JSON bytes | msgpack bytes | Ratio | enc JSON | enc msgpack |
+|---|---|---|---|---|---|
+| 50-episode list (session/episode/title/snapshot/duration rows) | 8523 | 6935 | 0.81 | 106.6 µs | 74.3 µs |
+| Favorite row (session/title/poster URL/genres/score) | 198 | 161 | 0.81 | 9.7 µs | 5.6 µs |
+| ~100 KB binary blob (fair JSON path = base64 string) | 136568 | 102425 | 0.75 | 994.6 µs | 40.4 µs (dec 719.3 µs vs 3.3 µs) |
+
+msgpack API cited: `packb(o, **kwargs)` → bytes and `unpackb(packed, **kwargs)`
+(`msgpack/__init__.py:30-36`, C-backed — verified `import msgpack._cmsgpack`
+succeeds); `Packer(*, default=None, use_single_float=False, autoreset=True,
+use_bin_type=True, strict_types=False, datetime=False, ...)`
+(`fallback.py:659-670`); `Unpacker(file_like=None, *, use_list=True, raw=False,
+timestamp=0, strict_map_key=True, ..., max_buffer_size=100*1024*1024,
+ext_hook=ExtType, ...)` (`fallback.py:226-246`, signature printed live).
+
+### 1. Poster/binary bytes — the only large measured win (CONDITIONAL, not active)
+
+* App evidence: `src/services/store.py:329-332` (`add_favorite`) deliberately
+  strips `data:`-URI posters — "Never persist a base64 data: URI — one poster
+  bloats the store." Posters elsewhere are URL strings (`src/main.py:42,493,1009`,
+  `home_screen.py:233-244` renders `src=poster` URLs). Nothing persists raw image
+  bytes today.
+* msgpack evidence: `Packer(use_bin_type=True)` (default) packs
+  `bytes/bytearray/memoryview` via the bin family `0xC4/0xC5/0xC6`
+  (`fallback.py:911-921`); the only lossless JSON path for bytes is base64
+  (+33% size, measured 136568 B vs 102425 B above, ~25× encode / ~200× decode gap).
+* Opportunity: **if** the app ever caches poster/thumbnail bytes on disk (offline
+  posters, download artwork), `packb({'poster': raw_bytes, ...})` /
+  `unpackb(..., raw=False)` is the correct container — base64-in-JSON is strictly
+  worse. No action while posters stay URLs.
+
+### 2. TTL cache double-JSON — real wart, but cache is currently unused (NO ACTION)
+
+* App evidence: `src/services/cache.py:94-104` — `set_json` does
+  `json.dumps(value, default=str)` into a str entry, then `_flush` (`:68-72`)
+  `json.dump`s the whole `self._data` dict via `_atomic_write_json` (`:33-42`);
+  `get_json` reverses with two `json.loads`. Values are double-encoded by design.
+  `Cache.get/set` (`:74-92`) accept only `str`.
+* Usage evidence: `grep` finds **zero** `.cache.get/.cache.set/get_json/set_json`
+  callers — `src/main.py:82,148,151,350` only constructs, sweeps, exposes, and
+  clears the cache. Replacing the inner or outer JSON with
+  `packb`/`Unpacker(..., strict_map_key=True, max_buffer_size=...)` would remove
+  the double-encode (~19% + speed on list-shaped values per the table) but saves
+  nothing until the cache has callers. If callers return, prefer storing native
+  objects via msgpack over the dumps-in-dump pattern.
+
+### 3. Checked and REJECTED — do not change
+
+* Download manifests (`src/services/downloads.py:421-435`): `_write_manifest`
+  uses `json.dumps(manifest, indent=2, default=str)`, `_read_manifest` uses
+  `json.load`, written a few times per download (partial → complete). Payloads
+  are tiny metadata dicts; `indent=2` is deliberate human-readability for a
+  debugging artifact. msgpack would be smaller but nobody reads manifests in a
+  hot loop — not worth losing readability.
+* Durable store (`src/services/store.py:47-56,69-80`): `JsonStore` sections
+  (search history capped `SEARCH_HISTORY_LIMIT = 20`, continue-watching capped
+  `CONTINUE_WATCHING_LIMIT = 20`, favorites capped `FAVORITES_LIMIT = 200`) are
+  small, human-inspectable (`storage/data/animepahe/app-state.json` is 55 B in
+  the repo), and read once at boot (`src/main.py:153-156`). Same readability
+  argument; measured favorite-row saving is 198 B → 161 B — irrelevant at this scale.
+* Provider API parsing (`src/services/animepahe.py:109,170,287`): `resp.json()`
+  decodes **server-controlled** JSON (airing/search/episodes endpoints). The wire
+  format is fixed by animepahe — msgpack cannot apply.
+* HLS proxy memory cache (`src/services/hls_proxy.py:154,286,305`):
+  `_master_cache: dict[str, tuple[float, str, str]]` is plain in-memory
+  strings with no serialization step — nothing to replace.
+* Streaming `Unpacker` for large lists: the largest app list measured
+  (50 episodes) is 8.5 KB JSON / 6.9 KB msgpack — one `unpackb` call handles it.
+  `Unpacker.feed` + iteration / `read_array_header` (`fallback.py:318,568-604`)
+  only pays off for multi-MB streams or socket framing (which is exactly how
+  flet uses it: `flet_socket_server.py:258`). No app-side equivalent exists.
+
+### Unverified (explicitly NOT claims)
+
+* Whether msgpack encode speed matters on low-end Android devices — benchmarks
+  above ran on this Windows dev machine (CPython 3.13, C ext); on-device numbers
+  were not measured.
+* Whether the Dart/Flet side could consume msgpack from app code — flet's
+  `packb([action, body])` path (`flet_socket_server.py:399`,
+  `pyodide_connection.py:180`) is framework-internal; no public API was found for
+  app-level messaging, so cross-language use is unexplored, not recommended.
