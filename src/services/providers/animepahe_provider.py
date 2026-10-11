@@ -192,12 +192,14 @@ def _parse_details(html: str, session: str) -> Anime | None:
         )
         return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
 
-    # The anchor wraps an <li> — capture the whole anchor and strip
-    # tags for the clean name (the title attribute carries "X movies").
+    # Scope to the genre block first, then each anchor (the anchor wraps
+    # an <li>; strip tags for the clean name — the title attribute
+    # carries "X movies").
+    genre_block = re.search(r'anime-genre(.*?)</ul>', html, re.S)
     genres = [
         re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", g)).strip()
-        for g in re.findall(r'anime-genre.*?<a[^>]*>(.*?)</a>', html, re.S)
-    ]
+        for g in re.findall(r"<a[^>]*>(.*?)</a>", genre_block.group(1), re.S)
+    ] if genre_block else []
     external = re.findall(r'href="(https://(?:anilist\.co|myanimelist\.net)/anime/(\d+))"', html)
     ani_id = next((int(i) for url, i in external if "anilist" in url), 0)
     mal_id = next((int(i) for url, i in external if "myanimelist" in url), 0)
