@@ -80,7 +80,12 @@ class AppController:
         self.page.dark_theme.font_family = "Outfit"
         self.page.theme_mode = ft.ThemeMode.SYSTEM
         self.cache = Cache()
-        self.store = JsonStore()
+        # The process-wide singleton: the ddos solver and the player use
+        # get_store(), and a second instance here would clobber their
+        # sections on flush (each keeps its own dirty set).
+        from services.store import get_store
+
+        self.store = get_store()
         self.scraper = AnimePaheScraper()
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
@@ -1023,6 +1028,9 @@ async def main(page: ft.Page):
     methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
     methods.cancel_resolve = lambda: spawn(
         controller.cancel_resolve(), name="cancel-resolve"
+    )
+    methods.toggle_favorite = lambda row: spawn(
+        controller.toggle_favorite(row), name="toggle-favorite"
     )
     methods.play_adjacent = lambda delta: spawn(
         controller.play_adjacent(delta), name="play-adjacent"

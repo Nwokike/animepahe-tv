@@ -41,5 +41,8 @@ class ControllerMethods:
     choose_quality: object = lambda index: None
     cancel_resolve: object = lambda: None
 
+    # Favorites (whole anime)
+    toggle_favorite: object = lambda row: None
+
 
 ControllerMethodsCtx = ft.create_context(ControllerMethods())

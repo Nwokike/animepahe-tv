@@ -99,6 +99,10 @@ class AppState:
     download_progress: dict | None = None
     downloads_version: int = 0
 
+    # Favorites (whole anime, keyed by anime_session)
+    favorites: dict = None
+    favorites_version: int = 0
+
     # Long-running action feedback (KTV's rule: anything that takes more
     # than a beat shows a spinner, or the app looks dead).
     is_resolving: bool = False
@@ -114,6 +118,7 @@ class AppState:
         self.episodes = []
         self.update_data = None
         self.starting_downloads = set()
+        self.favorites = {}
 
 
 state = AppState()

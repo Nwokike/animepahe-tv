@@ -18,6 +18,7 @@ from components.focus_styles import (
     card_focus_scale,
 )
 from components.pagination import pager as ft_pager
+from components.focus_styles import attach_focus_zoom, card_button_style, card_focus_scale
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -335,6 +336,41 @@ def AnimeDetailScreen() -> ft.Control:
         is_loading=state.is_loading,
     )
 
+    # Favorites are per-ANIME, never per episode: one button in the header.
+    _ = state.favorites_version
+    favorited = anime_session in (state.favorites or {})
+
+    def _toggle_favorite():
+        controller.toggle_favorite(
+            {
+                "anime_session": anime_session,
+                "title": title,
+                "poster": poster or "",
+                "type": anime.get("type", ""),
+                "year": anime.get("year", 0),
+                "status": anime.get("status", ""),
+                "score": anime.get("score", 0),
+            }
+        )
+
+    favorite_button = attach_focus_zoom(
+        ft.FilledButton(
+            content=ft.Text("Favorited" if favorited else "Favorite"),
+            icon=ft.Icons.FAVORITE_ROUNDED
+            if favorited
+            else ft.Icons.FAVORITE_BORDER_ROUNDED,
+            style=ft.ButtonStyle(
+                bgcolor=AppColors.PRIMARY
+                if favorited
+                else ft.Colors.TRANSPARENT,
+                color=ft.Colors.WHITE if favorited else ft.Colors.ON_SURFACE,
+                shape=ft.RoundedRectangleBorder(radius=10),
+                side=ft.BorderSide(1 if not favorited else 0, AppColors.PRIMARY),
+            ),
+            on_click=lambda e: _toggle_favorite(),
+        )
+    )
+
     def _metadata_row(anime: dict) -> ft.Control:
         """year / type / status / N Episodes / score, as the original."""
         parts = []
@@ -379,6 +415,8 @@ def AnimeDetailScreen() -> ft.Control:
                                         ),
                                         ft.Container(height=8),
                                         _metadata_row(anime),
+                                        ft.Container(height=12),
+                                        favorite_button,
                                     ],
                                     expand=True,
                                     alignment=ft.MainAxisAlignment.CENTER,

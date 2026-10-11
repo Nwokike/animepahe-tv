@@ -364,6 +364,82 @@ def SearchScreen() -> ft.Control:
             icon=ft.Icons.SEARCH_ROUNDED,
         )
 
+    # Favorites shelf (whole anime) — the Browse tab doubles as Discover,
+    # so a curated library is one tab away. Hidden while a query is active.
+    _ = state.favorites_version
+    favorites_shelf = ft.Container(width=0)
+    if not state.search_results and not state.search_query:
+        favorites = sorted(
+            (state.favorites or {}).values(),
+            key=lambda row: row.get("added_at", 0),
+            reverse=True,
+        )
+        if favorites:
+            cards = [
+                attach_focus_zoom(
+                    ft.FilledButton(
+                        content=ft.Column(
+                            [
+                                ft.Container(
+                                    content=ft.Image(
+                                        src=row.get("poster"),
+                                        fit=ft.BoxFit.COVER,
+                                        expand=True,
+                                    )
+                                    if row.get("poster")
+                                    else ft.Container(
+                                        content=ft.Icon(
+                                            ft.Icons.MOVIE_ROUNDED,
+                                            size=32,
+                                            color=ft.Colors.ON_SURFACE_VARIANT,
+                                        ),
+                                        alignment=ft.Alignment.CENTER,
+                                        bgcolor=ft.Colors.with_opacity(
+                                            0.1, ft.Colors.ON_SURFACE
+                                        ),
+                                    ),
+                                    width=120,
+                                    height=170,
+                                    border_radius=10,
+                                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                                ),
+                                ft.Text(
+                                    row.get("title", ""),
+                                    size=12,
+                                    weight=ft.FontWeight.W_600,
+                                    color=ft.Colors.ON_SURFACE,
+                                    max_lines=2,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                    width=120,
+                                ),
+                            ],
+                            spacing=6,
+                            width=120,
+                        ),
+                        style=card_button_style(
+                            padding=4, radius=12, overlay_alpha=0.18
+                        ),
+                        animate_scale=card_focus_scale(1.03),
+                        on_click=lambda e, s=row["anime_session"]: controller.open_anime(
+                            s
+                        ),
+                    )
+                )
+                for row in favorites[:20]
+            ]
+            favorites_shelf = ft.Column(
+                [
+                    ft.Text(
+                        "Favorites",
+                        size=16,
+                        weight=ft.FontWeight.W_700,
+                        color=ft.Colors.ON_SURFACE,
+                    ),
+                    ft.Row(controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO),
+                ],
+                spacing=8,
+            )
+
     # Column has no `padding` field in flet 1.0.4 — the screen inset lives
     # on the wrapper Container (passing it to Column raises TypeError the
     # moment the component re-renders).
@@ -371,6 +447,7 @@ def SearchScreen() -> ft.Control:
         content=ft.Column(
             [
                 header,
+                favorites_shelf,
                 ft.Row([ft.Container(expand=True), clear_btn], spacing=8),
                 suggestion_rows,
                 ft.Container(content=results, expand=True),

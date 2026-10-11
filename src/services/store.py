@@ -266,6 +266,61 @@ class JsonStore:
             await self.put_section("downloads", entries)
 
     # ------------------------------------------------------------------
+    # Favorites — WHOLE anime, keyed by anime_session (an episode session
+    # is never a favorite). Ordered newest-first at read time.
+    # ------------------------------------------------------------------
+
+    FAVORITES_LIMIT = 200
+
+    async def get_favorites(self) -> dict:
+        entries = await self.section("favorites", {})
+        return entries if isinstance(entries, dict) else {}
+
+    async def is_favorite(self, anime_session: str) -> bool:
+        if not anime_session:
+            return False
+        return anime_session in await self.get_favorites()
+
+    async def add_favorite(self, row: dict) -> None:
+        anime_session = row.get("anime_session")
+        if not anime_session:
+            return
+        entries = await self.get_favorites()
+        # Never persist a base64 data: URI — one poster bloats the store.
+        poster = row.get("poster") or ""
+        if poster.startswith("data:"):
+            poster = ""
+        entry = dict(row)
+        entry["poster"] = poster
+        entry["anime_session"] = anime_session
+        entry["added_at"] = time.time()
+        entries[anime_session] = entry
+        if len(entries) > self.FAVORITES_LIMIT:
+            oldest = sorted(
+                entries.items(), key=lambda kv: kv[1].get("added_at", 0)
+            )
+            for session, _ in oldest[: len(entries) - self.FAVORITES_LIMIT]:
+                entries.pop(session, None)
+        await self.put_section("favorites", entries)
+
+    async def remove_favorite(self, anime_session: str) -> None:
+        entries = await self.get_favorites()
+        if anime_session in entries:
+            entries.pop(anime_session, None)
+            await self.put_section("favorites", entries)
+
+    async def toggle_favorite(self, row: dict) -> bool:
+        """Returns the NEW favorite state."""
+        anime_session = row.get("anime_session")
+        if not anime_session:
+            return False
+        if await self.is_favorite(anime_session):
+            await self.remove_favorite(anime_session)
+            return False
+        await self.add_favorite(row)
+        return True
+
+    # ------------------------------------------------------------------
     # Rewarded-ad early access (episode_key -> unlocked_at timestamp).
     # Rewards are purchasable currency: the row is all the bookkeeping
     # needed, and clearing app data resets it.
