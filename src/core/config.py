@@ -32,3 +32,8 @@ BREAKER_OPEN_SECONDS = 30.0      # first cooldown; only failed trials double it
 BREAKER_OPEN_MAX_SECONDS = 300.0
 BREAKER_HALF_OPEN_TRIALS = 1     # trial requests when HALF_OPEN
 STARTUP_PROBE_BUDGET = 12.0      # wall-clock cap for the parallel probe race
+
+# Provider cache TTLs (seconds), per collection.
+CACHE_TTL_LATEST = 300
+CACHE_TTL_SEARCH = 600
+CACHE_TTL_EPISODES = 3600

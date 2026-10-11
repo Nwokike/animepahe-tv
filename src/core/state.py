@@ -1,5 +1,5 @@
 import flet as ft
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(unsafe_hash=True)
@@ -36,6 +36,9 @@ class Source:
     resolution: int
     audio: str
     fansub: str
+    # Per-source request headers the player/proxy must send (e.g. the
+    # Referer a CDN requires). Empty = this source needs nothing special.
+    headers: dict = field(default_factory=dict)
 
 
 @dataclass(unsafe_hash=True)
