@@ -8,9 +8,19 @@ and stays the safety net. Its session strings stay BARE (no namespace)
 so the user's existing store, history and continue-watching keys keep
 working unchanged.
 
-Source-specific limits (documented in backend-animepahe.md): English
-hardsub — NO subtitle tracks exist; no schedule API; no watchlist API
-(our store IS that feature).
+Source-specific limits (documented in backend-animepahe.md, three
+converging evidence lines each): English hardsub — NO subtitle tracks
+exist (never will via the API; subs are burned in); no schedule API
+(m=schedule has zero evidence anywhere); no watchlist/history API (our
+store IS that feature). Dub = separate renditions at the m=links level,
+correctly modelled on Source.audio.
+
+DEVICE-VERIFY checklist (the site is CF-walled from the dev machine —
+every m=links behavior verified through the app's own clearance on
+hardware): (1) play an episode — m=links renditions appear in the
+dialog with sizes; (2) a dubbed episode shows the DUB (ENG) group
+after SUB; (3) download sizes display; (4) details screen shows the
+synopsis block; (5) kwik.si Referer in the logs.
 """
 
 import logging
