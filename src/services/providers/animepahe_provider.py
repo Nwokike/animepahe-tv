@@ -55,6 +55,23 @@ class AnimePaheProvider:
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
         return await self.scraper.sources(anime_session, episode_session)
 
+    async def episodes_for_title(self, title: str) -> list[Episode]:
+        results, _ = await self.scraper.search(title, 1)
+        for anime in results:
+            if anime.title.strip().lower() == title.strip().lower():
+                episodes, _ = await self.scraper.episodes(anime.session, 1)
+                return episodes
+        return []
+
+    async def sources_for_title(self, title: str, episode: int) -> list[Source]:
+        results, _ = await self.scraper.search(title, 1)
+        for anime in results:
+            if anime.title.strip().lower() == title.strip().lower():
+                for ep in (await self.scraper.episodes(anime.session, 1))[0]:
+                    if ep.episode == episode:
+                        return await self.scraper.sources(anime.session, ep.session)
+        return []
+
     def clear_cache(self) -> None:
         self.scraper.clear_cache()
 

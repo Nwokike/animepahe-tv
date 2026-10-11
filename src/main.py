@@ -374,6 +374,7 @@ class AppController:
 
             try:
                 episodes, has_more = await self.router.episodes(anime_session, page_num)
+                state.current_source_name = self.router.last_winner or "" 
                 if gen != self._episodes_gen:
                     logger.info("load_episodes discarding stale page for %s", anime_session)
                     return
@@ -764,6 +765,33 @@ class AppController:
             }
             for name, rec in self.router.health().items()
         }
+
+    async def try_another_source(self, anime_session: str):
+        """Detail: the current source's episodes failed or are missing —
+        ask every OTHER provider by title (each is self-contained)."""
+        anime = state.selected_anime or {}
+        title = str(anime.get("title") or "").strip()
+        if not title:
+            self._show_error_snackbar("Nothing to look up — no title.")
+            return
+        state.is_loading = True
+        state.episodes_version += 1
+        try:
+            episodes, _ = await self.router.episodes_for_title_any(
+                title, skip=self._owner_of(anime_session)
+            )
+        except Exception as ex:
+            logger.warning("try_another_source failed: %s", ex)
+            episodes = []
+        finally:
+            state.is_loading = False
+            state.episodes_version += 1
+        if episodes:
+            state.episodes = episodes
+            state.episodes_has_more = False
+            state.current_source_name = self.router.last_winner or ""
+        else:
+            self._show_error_snackbar("No other source has this title.")
 
     async def set_backend_pin(self, name: str):
         """Settings: 'auto' or a provider name. Applies immediately and
@@ -1251,6 +1279,9 @@ async def main(page: ft.Page):
 
     # The shell's player branch reaches the controller through this handle
     # (its ControllerMethods copy is the shell-owned navigation half).
+    methods.try_another_source = lambda session: spawn(
+        controller.try_another_source(session), name="try-another-source"
+    )
     methods.sources_status = controller.sources_status
     methods.set_backend_pin = lambda name: spawn(
         controller.set_backend_pin(name), name="set-backend-pin"

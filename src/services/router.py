@@ -110,6 +110,7 @@ class ProviderRouter:
         self._providers: list[Provider] = list(providers or [])
         self._clock = clock or time.monotonic
         self._pin: str | None = None
+        self.last_winner: str | None = None
         self._breakers: dict[str, _Breaker] = {}
         self._health: dict[str, ProviderHealth] = {}
         for provider in self._providers:
@@ -188,6 +189,7 @@ class ProviderRouter:
             breaker.record_success()
             self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
             if not _is_empty(result) or is_last:
+                self.last_winner = provider.name
                 return result
             logger.debug("router: %s empty on %s — trying next", op, provider.name)
         if not providers:
@@ -220,6 +222,35 @@ class ProviderRouter:
         return await self._run(
             "sources", anime_session, episode_session, force=True, owner=owner_of(anime_session)
         )
+
+    async def episodes_for_title_any(
+        self, title: str, skip: str | None = None
+    ) -> tuple[list, bool]:
+        """'Try another source': ask every OTHER provider (title in ->
+        episodes out; each is self-contained, no id glue). Breaker-aware;
+        an empty answer moves on."""
+        for provider in self._providers:
+            if provider.name == skip:
+                continue
+            breaker = self._breakers[provider.name]
+            if not breaker.allow():
+                continue
+            started = self._clock()
+            try:
+                result = await provider.episodes_for_title(title)
+            except Exception as ex:
+                breaker.record_failure()
+                self._record_health(
+                    provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex)
+                )
+                logger.info("episodes_for_title failed on %s: %s", provider.name, ex)
+                continue
+            breaker.record_success()
+            self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+            if not _is_empty(result):
+                self.last_winner = provider.name
+                return (result, False)
+        return ([], False)
 
     # ------------------------------------------------------------------
     # Startup probe race — non-blocking, budget-capped

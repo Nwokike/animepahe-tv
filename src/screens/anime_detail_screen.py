@@ -425,11 +425,32 @@ def AnimeDetailScreen() -> ft.Control:
                             alignment=ft.MainAxisAlignment.START,
                         ),
                         ft.Container(height=24),
-                        ft.Text(
-                            "Episodes",
-                            size=20,
-                            weight=ft.FontWeight.W_700,
-                            color=ft.Colors.ON_SURFACE,
+                        ft.Row(
+                            [
+                                ft.Text(
+                                    "Episodes",
+                                    size=20,
+                                    weight=ft.FontWeight.W_700,
+                                    color=ft.Colors.ON_SURFACE,
+                                ),
+                                ft.Container(expand=True),
+                                # Which provider served these episodes, and
+                                # one-tap failover when this source misses.
+                                ft.Text(
+                                    f"Source: {state.current_source_name.capitalize()}"
+                                    if state.current_source_name
+                                    else "",
+                                    size=12,
+                                    color=ft.Colors.ON_SURFACE_VARIANT,
+                                ),
+                                ft.TextButton(
+                                    content="Try another source",
+                                    on_click=lambda e: controller.try_another_source(
+                                        anime_session
+                                    ),
+                                ),
+                            ],
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         ft.Container(height=8),
                         grid,

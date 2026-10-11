@@ -89,6 +89,7 @@ class AppState:
     continue_watching: dict = {}
     selected_anime: dict | None = None
     selected_source: object | None = None
+    current_source_name: str = ""
 
     # Player (in-app playback)
     player_open: bool = False
