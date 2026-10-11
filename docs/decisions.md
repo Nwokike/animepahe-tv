@@ -102,3 +102,31 @@ catalog + AniList + TVMaze), **in-app player ported (flet-video 0.85.3) with ktv
 Home/Search/Detail/Downloads/Settings wired to the router, and the first real tests (router
 table, store migration, player spec round-trip, provider fixtures). Commits separately per
 phase; boots clean with `[INFO]` at every commit.
+
+---
+
+# Update — the multi-backend phase (2026-10-11, later)
+
+The 0.85.3 swap landed ON TOP of the untouched app (no rewrite); the
+provider router now sits between the controller and the sources. Final
+bench, each certified by live probes from this machine:
+
+| Provider | Legs | Verdict |
+|---|---|---|
+| anikato (anikototv.to) | catalog + episodes + **streaming files** | COMPLETE — RC4 VRF (`base64(RC4("simple-hash", id))`, key hardcoded in the site's JS) unlocks the episode list; MegaPlay `getSources` `enc` decrypts (AES-256-CBC, keys hardcoded in megaplay's own JS) to a DIRECT playable master.m3u8 (#EXTM3U VOD) with 9 subtitle tracks + skip data. Sub + dub. |
+| animeout (WordPress) | catalog + episodes | files CF-walled at public.animeout.xyz (httpx AND primp 403) — durable resolve code, lights up if the wall clears |
+| kusonime (WordPress) | catalog + episodes + batch files (pixeldrain direct, verified Accept-Ranges) | COMPLETE for downloads; batch archives, not per-episode streams |
+| animepahe | catalog + episodes + streaming files | untouched; CF-walled catalog → breaker trips, files still attempted; safety net LAST |
+
+REJECTED as providers (not complete): kayoanime (files are Drive
+folders — a resolver project), Telegram (web previews carry no file
+bytes; MTProto-only), AniList/TVMaze/MALSync (metadata glue — the
+owner's rule: every provider must be a whole app in its own way).
+
+Architecture in the app: provider protocol mirroring the scraper's real
+shapes; router with per-provider circuit breakers (3 fails → 30s →
+half-open trial; failed trials double to a 5min cap), empty-answer
+fallthrough, `force` bypass, startup probe race, pin support
+(Settings → Content source), title-based cross-provider lookup
+("Try another source"), per-source headers through the play path
+(Source.headers), capability-gated Kwik resolve, m3u8-only proxy wrap.

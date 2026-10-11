@@ -245,6 +245,7 @@ def SettingsScreen() -> ft.Control:
     # source is down; the pin only changes who goes first.
     # ------------------------------------------------------------------
     controller_ref = getattr(controller, "_app_controller", None) or controller
+    _ = state.sources_test_version
     backend, set_backend = ft.use_state("auto")
     source_status, set_source_status = ft.use_state({})
 
@@ -290,6 +291,7 @@ def SettingsScreen() -> ft.Control:
         "open": AppColors.ERROR,
         "unknown": AppColors.WARNING,
     }
+    test_rows = {r.get("name"): r for r in (state.source_test_results or [])}
     status_rows = []
     for name in provider_names:
         rec = (source_status or {}).get(name) or {}
@@ -298,6 +300,14 @@ def SettingsScreen() -> ft.Control:
         latency_text = f"{latency:.0f} ms" if latency else "—"
         error = rec.get("last_error") or ""
         subtitle = f"{state_name} · {latency_text}" + (f" · {error[:60]}" if error else "")
+        tested = test_rows.get(name)
+        if tested is not None:
+            bits = ["probe OK" if tested.get("probe_ok") else "probe FAIL"]
+            if tested.get("search_count") is not None:
+                bits.append(f"{tested['search_count']} results in {tested.get('search_ms')} ms")
+            if tested.get("error"):
+                bits.append(tested["error"])
+            subtitle = " · ".join(bits)
         status_rows.append(
             _setting_row(
                 ft.Icons.CIRCLE,
@@ -311,10 +321,14 @@ def SettingsScreen() -> ft.Control:
                 ),
             )
         )
+    test_button = ft.TextButton(
+        content="Test all sources",
+        on_click=lambda e: controller.test_all_sources(),
+    )
     source_section = [
         _section_header("CONTENT SOURCE"),
         _settings_card([backend_row]),
-        _settings_card(status_rows) if status_rows else ft.Container(height=0),
+        _settings_card([*status_rows, test_button]) if status_rows else ft.Container(height=0),
     ]
 
     return ft.Column(

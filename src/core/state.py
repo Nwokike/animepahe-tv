@@ -90,6 +90,9 @@ class AppState:
     selected_anime: dict | None = None
     selected_source: object | None = None
     current_source_name: str = ""
+    # Dev-test panel (Settings): rows from "Test all sources".
+    source_test_results: list = []
+    sources_test_version: int = 0
 
     # Player (in-app playback)
     player_open: bool = False

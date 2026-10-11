@@ -754,6 +754,41 @@ class AppController:
             "proxy" if self.hls_proxy is not None else "direct",
         )
 
+    async def test_all_sources(self):
+        """Dev panel: probe every provider, then hit it with a real
+        search. Nothing is faked — the rows are what each source
+        actually answered, and nothing is filtered."""
+        import time as _time
+
+        rows: list[dict] = []
+        for provider in self.router._providers:
+            row = {
+                "name": provider.name,
+                "probe_ok": False,
+                "probe_ms": None,
+                "search_count": None,
+                "search_ms": None,
+                "error": "",
+            }
+            started = _time.monotonic()
+            try:
+                row["probe_ok"] = bool(await provider.probe())
+                row["probe_ms"] = round((_time.monotonic() - started) * 1000)
+            except Exception as ex:
+                row["error"] = f"probe: {ex}"[:120]
+            if row["probe_ok"]:
+                started = _time.monotonic()
+                try:
+                    results, _ = await provider.search("one piece", 1)
+                    row["search_count"] = len(results)
+                    row["search_ms"] = round((_time.monotonic() - started) * 1000)
+                except Exception as ex:
+                    row["error"] = f"search: {ex}"[:120]
+            rows.append(row)
+        state.source_test_results = rows
+        state.sources_test_version += 1
+        logger.info("source test: %s", [(r["name"], r["probe_ok"], r["search_count"]) for r in rows])
+
     def sources_status(self) -> dict:
         """Settings: per-provider live health as plain dicts."""
         return {
@@ -1279,6 +1314,9 @@ async def main(page: ft.Page):
 
     # The shell's player branch reaches the controller through this handle
     # (its ControllerMethods copy is the shell-owned navigation half).
+    methods.test_all_sources = lambda: spawn(
+        controller.test_all_sources(), name="test-all-sources"
+    )
     methods.try_another_source = lambda session: spawn(
         controller.try_another_source(session), name="try-another-source"
     )
