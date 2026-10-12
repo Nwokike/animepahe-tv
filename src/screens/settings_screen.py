@@ -93,8 +93,6 @@ def SettingsScreen() -> ft.Control:
         page = None
 
     def _open_terminal(e):
-        log_count = len(in_memory_log_handler.get_logs())
-
         log_text = ft.Text(
             value="\n".join(in_memory_log_handler.get_logs()[-TERMINAL_DISPLAY_LINES:])
             or "No activity recorded yet.\nEngine, network, and UI logs will appear here.",
@@ -262,7 +260,6 @@ def SettingsScreen() -> ft.Control:
         _current_theme = "system"
 
     def _pick_theme(token, mode):
-        from core.tasks import spawn
 
         controller_ref.save_theme_mode(mode)
 

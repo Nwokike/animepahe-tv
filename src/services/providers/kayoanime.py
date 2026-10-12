@@ -32,7 +32,7 @@ from core.config import (
     DRIVE_REFERER,
     DRIVE_WEB_KEY,
 )
-from core.state import Anime, Episode, LatestRelease, Source
+from core.state import Anime, Episode, Source
 from services.providers.base import make_session, split_session
 
 logger = logging.getLogger("animepahe.provider.kayoanime")
@@ -207,7 +207,6 @@ class KayoanimeProvider:
         return result
 
     async def search(self, query: str, page: int) -> tuple[list[Anime], bool]:
-        from urllib.parse import quote
 
         key = f"search_{query}_{page}"
         cached = self._cache_get(key)

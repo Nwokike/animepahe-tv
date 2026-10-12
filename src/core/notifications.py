@@ -18,7 +18,6 @@ Notification shape (the reference's recommendations):
 from __future__ import annotations
 
 import logging
-import os
 
 logger = logging.getLogger("animepahe.notify")
 

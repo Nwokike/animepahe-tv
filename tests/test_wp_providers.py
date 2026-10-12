@@ -150,10 +150,6 @@ def test_animeout_search_maps_titles_years_and_ranking():
 
 
 def test_animeout_episode_links_parse_numbers_and_order():
-    from services.providers.animeout import AnimeOutProvider
-
-    provider = AnimeOutProvider(client=FakeClient({}))
-    episodes = provider.__class__.__dict__  # keep the module functions reachable
     from services.providers.animeout import _parse_episode_links
 
     results = _parse_episode_links(ANIMEOUT_CONTENT, 1033730)
@@ -174,7 +170,7 @@ def test_animeout_filename_parses_quality_audio_fansub():
 
 
 def test_animeout_resolve_chain_follows_both_hops():
-    from services.providers.animeout import AnimeOutProvider, _resolve_direct_url
+    from services.providers.animeout import _resolve_direct_url
 
     # public.php FIRST: its url= param contains the nimbus path, so a
     # substring router must try the more specific needle first.

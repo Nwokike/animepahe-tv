@@ -16,7 +16,6 @@ import sys
 sys.path.insert(0, __file__.rsplit("tests", 1)[0] + "src")
 
 import flet as ft
-from flet.controls import context as flet_context
 from flet.controls.context import _context_page
 
 import app_shell
@@ -208,7 +207,6 @@ def test_retry_clears_error_and_replays():
 
 
 def test_go_back_clears_error_and_unmounts():
-    import asyncio
 
     state = app_state
     _reset_state()

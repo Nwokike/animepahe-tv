@@ -23,7 +23,6 @@ from core.theme import AppColors, AppTheme
 from services.animepahe import AnimePaheScraper
 from services.cache import Cache
 from services.kwik_resolver import KwikResolver
-from services.store import JsonStore
 from services.update_service import UpdateService
 from state.app_state import state
 from state.controller_ctx import ControllerMethods, ControllerMethodsCtx
@@ -1028,7 +1027,6 @@ class AppController:
 
         force=True re-checks even when a check ran recently (the user
         tapped Retry / the Sources panel)."""
-        import time as _time
 
         follows = await self.store.get_follows()
         if not follows:

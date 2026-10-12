@@ -20,7 +20,6 @@ except ImportError:
     fya = None
     _HAS_ADS = False
 
-from core.theme import AppColors
 
 # Demo unit — replace per platform in production.
 AD_BANNER_UNIT_ID = "demo-banner-yandex"

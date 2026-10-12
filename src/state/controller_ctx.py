@@ -10,7 +10,6 @@ copying breaks identity for screens that captured the context.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 import flet as ft
 

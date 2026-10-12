@@ -101,7 +101,6 @@ class AnimePaheProvider:
         # Two attested shapes: dict keyed by rendition ("360"/"720"/"1080")
         # or a flat list. Handle both — quality comes from the key when
         # the source gives one, otherwise it stays 0 (never invented).
-        renditions = data.values() if isinstance(data, dict) else data
         results: list[Source] = []
         for key, entry in (
             data.items() if isinstance(data, dict) else enumerate(data)
@@ -183,7 +182,6 @@ def _parse_details(html: str, session: str) -> Anime | None:
     ) or text(r'header[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>')
     if not title:
         return None
-    jp_title = text(r'<h2\.japanese[^>]*>([^<]+)</h2>')
     poster = text(r'anime-poster[^>]*>\s*<a href="([^"]+)"') or text(
         r'header[^>]*>\s*<img[^>]*data-src="([^"]+)"'
     )

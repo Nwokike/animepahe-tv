@@ -11,7 +11,7 @@ import flet as ft
 
 from components.empty_state import EmptyState
 from core.state import AppState
-from core.shared_services import SharedServices, get_shared_services
+from core.shared_services import get_shared_services
 from core.tokens import SPACING_XS, SPACING_XL
 
 

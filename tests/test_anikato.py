@@ -117,7 +117,7 @@ def test_aes_decrypt_opens_the_live_enc_token():
 
 def test_decrypt_returns_tracks_and_windows():
     """The full getSources payload: manifest + 9 tracks + intro/outro."""
-    from services.providers.anikato import AniKatoProvider, _decrypt_manifest
+    from services.providers.anikato import _decrypt_manifest
 
     enc = json.loads(_read("anikato_getsources.json"))["enc"]
     manifest = _decrypt_manifest(enc)
@@ -355,9 +355,8 @@ def test_animepahe_links_without_anime_id_goes_straight_to_scrape():
 # ---------------------------------------------------------------------
 
 def test_animepahe_details_parses_the_page():
-    import asyncio
 
-    from services.providers.animepahe_provider import AnimePaheProvider, _parse_details
+    from services.providers.animepahe_provider import _parse_details
 
     # Representative markup per the map's three-convergent selectors.
     DETAILS_HTML = """
@@ -545,7 +544,6 @@ def test_focus_scope_is_a_plain_function():
         def run_task(self, fn):
             seen.append(fn)
 
-    import flet as _ft
 
     listener = focus_scope(ft.Container(), lambda: seen.append("back"))
     assert isinstance(listener, ft.KeyboardListener)
@@ -556,7 +554,6 @@ def test_focus_manager_chains_instead_of_overwriting():
     """A second installer must not kill the first's handler."""
     import types
 
-    import flet as ft
 
     from core.focus_manager import FocusManager
 

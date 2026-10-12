@@ -7,7 +7,6 @@ same "reach the developer" affordance, no personal contact details shipped
 in the binary.
 """
 
-import asyncio
 import logging
 
 import flet as ft

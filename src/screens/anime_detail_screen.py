@@ -18,7 +18,6 @@ from components.focus_styles import (
     card_focus_scale,
 )
 from components.pagination import pager as ft_pager
-from components.focus_styles import attach_focus_zoom, card_button_style, card_focus_scale
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx

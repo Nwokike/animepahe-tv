@@ -112,7 +112,6 @@ def test_direct_download_resumes_with_range(tmp_path):
     os.makedirs(job_dir, exist_ok=True)
     part = job_dir / "file.mkv.part"
     part.write_bytes(b"B" * 1024)
-    seen_headers = {}
 
     async def run():
         seen = {"bytes": 0}

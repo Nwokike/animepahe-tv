@@ -253,8 +253,6 @@ async def test_clearance_empty_cookies_ignored(store):
 
 
 def test_early_access_round_trip(tmp_path, monkeypatch):
-    import asyncio
-    import time
 
     monkeypatch.setenv("FLET_APP_STORAGE_DATA", str(tmp_path))
     from services.store import JsonStore
@@ -274,7 +272,6 @@ def test_early_access_round_trip(tmp_path, monkeypatch):
 
 
 def test_early_access_expiry(tmp_path, monkeypatch):
-    import asyncio
 
     monkeypatch.setenv("FLET_APP_STORAGE_DATA", str(tmp_path))
     from services.store import JsonStore

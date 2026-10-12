@@ -9,6 +9,6 @@ deep diffing large lists.
 
 import flet as ft
 
-from core.state import AppState, state
+from core.state import state
 
 AppStateCtx = ft.create_context(state)

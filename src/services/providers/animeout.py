@@ -11,7 +11,7 @@ clears — the code is durable and lights up the moment it does.
 import logging
 import re
 
-from core.config import ANIMEOUT_API, BROWSER_UA, CACHE_TTL_EPISODES, CACHE_TTL_LATEST, CACHE_TTL_SEARCH
+from core.config import ANIMEOUT_API, CACHE_TTL_EPISODES, CACHE_TTL_LATEST, CACHE_TTL_SEARCH
 from core.state import Anime, Episode, Source
 import primp
 from services.providers.base import make_session, split_session

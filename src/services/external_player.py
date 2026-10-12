@@ -9,7 +9,6 @@ The resolving progress dialog is also restored: kwik resolution can take
 seconds, and a bare pause reads as a frozen app.
 """
 
-import asyncio
 import base64
 import logging
 import urllib.parse

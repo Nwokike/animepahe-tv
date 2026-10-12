@@ -24,12 +24,12 @@ import os
 import re
 import time
 
+import anyio
 import primp
 
 logger = logging.getLogger(__name__)
 
 PARALLEL_SEGMENTS = 6
-import anyio
 
 SEGMENT_TIMEOUT = 30
 PLAYLIST_TIMEOUT = 15
@@ -607,7 +607,7 @@ class DownloadManager:
 
     @staticmethod
     def _segment_complete(segs_dir: str, uri: str) -> bool:
-        name = f"-" + os.path.basename(uri.split("?")[0])
+        name = "-" + os.path.basename(uri.split("?")[0])
         for candidate in os.listdir(segs_dir) if os.path.isdir(segs_dir) else []:
             if candidate.endswith(name):
                 return True

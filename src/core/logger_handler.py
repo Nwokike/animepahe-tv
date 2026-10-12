@@ -9,13 +9,11 @@ Cloudflare solver, the kwik resolver and downloads.
 import logging
 import os
 import platform
-import shutil
 import sys
 import threading
 import time
 from collections import deque
 from datetime import datetime
-from typing import Optional
 
 
 class MemoryLogHandler(logging.Handler):
