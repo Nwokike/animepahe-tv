@@ -24,6 +24,8 @@ import asyncio
 import logging
 import time
 
+import anyio
+
 from core.config import (
     BREAKER_FAIL_THRESHOLD,
     BREAKER_HALF_OPEN_TRIALS,
@@ -163,39 +165,97 @@ class ProviderRouter:
     # The failover chain
     # ------------------------------------------------------------------
 
+    async def _attempt(self, op: str, provider: Provider, args) -> object:
+        """One provider attempt through its breaker; records health and
+        breaker events. Raises on transport/parse failure."""
+        breaker = self._breakers[provider.name]
+        started = self._clock()
+        try:
+            result = await getattr(provider, op)(*args)
+        except Exception:
+            breaker.record_failure()
+            self._record_health(
+                provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error="failed"
+            )
+            raise
+        breaker.record_success()
+        self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+        return result
+
     async def _run(self, op: str, *args, force: bool = False, owner: str | None = None):
+        """Try providers in editorial order (owner first when it owns the
+        session); first provider with an actual ANSWER wins.
+
+        Every provider is a COMPLETE app in its own right (nkiri-shaped:
+        title in, catalog/posters/episodes/files out). They have different
+        catalogs and different file walls, so an empty answer from one is
+        not an answer — the chain continues.
+
+        The candidates race: while they run together the worst case is
+        max(fastest, deadline) instead of the sum of the chain's
+        timeouts, so a walled provider no longer sits at the front of
+        the wait. The first ANSWER (non-empty) cancels the rest."""
         owner = owner or self._pin
         providers = self._providers
         if owner:
             providers = [p for p in providers if p.name == owner] + [
                 p for p in providers if p.name != owner
             ]
-        last_error: Exception | None = None
-        for idx, provider in enumerate(providers):
-            is_last = idx == len(providers) - 1
-            breaker = self._breakers[provider.name]
-            if not force and not breaker.allow():
-                logger.debug("router: skip %s (breaker %s)", provider.name, breaker.state)
-                continue
-            started = self._clock()
-            try:
-                result = await getattr(provider, op)(*args)
-            except Exception as ex:  # transport or parse failure -> fail over
-                breaker.record_failure()
-                self._record_health(provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex))
-                last_error = ex
-                logger.info("router: %s failed on %s: %s", op, provider.name, ex)
-                continue
-            breaker.record_success()
-            self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
-            if not _is_empty(result) or is_last:
-                self.last_winner = provider.name
-                return result
-            logger.debug("router: %s empty on %s — trying next", op, provider.name)
         if not providers:
             raise RouterError("no providers configured")
-        if last_error is not None:
-            raise RouterError(f"all providers failed for {op}") from last_error
+        eligible = [p for p in providers if force or self._breakers[p.name].allow()]
+        if not eligible:
+            raise RouterError("no provider available (all circuits open)")
+        # The first eligible provider (the owner when the session is
+        # owned) answers alone — editorial order governs the common path
+        # and no extra requests go out. Only when it fails or answers
+        # empty does the rest race: the worst case is then
+        # max(fastest, deadline) instead of the sum of the timeouts.
+        first = eligible[0]
+        try:
+            result = await self._attempt(op, first, args)
+        except Exception as ex:
+            results_errors: list[Exception] = [ex]
+        else:
+            self.last_winner = first.name
+            if not _is_empty(result):
+                return result
+            results_answers = {first.name: result}
+            results_errors = []
+        rest = eligible[1:]
+        if not rest:
+            if results_errors:
+                raise RouterError(f"all providers failed for {op}") from results_errors[0]
+            return results_answers[first.name]
+        outcomes: dict[str, object] = dict(results_answers) if not results_errors else {}
+        errors: list[Exception] = list(results_errors)
+        winner: Provider | None = None
+
+        async def _attempt_one(provider: Provider, tg) -> None:
+            nonlocal winner
+            try:
+                result = await self._attempt(op, provider, args)
+            except Exception as ex:
+                errors.append(ex)
+                return
+            outcomes[provider.name] = result
+            if not _is_empty(result):
+                winner = provider
+                tg.cancel_scope.cancel()  # the rest stand down
+
+        async with anyio.create_task_group() as tg:
+            for provider in rest:
+                tg.start_soon(_attempt_one, provider, tg)
+
+        if winner is not None:
+            self.last_winner = winner.name
+            return outcomes[winner.name]
+        if outcomes:
+            last = eligible[-1]
+            self.last_winner = last.name
+            return outcomes[last.name]
+        if errors:
+            raise RouterError(f"all providers failed for {op}") from errors[-1]
         raise RouterError(f"no provider answered for {op}")
 
     # ------------------------------------------------------------------
@@ -257,26 +317,25 @@ class ProviderRouter:
     # ------------------------------------------------------------------
 
     async def probe_all(self) -> dict[str, bool]:
-        """Race every provider's cheap probe in parallel. Never raises;
-        a failed probe records one breaker failure (of three)."""
+        """Race every provider's cheap probe in parallel under one
+        deadline. Never raises; a failed probe records one breaker
+        failure (of three). A deadline hit no longer fabricates failures
+        — a provider that simply didn't answer in time is left as it
+        was (the half-open machinery retries it later)."""
         if not self._providers:
             return {}
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(
-                    *(self._probe_one(p) for p in self._providers),
-                    return_exceptions=True,
-                ),
-                timeout=STARTUP_PROBE_BUDGET,
-            )
-        except asyncio.TimeoutError:
-            results = [None] * len(self._providers)
         ok: dict[str, bool] = {}
-        for provider, result in zip(self._providers, results):
-            ok[provider.name] = bool(result is True)
-            if not ok[provider.name]:
-                self._breakers[provider.name].record_failure()
+        with anyio.move_on_after(STARTUP_PROBE_BUDGET):
+            async with anyio.create_task_group() as tg:
+                for provider in self._providers:
+                    tg.start_soon(self._probe_record, provider, ok)
         return ok
+
+    async def _probe_record(self, provider: Provider, ok: dict) -> None:
+        try:
+            ok[provider.name] = await self._probe_one(provider)
+        except Exception:
+            ok[provider.name] = False
 
     async def _probe_one(self, provider: Provider) -> bool:
         started = self._clock()
