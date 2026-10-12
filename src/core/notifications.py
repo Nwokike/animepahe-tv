@@ -1,10 +1,26 @@
 """Notifications adapter — flet-notifications behind a safe seam.
 
 The package RAISES off-platform (its documented behavior) and is not
-installed in every environment yet, so every call site goes through
-this module: it detects the platform and the import once, and degrades
-to a no-op instead of an exception. Nothing in the app may import
+installed in every environment, so every call site goes through this
+module: it detects the platform and the import once, and degrades to a
+no-op instead of an exception. Nothing in the app may import
 flet_notifications directly.
+
+Every call below is written against the INSTALLED flet-notifications
+0.1.3 surface (verified in .venv):
+- ``flet_notifications.LocalNotifications`` is an ``ft.Service`` — one
+  instance, self-registered with the page, never added to controls
+- ``await service.request_permissions() -> bool`` is the permission flow
+- ``await service.create_notification_channel(NotificationChannel(...))``
+  with ``flet_notifications.types.Importance``
+- ``await service.show(id=, title=, body=, payload=, style=, channel_id=)``
+  — there is NO ``details=`` kwarg; per-platform detail is ``options=``
+- ``BigPictureStyle(image=AndroidIcon(file_path=...))`` — the image is a
+  REQUIRED ``AndroidIcon`` with exactly one source set
+- ``service.on_tap`` receives the event; ``e.payload`` is the string the
+  show() call passed, which is how the deep link comes back
+- re-showing the same id UPDATES the notification — that is how a live
+  progress bar advances (``show_progress``/``max_progress``/``progress``)
 
 Notification shape (the reference's recommendations):
 - per-anime stable id — one tray row per series, updated not piled
@@ -26,6 +42,7 @@ _PAYLOAD_SCHEME = "animepahe://anime/"
 
 _available: bool | None = None
 _service: object | None = None
+_tap_handler = None
 
 
 def _detect() -> bool:
@@ -46,6 +63,49 @@ def _detect() -> bool:
         _available = False
         _service = None
     return _available
+
+
+async def request_permissions() -> bool:
+    """Ask the OS for notification permission. False (quietly) when the
+    extension is unavailable — never raises."""
+    if not _detect():
+        return False
+    try:
+        return bool(await _service.request_permissions())
+    except Exception as ex:
+        logger.info("permission request failed: %s", ex)
+        return False
+
+
+def on_tap(handler) -> None:
+    """Install the deep-link handler. The service calls it with the
+    payload string a show() passed; the app routes that to the anime."""
+    global _tap_handler
+    _tap_handler = handler
+    if not _detect():
+        return
+
+    def _dispatch(e):
+        payload = getattr(e, "payload", None)
+        # The adapter owns the scheme, so a foreign payload never reaches
+        # the app — the handler only ever sees an anime session.
+        if _tap_handler is None or not anime_session_from(payload):
+            return
+        try:
+            _tap_handler(payload)
+        except Exception as ex:
+            logger.info("notification tap handling failed: %s", ex)
+
+    try:
+        _service.on_tap = _dispatch
+    except Exception as ex:
+        logger.info("on_tap install failed: %s", ex)
+
+
+def handle_payload(payload: str | None) -> str | None:
+    """A tap payload -> the anime session to open (None when it isn't
+    ours). Kept separate from the routing so it is unit-testable."""
+    return anime_session_from(payload)
 
 
 def payload_for(anime_session: str) -> str:
@@ -71,15 +131,16 @@ async def ensure_channel() -> bool:
     if not _detect():
         return False
     try:
-        from flet_notifications.types import AndroidNotificationChannel, Importance
+        from flet_notifications.channels import NotificationChannel
+        from flet_notifications.types import Importance
 
-        channel = AndroidNotificationChannel(
+        channel = NotificationChannel(
             id=CHANNEL_NEW_EPISODES,
             name="New episodes",
-            importance=Importance.HIGH,
             description="Alerts when a show you follow gets a new episode",
+            importance=Importance.HIGH,
         )
-        await _service.create_channel(channel)
+        await _service.create_notification_channel(channel)
         return True
     except Exception as ex:
         logger.info("channel create failed: %s", ex)
@@ -97,51 +158,71 @@ async def show_new_episode(
     if not _detect():
         return False
     try:
-        from flet_notifications.types import (
-            AndroidNotificationDetails,
-            BigPictureStyle,
-            NotificationDetails,
-        )
+        from flet_notifications.styles import AndroidIcon, BigPictureStyle
 
-        android = AndroidNotificationDetails(
-            channel_id=CHANNEL_NEW_EPISODES,
-        )
-        style = BigPictureStyle(
-            image_file_path=poster_path or "",
-            content_title=f"{title} — Episode {episode}",
-            summary_text="New episode on your followed show",
-        )
-        details = NotificationDetails(android=android)
+        style = None
+        if poster_path:
+            # AndroidIcon requires exactly one source; the poster is
+            # written to storage before this runs.
+            style = BigPictureStyle(
+                image=AndroidIcon(file_path=poster_path),
+                content_title=f"{title} — Episode {episode}",
+                summary_text="New episode on your followed show",
+            )
         await _service.show(
             id=stable_id(anime_session),
             title=f"{title} — Episode {episode}",
             body="Tap to watch",
             payload=payload_for(anime_session),
-            details=details,
             style=style,
+            channel_id=CHANNEL_NEW_EPISODES,
         )
         return True
-    except TypeError:
-        # Older/newer signatures: fall back to the minimal show.
-        try:
-            await _service.show(
-                id=stable_id(anime_session),
-                title=f"{title} — Episode {episode}",
-                body="Tap to watch",
-                payload=payload_for(anime_session),
-            )
-            return True
-        except Exception as ex:
-            logger.info("show failed: %s", ex)
-            return False
     except Exception as ex:
         logger.info("show failed: %s", ex)
+        return False
+
+
+async def show_progress(
+    *,
+    notification_id: int,
+    title: str,
+    body: str = "",
+    payload: str = "",
+    progress: int = 0,
+    max_progress: int = 0,
+    indeterminate: bool = False,
+) -> bool:
+    """One live-progress notification, advanced by re-showing the same
+    id. The download path uses this; kept here so no other module
+    imports the package."""
+    if not _detect():
+        return False
+    try:
+        await _service.show(
+            id=notification_id,
+            title=title,
+            body=body,
+            payload=payload,
+            show_progress=True,
+            progress=progress,
+            max_progress=max_progress,
+            indeterminate=indeterminate,
+            channel_id=CHANNEL_NEW_EPISODES,
+        )
+        return True
+    except Exception as ex:
+        logger.info("progress show failed: %s", ex)
         return False
 
 
 __all__ = [
     "ensure_channel",
     "show_new_episode",
+    "show_progress",
+    "request_permissions",
+    "on_tap",
+    "handle_payload",
     "payload_for",
     "anime_session_from",
     "stable_id",

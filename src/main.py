@@ -162,7 +162,34 @@ class AppController:
         # never flashes the wrong mode.
         await self._restore_theme_mode()
 
+        # Follows -> new-episode alerts. The channel, the permission ask
+        # and the tap deep-link all live behind the adapter (no-ops off
+        # platform), so this is safe on desktop where the extension is
+        # absent.
+        await self._setup_notifications()
+
         spawn(self._check_for_updates_bg(), name="update-check")
+        await self.start_episode_checker()
+
+    async def _setup_notifications(self) -> None:
+        """Channel + permission + tap routing, once at startup."""
+        from core import notifications
+
+        def _on_tap(payload: str):
+            session = notifications.handle_payload(payload)
+            if session:
+                logger.info("notification deep-link: %s", session)
+                self._open_from_notification(session)
+
+        notifications.on_tap(_on_tap)
+        await notifications.request_permissions()
+        await notifications.ensure_channel()
+
+    def _open_from_notification(self, anime_session: str) -> None:
+        """A tapped new-episode alert opens that anime's detail."""
+        from core.tasks import spawn
+
+        spawn(self.load_anime(anime_session), name="notif-open-anime")
 
     async def _restore_theme_mode(self):
         try:
