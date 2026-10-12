@@ -287,19 +287,16 @@ def SearchScreen() -> ft.Control:
 
     field = ft.TextField(
         hint_text="Search anime...",
-        # 1.0.4 API: border_radius/border_color/focused_border_color are
-        # deprecated on TextField — a per-ControlState border map is the
-        # supported shape now (the deprecation warnings came from here).
-        border={
-            ft.ControlState.DEFAULT: ft.OutlineInputBorder(
-                border_radius=16,
-                side=ft.BorderSide(1, ft.Colors.TRANSPARENT),
-            ),
-            ft.ControlState.FOCUSED: ft.OutlineInputBorder(
-                border_radius=16,
-                side=ft.BorderSide(1.5, AppColors.PRIMARY),
-            ),
-        },
+        # 0.85.3 shape: the border is the InputBorder enum plus the flat
+        # radius/width/color kwargs. (A per-ControlState map of
+        # OutlineInputBorder is a LATER Flet API — it does not exist
+        # here, and constructing it raised on every render.)
+        border=ft.InputBorder.OUTLINE,
+        border_radius=16,
+        border_width=1,
+        border_color=ft.Colors.TRANSPARENT,
+        focused_border_width=1.5,
+        focused_border_color=AppColors.PRIMARY,
         bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
         focused_bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
         prefix_icon=ft.Icons.SEARCH_ROUNDED,

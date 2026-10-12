@@ -128,3 +128,67 @@ def test_choose_download_quality_ignores_a_stale_index():
     assert called == []
     # Nothing stranded either: an invalid pick simply leaves the flag set.
     assert state.download_choice_open is True
+
+
+def test_single_rendition_start_clears_the_spinner_even_when_it_fails():
+    """The single-rendition path had no try/finally: an I/O error inside
+    _begin_download left the episode in state.starting_downloads forever,
+    so the detail-screen button spun until restart. The real path, with a
+    fake downloads manager that raises on the manifest write."""
+    import asyncio
+
+    import main as app_main
+    from core.state import state
+
+    class _Router:
+        def __init__(self, sources):
+            self._sources = sources
+
+        def get(self, name):
+            return None  # no provider -> no kwik unpack
+
+        async def sources(self, anime_session, episode_session):
+            return list(self._sources)
+
+    class _Downloads:
+        def __init__(self):
+            self.active_jobs = []
+
+        async def detect_kind(self, url, headers):
+            return "file"
+
+        async def start_direct(self, *a, **kw):
+            raise OSError("disk full")
+
+    class _Store:
+        async def get_downloads(self):
+            return {}
+
+        async def save_download(self, session, row):
+            pass
+
+    controller = app_main.AppController.__new__(app_main.AppController)
+    controller._owner_of = lambda session: "s1"
+    controller.router = _Router([_src(1080)])  # ONE rendition -> immediate start
+    controller.downloads = _Downloads()
+    controller.store = _Store()
+
+    async def _anime(session):
+        return {"title": "Frieren", "poster": "p"}
+
+    async def _resolve(url, session, provider_name=None):
+        return url
+
+    controller._resolve_anime = _anime
+    controller._resolve_source = _resolve
+    state.starting_downloads = set()
+    state.episodes = [type("E", (), {"session": "e1", "episode": 1, "anime_id": 9})()]
+    state.downloads = {}
+
+    try:
+        asyncio.run(controller.download_episode("s1", "e1"))
+        raise AssertionError("expected the OSError to propagate")
+    except OSError:
+        pass
+    # The important part: the spinner is cleared either way.
+    assert "e1" not in state.starting_downloads

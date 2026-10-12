@@ -136,8 +136,27 @@ def AppShell() -> ft.Control:
         ft.use_dialog(active_dialog)
     except RuntimeError:
         pass
+    def _close_dialog():
+        """Close whichever dialog is open.
+
+        The flag-driven dialogs (play quality, download quality) are owned
+        by the controller's state, so clearing the imperative sheet alone
+        leaves their flags set — the elif chain above then rebuilds the
+        same dialog on the next render, and neither Cancel nor global Back
+        would ever dismiss it."""
+        set_sheet(None)
+        if state.quality_dialog_open or state.pending_playback is not None:
+            state.quality_dialog_open = False
+            state.quality_choices = None
+            state.pending_playback = None
+            state.episodes_version += 1
+        if state.download_choice_open or state.pending_download is not None:
+            state.download_choice_open = False
+            state.download_choices = None
+            state.pending_download = None
+
     controller.open_sheet = lambda d: set_sheet(d)
-    controller.close_dialog = lambda: set_sheet(None)
+    controller.close_dialog = _close_dialog
 
     # Publish what global Back should do (the controller's FocusManager
     # reads this on every keypress; the closures above are the actions).

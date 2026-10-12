@@ -674,6 +674,11 @@ class AppController:
             "headers": sources[0].headers,
             "subtitles": sources[0].subtitles,
             "skip": sources[0].skip,
+            # Which provider actually SERVED these sources — the re-resolve
+            # in choose_quality must use the same capability gate (an
+            # owner-derived one would unpack a direct m3u8 through kwik,
+            # or hand the player a kwik page URL raw).
+            "provider": serving_provider,
         }
         state.episodes_version += 1
 
@@ -773,7 +778,11 @@ class AppController:
             headers=choice.get("headers") or {},
         )
         try:
-            m3u8 = await self._resolve_source(choice_source.url, pending["anime_session"])
+            m3u8 = await self._resolve_source(
+                choice_source.url,
+                pending["anime_session"],
+                provider_name=pending.get("provider"),
+            )
             variants = (
                 await self._fetch_variants(m3u8, choice.get("headers")) if m3u8 else []
             )
@@ -1374,8 +1383,15 @@ class AppController:
             state.download_choice_open = True
             self._finish_download_start(episode_session)
             return
-        await self._begin_download(choices[0], anime_session, episode_session, ep, anime)
-        self._finish_download_start(episode_session)
+        # try/finally, not a trailing call: an I/O error inside _begin_download
+        # (store, manifest, full disk) must not leave the row's spinner
+        # spinning for the rest of the session.
+        try:
+            await self._begin_download(
+                choices[0], anime_session, episode_session, ep, anime
+            )
+        finally:
+            self._finish_download_start(episode_session)
 
     async def choose_download_quality(self, index: int):
         """The download dialog's pick — resolve and start that rendition."""

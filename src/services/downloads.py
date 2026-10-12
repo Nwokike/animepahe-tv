@@ -315,9 +315,18 @@ class DownloadManager:
         """Delete a job's files (partials included). Safe when absent."""
         import shutil
 
-        shutil.rmtree(
-            self._job_dir(anime_session, episode_session), ignore_errors=True
+        job_dir = self._job_dir(anime_session, episode_session)
+        shutil.rmtree(job_dir, ignore_errors=True)
+        # Rows written before the platform-safe mapping live under the RAW
+        # session name; without this the old files leak forever (nothing
+        # would ever delete them).
+        legacy = os.path.join(
+            self.downloads_dir,
+            str(anime_session or "unknown"),
+            str(episode_session),
         )
+        if os.path.abspath(legacy) != os.path.abspath(job_dir):
+            shutil.rmtree(legacy, ignore_errors=True)
 
     async def _run_direct(
         self,

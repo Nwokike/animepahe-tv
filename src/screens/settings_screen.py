@@ -320,7 +320,9 @@ def SettingsScreen() -> ft.Control:
         value=backend,
         options=[ft.dropdown.Option("auto", "Automatic (recommended)")]
         + [ft.dropdown.Option(name, name.capitalize()) for name in provider_names],
-        on_change=_on_backend_change,
+        # 0.85.3's Dropdown has no on_change — on_select fires when the
+        # user picks an option (on_text_change is the editable case).
+        on_select=_on_backend_change,
         text_size=13,
         content_padding=ft.Padding.symmetric(horizontal=12, vertical=8),
     )

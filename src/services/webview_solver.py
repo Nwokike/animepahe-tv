@@ -158,12 +158,11 @@ class WebViewSolver:
             )
 
             # Check title and current URL to avoid premature completion on challenge interstitial
-            # flet_webview's WebView has no get_title(); read it via JS.
+            # flet_webview's WebView exposes get_title()/get_user_agent()
+            # directly (a JS round-trip method does not exist here).
             title = ""
             try:
-                result = await webview.run_javascript_returning_result(
-                    "document.title",
-                )
+                result = await webview.get_title()
                 if isinstance(result, str):
                     title = result
             except Exception:
@@ -207,15 +206,15 @@ class WebViewSolver:
 
             logger.info("Mobile solver verified challenge completion! Title: %s", title)
             ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            # flet_webview's WebView has no get_user_agent(); read it via JS.
+            # The WebView reports its own UA directly — the JS round-trip
+            # this used to attempt does not exist in flet_webview, so the
+            # real device UA was silently never captured.
             try:
-                final_ua = await webview.run_javascript_returning_result(
-                    "navigator.userAgent",
-                )
+                final_ua = await webview.get_user_agent()
                 if isinstance(final_ua, str) and final_ua:
                     ua = final_ua
             except Exception as ex:
-                logger.debug("UA read via JS failed: %s", ex)
+                logger.debug("UA read failed: %s", ex)
             if not result_future.done():
                 result_future.set_result((cookie_str, ua))
 

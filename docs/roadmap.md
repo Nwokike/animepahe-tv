@@ -132,3 +132,30 @@ removed rather than wired, because it needs a free-line/paywall rule the
 app does not have and inventing one is a product call. `flet_yandex_ads`
 0.1.0 is installed and its test unit ids are used by the interstitial,
 app-open and banner formats.
+
+## Phase 7.5 addendum — the audit's own catches
+Two independent audit passes over this phase's work found four defects in
+it (all fixed) and, more importantly, three more of the same bug family
+the phase was opened for — code calling an API that does not exist:
+
+- `ft.OutlineInputBorder` (2 sites, search screen) and
+  `ft.Dropdown(on_change=)` (settings) do not exist in the pinned 0.85.3;
+  both raised at CONSTRUCTION, so the screen crashed on open. The comment
+  next to the TextField border claimed the map form was the 1.0.4 API —
+  the opposite of the truth.
+- `webview.run_javascript_returning_result` does not exist in flet-webview
+  (the package has `get_title()` / `get_user_agent()`), so the mobile CF
+  solver silently never read the title or the device UA.
+
+Plus: the dialog portal's Cancel/Back never dismissed the flag-driven
+dialogs (it only cleared the imperative sheet); `choose_quality`'s
+re-resolve dropped the serving provider, so a failover source was
+re-resolved with the owner's capability gate; the single-rendition
+download start had no try/finally, so an I/O error pinned the row's
+spinner forever; and rows written before the platform-safe path mapping
+leaked their files on delete.
+
+`tests/test_surface_api.py` now guards the existence class (a plain
+`ft.X` reference where X is not on the module), and the keyword-level
+walk is deliberately NOT part of it: Flet accepts many kwargs through its
+own machinery, so a signature check reports false positives.
