@@ -196,23 +196,63 @@ class AnimeOutProvider:
         if resp.status_code != 200:
             raise RuntimeError(f"animeout HTTP {resp.status_code}")
         html = (resp.json().get("content") or {}).get("rendered", "")
-        results = _parse_episode_links(html, int(native))
+        pairs = _parse_episode_pairs(html)
+        results = _episode_rows(pairs, int(native))
+        # The variant table rides the same cache so sources() can serve
+        # every quality of an episode without re-fetching the post.
+        self._cache_put(f"variants_{native}", _variant_map(pairs), CACHE_TTL_EPISODES)
         self._cache_put(key, results, CACHE_TTL_EPISODES)
         return (results, False)
 
+    async def _variants_for(self, native: str) -> dict[int, list[str]]:
+        """Episode number -> every direct link. Fetches the post once when
+        episodes() hasn't run yet for this session."""
+        key = f"variants_{native}"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        resp = await self._client.get(
+            f"{ANIMEOUT_API}/posts/{native}", params={"_fields": "id,content"}
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"animeout HTTP {resp.status_code}")
+        html = (resp.json().get("content") or {}).get("rendered", "")
+        mapping = _variant_map(_parse_episode_pairs(html))
+        self._cache_put(key, mapping, CACHE_TTL_EPISODES)
+        return mapping
+
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
-        """Resolve one episode's direct MKV through the link-page chain.
+        """Every quality of one episode through the link-page chain.
         Raises on transport failure (the router then fails over); an
         empty list means the chain resolved but delivered nothing."""
-        url = await _resolve_direct_url(episode_session, client=self._client)
-        if _FILE_HOST in url:
-            # The file host is Cloudflare-challenged today; treat as
-            # no-stream rather than hammering it on every tap.
-            return []
-        if not url.startswith("http"):
-            return []
-        resolution, audio, fansub = _parse_filename(url)
-        return [Source(url=url, resolution=resolution, audio=audio, fansub=fansub)]
+        _, native = split_session(anime_session)
+        # The episode number is in the link's own filename, so the sibling
+        # qualities of the same episode are found by number.
+        number = _episode_number(episode_session)
+        links: list[str] = [episode_session]
+        if native.isdigit() and number:
+            try:
+                variants = await self._variants_for(native)
+            except Exception as ex:
+                logger.debug("animeout variants fetch failed: %s", ex)
+                variants = {}
+            for href in variants.get(number, []):
+                if href not in links:
+                    links.append(href)
+        sources: list[Source] = []
+        for href in links:
+            url = await _resolve_direct_url(href, client=self._client)
+            if _FILE_HOST in url:
+                # The file host is Cloudflare-challenged today; treat as
+                # no-stream rather than hammering it on every tap.
+                return []
+            if not url.startswith("http"):
+                continue
+            resolution, audio, fansub = _parse_filename(url)
+            sources.append(
+                Source(url=url, resolution=resolution, audio=audio, fansub=fansub)
+            )
+        return sources
 
     async def episodes_for_title(self, title: str) -> list[Episode]:
         results, _ = await self.search(title, 1)
@@ -236,31 +276,47 @@ class AnimeOutProvider:
         await self._client.aclose()
 
 
-def _parse_episode_links(html: str, anime_id: int) -> list[Episode]:
-    """AnimeOut embeds one direct link per episode in post content:
-    ``[AnimeOut] Title - 12 [hash][1080pp][SubsPlease][x265][RapidBot].mkv``.
-    Multiple patterns are tried (S01E12, "- 12", "Episode 12") — different
-    eras of posts use different conventions."""
-    # Posts mix double- and single-quoted anchors (the One Piece
-    # ongoing post: 2067 single-quoted vs 15 double-quoted) — match both.
+def _episode_number(filename: str) -> int:
+    """The episode number inside a release filename. Patterns tried in
+    order (S01E12, "- 12", "Episode 12", bare) — different eras of posts
+    use different conventions. 0 when nothing matches."""
+    m = (
+        re.search(r"\bS\d{1,2}E(\d{1,4})\b", filename, re.I)
+        or re.search(r"-\s*(\d{1,4})\s*\d*\s*\[", filename, re.I)
+        or re.search(r"[Ee]pisode\s*(\d{1,4})", filename, re.I)
+        or re.search(r"\b(\d{1,4})\b", filename, re.I)
+    )
+    return int(m.group(1)) if m else 0
+
+
+def _parse_episode_pairs(html: str) -> list[tuple[int, str]]:
+    """Every (episode number, direct link) pair in a post's content —
+    INCLUDING multiple qualities of the same episode. Posts serve e.g.
+    both [1080pp] and [720p] links for one episode; dropping the second
+    here is what made the promised 1080p/720p choice impossible."""
     hrefs = re.findall(r"href=['\"](https?://[^'\"]+\.mkv)['\"]", html, re.I)
-    results: list[Episode] = []
-    seen: set[int] = set()
+    pairs: list[tuple[int, str]] = []
     for href in hrefs:
         filename = href.rsplit("/", 1)[-1]
-        m = (
-            re.search(r"\bS\d{1,2}E(\d{1,4})\b", filename, re.I)
-            or re.search(r"-\s*(\d{1,4})\s*\d*\s*\[", filename)
-            or re.search(r"[Ee]pisode\s*(\d{1,4})", filename)
-            or re.search(r"\b(\d{1,4})\b", filename)
-        )
-        if not m:
-            continue
-        ep_num = int(m.group(1))
+        number = _episode_number(filename)
+        if number:
+            pairs.append((number, href))
+    # Stable and best-first: highest quality first, then link order.
+    pairs.sort(key=lambda pair: -_parse_filename(pair[1])[0])
+    return pairs
+
+
+def _episode_rows(pairs: list[tuple[int, str]], anime_id: int) -> list[Episode]:
+    """One display row per episode number (the best quality link is its
+    session) — the grid shows one card per episode, not one per link."""
+    rows: list[Episode] = []
+    seen: set[int] = set()
+    for ep_num, href in pairs:
         if ep_num in seen:
             continue
         seen.add(ep_num)
-        results.append(
+        filename = href.rsplit("/", 1)[-1]
+        rows.append(
             Episode(
                 id=ep_num,
                 anime_id=anime_id,
@@ -274,8 +330,16 @@ def _parse_episode_links(html: str, anime_id: int) -> list[Episode]:
                 filler=False,
             )
         )
-    results.sort(key=lambda e: e.episode)
-    return results
+    rows.sort(key=lambda e: e.episode)
+    return rows
+
+
+def _variant_map(pairs: list[tuple[int, str]]) -> dict[int, list[str]]:
+    """Episode number -> every direct link for it, best quality first."""
+    mapping: dict[int, list[str]] = {}
+    for ep_num, href in pairs:
+        mapping.setdefault(ep_num, []).append(href)
+    return mapping
 
 
 def _parse_filename(url: str) -> tuple[int, str, str]:

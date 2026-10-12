@@ -81,9 +81,14 @@ class AnimePaheProvider:
         return episodes, has_more
 
     async def _sources_via_links(self, anime_session: str, episode_session: str) -> list[Source]:
-        """m=links: one JSON call -> per-rendition {audio, kwik,
-        kwik_pahewin, filesize?, hd}. Needs the numeric anime_id from
-        m=release (carried on the episodes we already loaded)."""
+        """m=links: one JSON call -> per-rendition {audio, kwik, filesize?,
+        hd}. Needs the numeric anime_id from m=release (carried on the
+        episodes we already loaded).
+
+        `hd` marks the HD renditions; `kwik_pahewin` (the pahe.win menu
+        URL) is NOT read here — that menu is served by the play-page
+        scrape's pickDownload parsing on the fallback path, so the two
+        routes stay distinct instead of one pretending to serve both."""
         anime_id = self._anime_ids.get(episode_session)
         if not anime_id:
             return []
@@ -111,12 +116,19 @@ class AnimePaheProvider:
                 resolution = int(key) if isinstance(key, str) and key.isdigit() else 0
             except (TypeError, ValueError):
                 resolution = 0
+            # hd rides the fansub label the way the play-page scrape
+            # carries " AV1" — visible in the quality list, no new field.
+            # The site serves it as the STRING "0"/"1", so a bare
+            # truthiness test would mark every rendition HD.
+            fansub = "AnimePahe"
+            if entry.get("hd") not in (None, "", "0", 0, False):
+                fansub += " HD"
             results.append(
                 Source(
                     url=str(entry["kwik"]),
                     resolution=resolution,
                     audio=str(entry.get("audio") or "jpn"),
-                    fansub="AnimePahe",
+                    fansub=fansub,
                     size=f"{entry['filesize']}MB" if entry.get("filesize") else "",
                 )
             )

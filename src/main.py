@@ -34,6 +34,40 @@ logger = logging.getLogger(__name__)
 _PROGRESS_FLUSH_SECONDS = 0.5
 
 
+def _source_choices(sources) -> list[dict]:
+    """Every site source as a choice dict, SUB (JPN) first then DUB (ENG),
+    each best-first — the exact list the original build showed and the
+    one both the play dialog and the download dialog render, so the two
+    can never disagree about what a quality means."""
+    ordered = sorted(
+        sources,
+        key=lambda s: (str(s.audio or "").lower().startswith("eng"), -s.resolution),
+    )
+    choices: list[dict] = []
+    for src in ordered:
+        audio_label = (
+            "DUB (ENG)"
+            if "eng" in (src.audio or "").lower()
+            else f"SUB ({(src.audio or 'jpn').upper()})"
+        )
+        label = f"{src.resolution}p - {audio_label}"
+        if src.fansub:
+            label += f" ({src.fansub})"
+        if getattr(src, "size", ""):
+            label += f" [{src.size}]"
+        choices.append(
+            {
+                "label": label,
+                "kind": "source",
+                "url": src.url,
+                "headers": src.headers,
+                "subtitles": src.subtitles,
+                "skip": src.skip,
+            }
+        )
+    return choices
+
+
 def _anime_dict(anime) -> dict:
     """Anime dataclass -> the detail header's dict. Every field the
     providers fill is carried: dropping one here is what made synopsis,
@@ -593,7 +627,7 @@ class AppController:
         # every other provider's URLs are already playable.
         self._resolve_stage(gen, "Resolving stream…")
         m3u8 = await self._resolve_source(
-            sources[0], anime_session, provider_name=serving_provider
+            sources[0].url, anime_session, provider_name=serving_provider
         )
         if gen != self._play_gen:
             return
@@ -607,36 +641,12 @@ class AppController:
         if gen != self._play_gen:
             return
 
-        # 3. Quality choices: EVERY site source, sorted best-first — exactly
-        #    what the original listed ("1080p - SUB (JPN) (SubsPlease)").
-        #    Nothing is filtered or dropped: the best is simply marked as
-        #    the recommended pick. The m3u8 variants of the chosen source
-        #    are the in-player quality options instead (house-player
-        #    parity), so they don't belong in this list.
-        choices: list[dict] = []
-        for src in sources:
-            # The original build's label format: DUB (ENG) when the audio is
-            # English, SUB (JPN) otherwise, plus the fansub group.
-            audio_label = (
-                "DUB (ENG)"
-                if "eng" in (src.audio or "").lower()
-                else f"SUB ({(src.audio or 'jpn').upper()})"
-            )
-            label = f"{src.resolution}p - {audio_label}"
-            if src.fansub:
-                label += f" ({src.fansub})"
-            if getattr(src, "size", ""):
-                label += f" [{src.size}]"
-            choices.append(
-                {
-                    "label": label,
-                    "kind": "source",
-                    "url": src.url,
-                    "headers": src.headers,
-                    "subtitles": src.subtitles,
-                    "skip": src.skip,
-                }
-            )
+        # 3. Quality choices: EVERY site source, best-first — exactly what
+        #    the original listed ("1080p - SUB (JPN) (SubsProvide)"). The
+        #    m3u8 variants of the chosen source are the in-player quality
+        #    options instead (house-player parity), so they don't belong in
+        #    this list.
+        choices = _source_choices(sources)
 
         if len(choices) <= 1:
             await self._open_player(
@@ -663,7 +673,7 @@ class AppController:
         state.episodes_version += 1
 
     async def _resolve_source(
-        self, source, anime_session: str, provider_name: str | None = None
+        self, url: str, anime_session: str, provider_name: str | None = None
     ) -> str | None:
         """Source URL -> playable URL, per the serving provider's
         capabilities. kwik_resolve providers (AnimePahe) unpack through
@@ -678,11 +688,11 @@ class AppController:
         provider = self.router.get(name)
         if provider is not None and provider.capabilities.get("kwik_resolve"):
             try:
-                return await self.kwik.resolve(source.url)
+                return await self.kwik.resolve(url)
             except Exception as ex:
-                logger.error("kwik resolve(%s) failed: %s", source.url, ex)
+                logger.error("kwik resolve(%s) failed: %s", url, ex)
                 return None
-        return source.url or None
+        return url or None
 
     async def _fetch_variants(self, m3u8: str, headers: dict | None = None) -> list[dict]:
         """Master-playlist variants through the proxy (correct headers),
@@ -758,7 +768,7 @@ class AppController:
             headers=choice.get("headers") or {},
         )
         try:
-            m3u8 = await self._resolve_source(choice_source, pending["anime_session"])
+            m3u8 = await self._resolve_source(choice_source.url, pending["anime_session"])
             variants = (
                 await self._fetch_variants(m3u8, choice.get("headers")) if m3u8 else []
             )
@@ -1255,7 +1265,7 @@ class AppController:
         """Resolve one kwik source and hand the m3u8 to KTV, exactly as the
         old app did (TimeoutError counts as launch success)."""
         self._resolve_stage(self._play_gen, "Resolving stream…")
-        m3u8 = await self._resolve_source(source, anime_session)
+        m3u8 = await self._resolve_source(source.url, anime_session)
         if not m3u8:
             self._show_error_snackbar("Failed to resolve the stream.")
             return
@@ -1341,19 +1351,77 @@ class AppController:
             self._show_error_snackbar("No stream found for this episode.")
             self._finish_download_start(episode_session)
             return
-        resolved = await self._resolve_source(sources[0], anime_session)
+
+        # A silent sources[0] downloads whatever the provider listed first
+        # — a 360p when a 1080p exists. The same list the play dialog
+        # shows, so the user picks; a single rendition starts immediately.
+        choices = _source_choices(sources)
+        if len(choices) > 1:
+            state.pending_download = {
+                "anime_session": anime_session,
+                "episode_session": episode_session,
+                "title": (anime or {}).get("title", ""),
+                "poster": (anime or {}).get("poster", ""),
+                "episode_num": ep.episode if ep else 0,
+                "anime_id": ep.anime_id if ep else 0,
+            }
+            state.download_choices = choices
+            state.download_choice_open = True
+            self._finish_download_start(episode_session)
+            return
+        await self._begin_download(choices[0], anime_session, episode_session, ep, anime)
+        self._finish_download_start(episode_session)
+
+    async def choose_download_quality(self, index: int):
+        """The download dialog's pick — resolve and start that rendition."""
+        pending = state.pending_download or {}
+        choices = state.download_choices or []
+        if not pending or index < 0 or index >= len(choices):
+            return
+        state.download_choice_open = False
+        state.download_choices = None
+        state.pending_download = None
+        ep = next(
+            (e for e in state.episodes if e.session == pending.get("episode_session")),
+            None,
+        )
+        state.starting_downloads.add(pending.get("episode_session"))
+        state.busy_version += 1
+        try:
+            await self._begin_download(
+                choices[index],
+                pending.get("anime_session"),
+                pending.get("episode_session"),
+                ep,
+                pending,
+            )
+        finally:
+            self._finish_download_start(pending.get("episode_session"))
+
+    async def _begin_download(
+        self,
+        choice: dict,
+        anime_session: str,
+        episode_session: str,
+        ep,
+        anime: dict | None,
+    ):
+        """Resolve one chosen rendition and start the job."""
+        source_headers = dict(choice.get("headers") or {})
+        resolved = await self._resolve_source(choice["url"], anime_session)
         if not resolved:
             self._show_error_snackbar("Couldn't resolve the stream for download.")
-            self._finish_download_start(episode_session)
             return
 
         metadata = {
             "anime_session": anime_session,
-            "anime_id": ep.anime_id if ep else 0,
+            "anime_id": (ep.anime_id if ep else 0)
+            or (anime or {}).get("anime_id", 0),
             "title": (anime or {}).get("title", ""),
             "poster": (anime or {}).get("poster", ""),
             "episode_num": ep.episode if ep else 0,
         }
+        rows = await self.store.get_downloads()
         row = dict(metadata)
         row.update({"state": "partial"})
         await self.store.save_download(episode_session, row)
@@ -1363,7 +1431,6 @@ class AppController:
         # One resolution, two shapes — decided by what the media IS, never
         # by which source it came from: a file is fetched directly, an
         # m3u8 by its segments, at whatever quality it serves.
-        source_headers = dict(sources[0].headers) if sources[0].headers else {}
         kind = await self.downloads.detect_kind(resolved, source_headers)
         if kind == "file":
             await self.downloads.start_direct(
@@ -1380,7 +1447,6 @@ class AppController:
             await self.downloads.start(
                 episode_session, resolved, source_headers, metadata
             )
-        self._finish_download_start(episode_session)
 
     def _finish_download_start(self, episode_session: str) -> None:
         state.starting_downloads.discard(episode_session)
@@ -1685,6 +1751,9 @@ async def main(page: ft.Page):
     )
     methods.download_episode = lambda a, e: spawn(
         controller.download_episode(a, e), name="download-episode"
+    )
+    methods.choose_download_quality = lambda index: spawn(
+        controller.choose_download_quality(index), name="choose-download-quality"
     )
     methods.cancel_download = lambda e: spawn(
         controller.cancel_download(e), name="cancel-download"

@@ -131,6 +131,11 @@ class AppState:
     downloads: dict = {}
     download_progress: dict | None = None
     downloads_version: int = 0
+    # Download quality choice (the same list the play dialog shows — a
+    # silent sources[0] would download the wrong rendition).
+    download_choice_open: bool = False
+    download_choices: list | None = None
+    pending_download: dict | None = None
 
     # Favorites (whole anime, keyed by anime_session)
     follows: dict = None

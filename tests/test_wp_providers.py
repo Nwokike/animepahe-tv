@@ -150,12 +150,42 @@ def test_animeout_search_maps_titles_years_and_ranking():
 
 
 def test_animeout_episode_links_parse_numbers_and_order():
-    from services.providers.animeout import _parse_episode_links
+    from services.providers.animeout import _episode_rows, _parse_episode_pairs
 
-    results = _parse_episode_links(ANIMEOUT_CONTENT, 1033730)
+    pairs = _parse_episode_pairs(ANIMEOUT_CONTENT)
+    assert [number for number, _ in pairs] == [1, 2, 3]
+    results = _episode_rows(pairs, 1033730)
     assert [e.episode for e in results] == [1, 2, 3]
     assert results[0].title == "Episode 1"
     assert results[0].session.startswith("http://nimbus.animeout.com/")
+
+
+def test_animeout_keeps_every_quality_of_one_episode():
+    """A post serving both 1080p and 720p for the same episode must yield
+    ONE row and TWO links — the old dedupe by episode number silently
+    dropped the second quality, so the promised 1080p/720p choice could
+    never appear."""
+    from services.providers.animeout import (
+        _episode_rows,
+        _parse_episode_pairs,
+        _variant_map,
+    )
+
+    html = """
+    <a href="http://nimbus.animeout.com/s/[AnimeOut] Show S2 - 04 1080pp [AB12CD34][1080pp][SubsPlease][x265][RapidBot].mkv">04</a>
+    <a href="http://nimbus.animeout.com/s/[AnimeOut] Show S2 - 04 720p [AB12CD35][720p][SubsPlease][x265][RapidBot].mkv">04</a>
+    <a href="http://nimbus.animeout.com/s/[AnimeOut] Show S2 - 05 1080pp [AB12CD36][1080pp][SubsPlease][x265][RapidBot].mkv">05</a>
+    """
+    pairs = _parse_episode_pairs(html)
+    rows = _episode_rows(pairs, 7)
+    assert [e.episode for e in rows] == [4, 5]  # one row per episode
+    # the row's session is the BEST quality
+    assert "1080pp" in rows[0].session
+    variants = _variant_map(pairs)
+    assert len(variants[4]) == 2
+    assert len(variants[5]) == 1
+    # best-first inside the variant list
+    assert "1080pp" in variants[4][0]
 
 
 def test_animeout_filename_parses_quality_audio_fansub():
@@ -281,3 +311,51 @@ def test_kusonime_block_quality_and_evidence_ranges():
 
 
 
+
+
+def test_animeout_sources_serves_every_quality_of_the_episode():
+    """One tap on episode 4 offers both 1080p and 720p — the quality dialog
+    finally has a real choice to make. The fake chain is routed per release
+    hash so each variant resolves to its own landing page."""
+    from services.providers.animeout import AnimeOutProvider
+
+    def _landing(tag: str) -> str:
+        return f'<a href="https://ddl.animeout.com/public.php?url=nimbus/{tag}">Download</a>'
+
+    def _public(tag: str, quality: str) -> str:
+        return (
+            '<script>var url = "https://cdn.example/[AnimeOut] Show - 04 %s [%s][%s]'
+            '[SubsProvide][x265][RapidBot].mkv";</script>' % (quality, tag, quality)
+        )
+
+    content = """
+    <a href="http://nimbus.animeout.com/s/[AnimeOut] Show - 04 1080pp [AB12CD34][1080pp][SubsProvide][x265][RapidBot].mkv">04</a>
+    <a href="http://nimbus.animeout.com/s/[AnimeOut] Show - 04 720p [AB12CD35][720p][SubsProvide][x265][RapidBot].mkv">04</a>
+    """
+    client = FakeClient(
+        {
+            "/posts/99": FakeResponse(
+                200, json_data={"id": 99, "content": {"rendered": content}}
+            ),
+            # the specific routes must precede the generic ones
+            "public.php?url=nimbus/AB12CD34": FakeResponse(
+                200, text=_public("AB12CD34", "1080pp")
+            ),
+            "public.php?url=nimbus/AB12CD35": FakeResponse(
+                200, text=_public("AB12CD35", "720p")
+            ),
+            "AB12CD34": FakeResponse(200, text=_landing("AB12CD34")),
+            "AB12CD35": FakeResponse(200, text=_landing("AB12CD35")),
+            "public.php": FakeResponse(200, text=ANIMEOUT_PUBLIC_PAGE),
+            "nimbus": FakeResponse(200, text=ANIMEOUT_LANDING),
+        }
+    )
+    provider = AnimeOutProvider(client=client)
+    sources = _run(
+        provider.sources(
+            "animeout:99",
+            "http://nimbus.animeout.com/s/[AnimeOut] Show - 04 1080pp [AB12CD34][1080pp][SubsProvide][x265][RapidBot].mkv",
+        )
+    )
+    assert sorted(s.resolution for s in sources) == [720, 1080]
+    assert all(s.fansub == "SubsProvide" for s in sources)

@@ -309,6 +309,10 @@ def test_animepahe_sources_via_links_parses_renditions():
     assert all(s.audio == "jpn" for s in sources)
     assert sources[2].url == "https://kwik.si/e/abc1080"
     assert sources[1].size == "176.2MB"
+    # hd marks the HD renditions in the fansub label; the 360 is unmarked.
+    assert sources[0].fansub == "AnimePahe"
+    assert sources[1].fansub == "AnimePahe HD"
+    assert sources[2].fansub == "AnimePahe HD"
 
 
 def test_animepahe_links_failure_falls_back_to_scrape():

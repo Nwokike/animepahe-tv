@@ -103,25 +103,41 @@ def AppShell() -> ft.Control:
 
     # Dialog portal (Sherlock pattern): one dialog whose identity survives
     # re-renders; screens open sheets through the controller instead of
-    # calling page.show_dialog ad hoc.
+    # calling page.show_dialog ad hoc. THREE owners share it — the play
+    # quality dialog, the download quality dialog, and an imperative
+    # sheet (the search-confirm) — so the portal tracks WHO owns it.
+    # Clearing on a flag alone is wrong: it would dismiss whichever
+    # dialog happened to be open as soon as another flag flipped.
     active_dialog, set_active_dialog = ft.use_state(None)
+    portal_owner, set_portal_owner = ft.use_state(None)
+    sheet, set_sheet = ft.use_state(None)
     # The quality dialog also rebuilds when its resolving flag flips, so the
     # spinner/disabled state lands without remounting the whole shell.
     dialog_resolving, set_dialog_resolving = ft.use_state(False)
-    if state.quality_dialog_open and (
-        active_dialog is None or dialog_resolving != state.quality_resolving
-    ):
-        set_active_dialog(_build_quality_dialog(state, controller))
-        set_dialog_resolving(state.quality_resolving)
-    if not state.quality_dialog_open and active_dialog is not None:
-        set_active_dialog(None)
-        set_dialog_resolving(False)
+    if state.quality_dialog_open:
+        if portal_owner != "quality" or dialog_resolving != state.quality_resolving:
+            set_portal_owner("quality")
+            set_dialog_resolving(state.quality_resolving)
+            set_active_dialog(_build_quality_dialog(state, controller))
+    elif state.download_choice_open:
+        if portal_owner != "download":
+            set_portal_owner("download")
+            set_active_dialog(_build_download_quality_dialog(state, controller))
+    elif sheet is not None:
+        if portal_owner != "sheet":
+            set_portal_owner("sheet")
+            set_active_dialog(sheet)
+    else:
+        if portal_owner is not None or active_dialog is not None:
+            set_portal_owner(None)
+            set_active_dialog(None)
+            set_dialog_resolving(False)
     try:
         ft.use_dialog(active_dialog)
     except RuntimeError:
         pass
-    controller.open_sheet = lambda d: set_active_dialog(d)
-    controller.close_dialog = lambda: set_active_dialog(None)
+    controller.open_sheet = lambda d: set_sheet(d)
+    controller.close_dialog = lambda: set_sheet(None)
 
     # Publish what global Back should do (the controller's FocusManager
     # reads this on every keypress; the closures above are the actions).
@@ -544,6 +560,64 @@ def _placeholder(title: str, message: str) -> ft.Control:
         ),
         alignment=ft.Alignment.CENTER,
         expand=True,
+    )
+
+
+def _build_download_quality_dialog(state, controller) -> ft.Control:
+    """Which rendition to save offline — the same list the play dialog
+    shows, because a silent sources[0] downloads whatever the provider
+    listed first (a 360p when a 1080p exists). The best is filled in as
+    the recommendation."""
+    choices = state.download_choices or []
+    pending = state.pending_download or {}
+    buttons = []
+    for i, choice in enumerate(choices):
+        is_first = i == 0
+        buttons.append(
+            (
+                ft.FilledButton(
+                    content=choice["label"],
+                    icon=ft.Icons.RECOMMEND_ROUNDED,
+                    style=ft.ButtonStyle(
+                        bgcolor=AppColors.PRIMARY,
+                        color=ft.Colors.WHITE,
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                    ),
+                    on_click=lambda e, i=i: controller.choose_download_quality(i),
+                )
+                if is_first
+                else ft.OutlinedButton(
+                    content=choice["label"],
+                    on_click=lambda e, i=i: controller.choose_download_quality(i),
+                )
+            )
+        )
+    label = f"{pending.get('title', '')} — Episode {pending.get('episode_num', '?')}"
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text(
+            f"Download quality — {label}".strip(" —"),
+            weight=ft.FontWeight.W_600,
+        ),
+        content=ft.Column(
+            controls=[
+                ft.Text(
+                    "Saved in the format the source serves — nothing is converted.",
+                    size=12,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                *buttons,
+            ],
+            tight=True,
+            spacing=10,
+        ),
+        actions=[
+            ft.TextButton(
+                content="Cancel",
+                on_click=lambda e: controller.close_dialog(),
+            )
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
     )
 
 
