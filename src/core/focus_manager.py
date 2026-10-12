@@ -14,7 +14,11 @@ class FocusManager:
         self.page = page
         self._back_handler = None
         self._previous = getattr(page, "on_keyboard_event", None)
-        page.on_keyboard_event = self._handle_keyboard
+        # Keep the installed handler's identity: bound methods are fresh
+        # objects on every attribute access, so an `is` check against a
+        # re-access would never match.
+        self._own = self._handle_keyboard
+        page.on_keyboard_event = self._own
 
     def set_back_handler(self, handler: callable):
         self._back_handler = handler
@@ -33,7 +37,7 @@ class FocusManager:
     def restore(self) -> None:
         """Give the page back the handler that was here before (an
         identity-guarded restore — only if ours is still installed)."""
-        if getattr(self.page, "on_keyboard_event", None) is self._handle_keyboard:
+        if getattr(self.page, "on_keyboard_event", None) is self._own:
             self.page.on_keyboard_event = self._previous
 
     @staticmethod
