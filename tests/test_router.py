@@ -66,6 +66,13 @@ class FakeProvider:
     async def episodes_for_title(self, title):
         return list(self.episodes_data)
 
+    async def sources_for_title(self, title, episode):
+        self.calls.append(("sources_for_title", title, episode))
+        if self.fail_latest > 0:
+            self.fail_latest -= 1
+            raise RuntimeError(f"{self.name} down")
+        return list(self.sources_data)
+
     async def close(self):
         pass
 
@@ -290,3 +297,60 @@ def test_empty_router_is_inert_not_fatal():
         assert False, "expected RouterError"
     except RouterError as ex:
         assert "no providers" in str(ex)
+
+
+# ---------------------------------------------------------------------
+# sources_for_title_any — the playback half of failover by title
+# ---------------------------------------------------------------------
+
+def test_sources_for_title_any_skips_the_owner_and_names_the_winner():
+    owner, other = FakeProvider("owner"), FakeProvider("other")
+    r = _router(owner, other)
+    result = asyncio.run(r.sources_for_title_any("Frieren", 3, skip="owner"))
+    assert result == other.sources_data
+    assert r.last_winner == "other"
+    # the owner is never asked
+    assert not [c for c in owner.calls if c[0] == "sources_for_title"]
+    assert ("sources_for_title", "Frieren", 3) in other.calls
+
+
+def test_sources_for_title_any_stops_at_the_first_answer():
+    first, second = FakeProvider("first"), FakeProvider("second")
+    r = _router(first, second)
+    asyncio.run(r.sources_for_title_any("Frieren", 3))
+    # first answered, so second is never asked
+    assert not [c for c in second.calls if c[0] == "sources_for_title"]
+
+
+def test_sources_for_title_any_empty_when_everyone_is_empty():
+    empty = FakeProvider("empty")
+    empty.sources_data = []
+    r = _router(empty)
+    assert asyncio.run(r.sources_for_title_any("Frieren", 3)) == []
+
+
+def test_sources_for_title_any_skips_an_open_breaker_unless_forced():
+    down, up = FakeProvider("down"), FakeProvider("up")
+    r = _router(down, up)
+    # Trip 'down''s breaker: three failures opens it for 30s.
+    for _ in range(3):
+        down.fail_latest = 1
+        asyncio.run(r.latest_releases(1))
+    assert [c for c in down.calls if c[0] == "sources_for_title"] == []
+
+    # force=True: the user asking to watch overrides the tripped breaker.
+    result = asyncio.run(r.sources_for_title_any("Frieren", 3, force=True))
+    assert result == down.sources_data
+    assert ("sources_for_title", "Frieren", 3) in down.calls
+
+
+def test_sources_for_title_any_survives_a_provider_that_raises():
+    broken, good = FakeProvider("broken"), FakeProvider("good")
+    broken.sources_for_title = _raiser
+    r = _router(broken, good)
+    result = asyncio.run(r.sources_for_title_any("Frieren", 3))
+    assert result == good.sources_data
+
+
+async def _raiser(title, episode):
+    raise RuntimeError("provider exploded")

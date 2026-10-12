@@ -550,8 +550,27 @@ class AppController:
             sources = []
         if gen != self._play_gen:
             return
+        serving_provider = None
         if not sources:
-            logger.warning("no sources — external player fallback")
+            # The owner has nothing for this episode — every OTHER provider
+            # is a complete app, so ask them by title before giving up.
+            # force=True: the user asked to watch, a tripped breaker must
+            # not block playback recovery.
+            title = str((state.selected_anime or {}).get("title") or "").strip()
+            ep_num = ep.episode if ep else 0
+            if title and ep_num:
+                logger.info("no sources on the owner — asking by title: %r ep %s", title, ep_num)
+                sources = await self.router.sources_for_title_any(
+                    title, ep_num, skip=self._owner_of(anime_session), force=True
+                )
+                if sources:
+                    serving_provider = self.router.last_winner
+                    state.current_source_name = serving_provider or ""
+                    logger.info("sources served by %s", serving_provider)
+        if gen != self._play_gen:
+            return
+        if not sources:
+            logger.warning("no sources anywhere — external player fallback")
             await self._open_external_player(anime_session, episode_session)
             return
         # SUB (JPN) group first, DUB (ENG) after — each best-first.
@@ -566,7 +585,9 @@ class AppController:
         # the kwik_resolve capability (AnimePahe) need the Kwik unpack;
         # every other provider's URLs are already playable.
         self._resolve_stage(gen, "Resolving stream…")
-        m3u8 = await self._resolve_source(sources[0], anime_session)
+        m3u8 = await self._resolve_source(
+            sources[0], anime_session, provider_name=serving_provider
+        )
         if gen != self._play_gen:
             return
         if not m3u8:
@@ -634,12 +655,20 @@ class AppController:
         }
         state.episodes_version += 1
 
-    async def _resolve_source(self, source, anime_session: str) -> str | None:
-        """Source URL -> playable URL, per the owning provider's
+    async def _resolve_source(
+        self, source, anime_session: str, provider_name: str | None = None
+    ) -> str | None:
+        """Source URL -> playable URL, per the serving provider's
         capabilities. kwik_resolve providers (AnimePahe) unpack through
         Kwik; others are already playable (anikato m3u8s, kusonime
-        files). None means resolution failed."""
-        provider = self.router.get(self._owner_of(anime_session))
+        files). None means resolution failed.
+
+        `provider_name` overrides the owner-derived provider — the title
+        failover serves sources from a DIFFERENT provider than the one
+        the anime_session names, and the capability gate must follow the
+        source, not the session."""
+        name = provider_name or self._owner_of(anime_session)
+        provider = self.router.get(name)
         if provider is not None and provider.capabilities.get("kwik_resolve"):
             try:
                 return await self.kwik.resolve(source.url)

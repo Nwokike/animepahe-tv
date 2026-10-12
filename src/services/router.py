@@ -270,17 +270,8 @@ class ProviderRouter:
     async def episodes(self, session: str, page: int) -> tuple[list, bool]:
         return await self._run("episodes", session, page, owner=owner_of(session))
 
-    async def episodes_forced(self, session: str, page: int) -> tuple[list, bool]:
-        """'Try another source' — bypass OPEN breakers for this call."""
-        return await self._run("episodes", session, page, force=True, owner=owner_of(session))
-
     async def sources(self, anime_session: str, episode_session: str) -> list:
         return await self._run("sources", anime_session, episode_session, owner=owner_of(anime_session))
-
-    async def sources_forced(self, anime_session: str, episode_session: str) -> list:
-        return await self._run(
-            "sources", anime_session, episode_session, force=True, owner=owner_of(anime_session)
-        )
 
     async def episodes_for_title_any(
         self, title: str, skip: str | None = None
@@ -310,6 +301,39 @@ class ProviderRouter:
                 self.last_winner = provider.name
                 return (result, False)
         return ([], False)
+
+    async def sources_for_title_any(
+        self, title: str, episode: int, skip: str | None = None, *, force: bool = False
+    ) -> list:
+        """'Try another source' for PLAYBACK: ask every OTHER provider for
+        this title's episode sources (title in -> sources out; each is
+        self-contained, no id glue). Breaker-aware unless force — the user
+        asking to watch something overrides a tripped breaker."""
+        results: list = []
+        for provider in self._providers:
+            if provider.name == skip:
+                continue
+            breaker = self._breakers[provider.name]
+            if not force and not breaker.allow():
+                continue
+            started = self._clock()
+            try:
+                result = await provider.sources_for_title(title, episode)
+            except Exception as ex:
+                if not force:
+                    breaker.record_failure()
+                self._record_health(
+                    provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex)
+                )
+                logger.info("sources_for_title failed on %s: %s", provider.name, ex)
+                continue
+            breaker.record_success()
+            self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+            if not _is_empty(result):
+                self.last_winner = provider.name
+                results = result
+                break
+        return results
 
     # ------------------------------------------------------------------
     # Startup probe race — non-blocking, budget-capped
