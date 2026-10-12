@@ -240,6 +240,59 @@ def SettingsScreen() -> ft.Control:
 
 
     # ------------------------------------------------------------------
+    # Theme: the house 3-way (Dark / Light / System), persisted. The
+    # header toggle cycles the same order; this is the direct picker.
+    # ------------------------------------------------------------------
+    _THEME_OPTIONS = [
+        ("dark", "Dark", ft.Icons.DARK_MODE_ROUNDED),
+        ("light", "Light", ft.Icons.LIGHT_MODE_ROUNDED),
+        ("system", "System", ft.Icons.SETTINGS_SYSTEM_DAYDREAM_ROUNDED),
+    ]
+    _current_theme = state.theme_mode
+    if _current_theme == ft.ThemeMode.DARK:
+        _current_theme = "dark"
+    elif _current_theme == ft.ThemeMode.LIGHT:
+        _current_theme = "light"
+    else:
+        _current_theme = "system"
+
+    def _pick_theme(token, mode):
+        from core.tasks import spawn
+
+        controller_ref.save_theme_mode(mode)
+
+    theme_picker = ft.Row(
+        [
+            ft.OutlinedButton(
+                content=ft.Row(
+                    [ft.Icon(icon, size=16), ft.Text(label, size=13)],
+                    spacing=6,
+                    tight=True,
+                ),
+                style=ft.ButtonStyle(
+                    bgcolor=ft.Colors.with_opacity(0.15, AppColors.PRIMARY)
+                    if _current_theme == token
+                    else ft.Colors.TRANSPARENT,
+                    side={
+                        ft.ControlState.DEFAULT: ft.BorderSide(
+                            1.5,
+                            AppColors.PRIMARY
+                            if _current_theme == token
+                            else ft.Colors.with_opacity(0.3, AppColors.PRIMARY),
+                        )
+                    },
+                ),
+                on_click=lambda e, tk=token, md=md: _pick_theme(tk, md),
+            )
+            for token, label, icon in _THEME_OPTIONS
+            for md in [
+                {"dark": ft.ThemeMode.DARK, "light": ft.ThemeMode.LIGHT, "system": ft.ThemeMode.SYSTEM}[token]
+            ]
+        ],
+        spacing=8,
+    )
+
+    # ------------------------------------------------------------------
     # Content source — auto (recommended) vs pinned provider, with live
     # per-provider status. The router still fails over when a pinned
     # source is down; the pin only changes who goes first.
@@ -333,6 +386,8 @@ def SettingsScreen() -> ft.Control:
 
     return ft.Column(
         controls=[
+            _section_header("APPEARANCE"),
+            _settings_card([theme_picker]),
             *source_section,
             _section_header("PLAYBACK"),
 

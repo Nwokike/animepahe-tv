@@ -43,6 +43,42 @@ class AppColors:
             return True
 
     @staticmethod
+    def is_dark_mode(mode: ft.ThemeMode | None, platform_brightness=None) -> bool:
+        """The branch every accessor shares: SYSTEM resolves through the
+        platform brightness (dark when unknown — a TV default)."""
+        if mode == ft.ThemeMode.LIGHT:
+            return False
+        if mode == ft.ThemeMode.DARK:
+            return True
+        try:
+            return platform_brightness == ft.Brightness.DARK
+        except Exception:
+            return True
+
+    @staticmethod
+    def get_text(page: ft.Page):
+        """The on-surface text color for the page's effective mode."""
+        try:
+            mode = getattr(page, "theme_mode", None)
+            brightness = getattr(page, "platform_brightness", None)
+        except Exception:
+            mode, brightness = None, None
+        return AppColors.DARK_TEXT if AppColors.is_dark_mode(mode, brightness) else AppColors.LIGHT_TEXT
+
+    @staticmethod
+    def get_text_dim(page: ft.Page):
+        try:
+            mode = getattr(page, "theme_mode", None)
+            brightness = getattr(page, "platform_brightness", None)
+        except Exception:
+            mode, brightness = None, None
+        return (
+            AppColors.DARK_TEXT_DIM
+            if AppColors.is_dark_mode(mode, brightness)
+            else AppColors.LIGHT_TEXT_DIM
+        )
+
+    @staticmethod
     def get_glass_bg(page: ft.Page):
         return ft.Colors.with_opacity(
             0.05, ft.Colors.WHITE if AppColors._is_dark(page) else ft.Colors.BLACK
@@ -119,6 +155,15 @@ class AppTheme:
             ),
             focus_color=AppColors.PRIMARY,
             visual_density=ft.VisualDensity.COMFORTABLE,
+            dialog_theme=ft.DialogTheme(
+                bgcolor=AppColors.DARK_SURFACE,
+                title_text_style=ft.TextStyle(color=AppColors.DARK_TEXT),
+                content_text_style=ft.TextStyle(color=AppColors.DARK_TEXT_DIM),
+            ),
+            card_theme=ft.CardTheme(
+                color=AppColors.DARK_SURFACE,
+                shadow_color=ft.Colors.TRANSPARENT,
+            ),
         )
 
     @staticmethod
@@ -135,4 +180,13 @@ class AppTheme:
             ),
             focus_color=AppColors.PRIMARY,
             visual_density=ft.VisualDensity.COMFORTABLE,
+            dialog_theme=ft.DialogTheme(
+                bgcolor=AppColors.LIGHT_SURFACE,
+                title_text_style=ft.TextStyle(color=AppColors.LIGHT_TEXT),
+                content_text_style=ft.TextStyle(color=AppColors.LIGHT_TEXT_DIM),
+            ),
+            card_theme=ft.CardTheme(
+                color=AppColors.LIGHT_SURFACE,
+                shadow_color=ft.Colors.TRANSPARENT,
+            ),
         )

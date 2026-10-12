@@ -80,6 +80,7 @@ class AppController:
         self.page.theme.font_family = "Outfit"
         self.page.dark_theme.font_family = "Outfit"
         self.page.theme_mode = ft.ThemeMode.SYSTEM
+        state.theme_mode = ft.ThemeMode.SYSTEM
         self.cache = Cache()
         # The process-wide singleton: the ddos solver and the player use
         # get_store(), and a second instance here would clobber their
@@ -177,8 +178,10 @@ class AppController:
             return
         if saved in modes:
             self.page.theme_mode = modes[saved]
+            state.theme_mode = modes[saved]
 
     async def save_theme_mode(self, mode: ft.ThemeMode):
+        state.theme_mode = mode
         try:
             await self.store.save_theme_mode(self._theme_name(mode))
         except Exception as ex:

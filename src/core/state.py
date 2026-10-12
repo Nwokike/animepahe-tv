@@ -83,6 +83,10 @@ class AppState:
     cf_blocked: bool = False
     is_online: bool = True
     connectivity_version: int = 0
+    # The observable theme mode: the header toggle and the Settings
+    # picker both drive it, and every screen reads it instead of asking
+    # the page (which is not observable).
+    theme_mode: object = None
     update_available: bool = False
     update_data: dict | None = None
     # Version counters: bumped by the controller when a collection is
