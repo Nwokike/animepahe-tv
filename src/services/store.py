@@ -99,6 +99,45 @@ class JsonStore:
             await self._flush()
 
     # ------------------------------------------------------------------
+    # Generic key/value settings (presentation defaults the player reads
+    # at construction time: subtitle size, aspect fit)
+    # ------------------------------------------------------------------
+
+    async def save_setting(self, key: str, value) -> None:
+        async with self._lock:
+            await self._ensure_loaded()
+            settings = self._data.get("settings")
+            if not isinstance(settings, dict):
+                settings = {}
+                self._data["settings"] = settings
+            settings[key] = value
+            self._dirty = True
+            await self._flush()
+
+    def get_setting(self, key: str, default=None):
+        """Sync read — the player builds its video control (and reads
+        these) inside a plain constructor, before any coroutine runs.
+
+        Startup has already loaded the document by then; the cold read
+        below only covers a first-run open and cannot interleave with a
+        write, because a sync call never yields to the loop.
+        """
+        if not self._loaded:
+            try:
+                with open(self.path, encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    self._data = raw
+                self._loaded = True
+            except (OSError, ValueError):
+                self._data = {}
+        settings = self._data.get("settings")
+        if not isinstance(settings, dict):
+            return default
+        value = settings.get(key)
+        return default if value is None else value
+
+    # ------------------------------------------------------------------
     # Search history (most-recent-first, deduped, capped)
     # ------------------------------------------------------------------
 

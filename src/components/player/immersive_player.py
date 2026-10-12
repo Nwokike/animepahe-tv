@@ -62,6 +62,16 @@ def _mpv_props(referer: str) -> dict:
 
 SPEEDS = (0.25, 0.5, 1.0, 1.25, 1.5, 2.0)
 
+# Aspect-fit choices (name, label) — persisted by name, so the map below
+# is the only place a name meets a BoxFit.
+FIT_OPTIONS = (("contain", "Contain"), ("cover", "Cover"), ("fill", "Fill"))
+
+_BOX_FITS = {
+    "contain": ft.BoxFit.CONTAIN,
+    "cover": ft.BoxFit.COVER,
+    "fill": ft.BoxFit.FILL,
+}
+
 
 def _stream_variants(m3u8_text: str) -> list[dict]:
     """Parse an HLS master playlist into variants.
@@ -227,7 +237,7 @@ class ImmersivePlayer(ft.Stack):
             resume_upon_entering_foreground_mode=False,
             playlist_mode=fv.PlaylistMode.NONE,
             fill_color=ft.Colors.BLACK,
-            fit=ft.BoxFit.CONTAIN,
+            fit=self._box_fit(),
             title=self.title or "AnimePahe",
             controls=self._build_controls(),
             subtitle_configuration=fv.VideoSubtitleConfiguration(
@@ -307,18 +317,6 @@ class ImmersivePlayer(ft.Stack):
         self.audio_chips = []
         self.speed_texts = []
 
-        def _cycle_speed(e=None):
-            self._speed_index = (self._speed_index + 1) % len(SPEEDS)
-            rate = SPEEDS[self._speed_index]
-            self._speed_rate = rate
-            for text in self.speed_texts:
-                text.value = f"{rate}x"
-            try:
-                self.video.playback_rate = rate
-                self.video.update()
-            except Exception:
-                pass
-
         def _open_settings(e=None):
             spawn(self.open_stream_settings(), name="player-settings")
 
@@ -367,7 +365,7 @@ class ImmersivePlayer(ft.Stack):
                     border_radius=6,
                     ink=True,
                     tooltip="Playback speed",
-                    on_click=_cycle_speed,
+                    on_click=self._cycle_speed,
                 )
             )
             items.append(
@@ -453,6 +451,16 @@ class ImmersivePlayer(ft.Stack):
     def did_mount(self):
         from core.tasks import spawn
 
+        # Mount, not first-ready: the registry must be live before any
+        # confirmation can fire (speed cycles before the first frame is
+        # not decoded), and unregistering at mount's mirror (will_unmount)
+        # covers the overlay-removal race that never reaches handle_close.
+        try:
+            from core.notify import register_fullscreen_toast
+
+            register_fullscreen_toast(self._toast_show)
+        except Exception:
+            pass
         self._read_resume_position()
         spawn(self._start_playback(), name="player-start")
 
@@ -694,6 +702,22 @@ class ImmersivePlayer(ft.Stack):
             except Exception:
                 pass
 
+    def _cycle_speed(self, e=None):
+        """One tap per preset, wrapping. The confirmation rides the toast
+        chip — the speed text only covers the branch whose chip was tapped
+        (the control tree is built twice, touch + desktop/TV)."""
+        self._speed_index = (self._speed_index + 1) % len(SPEEDS)
+        rate = SPEEDS[self._speed_index]
+        self._speed_rate = rate
+        for text in self.speed_texts:
+            text.value = f"{rate}x"
+        try:
+            self.video.playback_rate = rate
+            self.video.update()
+        except Exception:
+            pass
+        self._toast_show(f"Speed {rate}x")
+
     def _refresh_option_labels(self) -> None:
         """Sync the quality/audio chip text with the current pins, and
         reveal the chips now that the probe proved there are options."""
@@ -840,6 +864,7 @@ class ImmersivePlayer(ft.Stack):
                 await self.video.seek(ft.Duration(seconds=seconds))
                 self._last_position = seconds
                 self.status_text.value = f"Resumed from {_fmt(seconds)}"
+                self._toast_show(f"Resumed from {_fmt(seconds)}")
                 self.update()
             except Exception as ex:
                 logger.warning("deferred seek failed: %s", ex)
@@ -850,6 +875,14 @@ class ImmersivePlayer(ft.Stack):
         """Overlay-removal safety net: the shell can drop the player
         without handle_close (remount races) — the position save must
         not depend on the close path landing."""
+        # The toast registry goes with the chip; a survivor chip pointing
+        # at unmounted controls is the leak this closes.
+        try:
+            from core.notify import unregister_fullscreen_toast
+
+            unregister_fullscreen_toast()
+        except Exception:
+            pass
         if self._position_saved or self._is_closing:
             return
         try:
@@ -1016,8 +1049,20 @@ class ImmersivePlayer(ft.Stack):
                     spacing=6,
                 )
             )
-        if size_section:
-            sections.extend(size_section)
+        size_section.append(ft.Text("Aspect fit", size=13, weight=ft.FontWeight.W_700))
+        size_section.append(
+            ft.Row(
+                [
+                    ft.OutlinedButton(
+                        content=label,
+                        on_click=lambda e, n=name: self._set_fit(n),
+                    )
+                    for name, label in FIT_OPTIONS
+                ],
+                spacing=6,
+            )
+        )
+        sections.extend(size_section)
 
         show_app_dialog(
             page,
@@ -1071,12 +1116,6 @@ class ImmersivePlayer(ft.Stack):
 
     def _on_first_ready(self, e=None):
         logger.info("player ready")
-        try:
-            from core.notify import register_fullscreen_toast
-
-            register_fullscreen_toast(self._toast_show)
-        except Exception:
-            pass
         self._hide_overlay()
         self._check_and_trigger_seek()
         self._apply_default_subtitle()
@@ -1152,6 +1191,31 @@ class ImmersivePlayer(ft.Stack):
 
         spawn(_save(), name="save-subtitle-size")
 
+    def _box_fit(self) -> ft.BoxFit:
+        if self.store is None:
+            return ft.BoxFit.CONTAIN
+        try:
+            name = str(self.store.get_setting("video_fit", "contain") or "contain")
+        except Exception:
+            name = "contain"
+        return _BOX_FITS.get(name, ft.BoxFit.CONTAIN)
+
+    def _set_fit(self, name: str) -> None:
+        if self.store is None or name not in _BOX_FITS:
+            return
+
+        async def _save():
+            await self.store.save_setting("video_fit", name)
+            try:
+                self.video.fit = _BOX_FITS[name]
+                self.video.update()
+            except Exception:
+                pass
+
+        from core.tasks import spawn
+
+        spawn(_save(), name="save-video-fit")
+
     # ------------------------------------------------------------------
     # Fullscreen toast (the snackbar's fullscreen-visible twin)
     # ------------------------------------------------------------------
@@ -1216,12 +1280,18 @@ class ImmersivePlayer(ft.Stack):
             return ep_outro
         return None
 
+    def _is_intro_window(self, window) -> bool:
+        """Intro vs outro for a window — shared by the chip label and the
+        skip confirmation so the two can never disagree."""
+        if not window:
+            return False
+        return window == self._window(self.skip.get("intro")) or window == self._window(
+            self.skip.get("episode_intro")
+        )
+
     def _update_skip_chip(self, seconds: float) -> None:
         window = self._active_window(seconds)
-        is_intro = window is not None and (
-            window == self._window(self.skip.get("intro"))
-            or window == self._window(self.skip.get("episode_intro"))
-        )
+        is_intro = self._is_intro_window(window)
         visible = window is not None
         label = "Skip Intro" if is_intro else "Skip Outro"
         changed = visible != self.skip_chip.visible or (
@@ -1246,6 +1316,9 @@ class ImmersivePlayer(ft.Stack):
             await self.video.seek(end + 1)
         except Exception as ex:
             logger.warning("skip seek failed: %s", ex)
+            return
+        what = "intro" if self._is_intro_window(window) else "outro"
+        self._toast_show(f"Skipped {what}")
 
     def _on_error(self, e):
         err_msg = str(getattr(e, "data", None) or e)
