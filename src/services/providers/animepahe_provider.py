@@ -26,7 +26,7 @@ synopsis block; (5) kwik.si Referer in the logs.
 import logging
 
 from core.state import Anime, Episode, LatestRelease, Source
-from services.animepahe import AnimePaheScraper
+from services.animepahe import BASE as ANIMEPAHE_BASE, AnimePaheScraper
 
 logger = logging.getLogger("animepahe.provider.animepahe")
 
@@ -138,7 +138,7 @@ class AnimePaheProvider:
     async def anime(self, session: str) -> Anime | None:
         """The /anime/{session} details page — synopsis, genres, studios,
         aired range, external ids (the detail screen's Phase-3 note)."""
-        resp = await self.scraper.ddos.get(f"{self.scraper.BASE}/anime/{session}")
+        resp = await self.scraper.ddos.get(f"{ANIMEPAHE_BASE}/anime/{session}")
         if resp is None or resp.status_code != 200:
             return None
         return _parse_details(resp.text, session)

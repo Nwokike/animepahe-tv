@@ -385,7 +385,7 @@ class JsonStore:
                 # follows and the old name is retired on disk.
                 self._data["follows"] = legacy
                 self._data.pop("favorites", None)
-                self._touch()
+                self._dirty = True
                 await self._flush()
                 return legacy
             return {}

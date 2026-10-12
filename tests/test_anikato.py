@@ -409,8 +409,12 @@ def test_animepahe_anime_uses_ddos_get():
 
     from services.providers.animepahe_provider import AnimePaheProvider
 
+    seen: list[str] = []
+
     class FakeDdos:
         async def get(self, url):
+            seen.append(url)
+
             class R:
                 status_code = 200
                 text = DETAILS_FIXTURE
@@ -418,9 +422,12 @@ def test_animepahe_anime_uses_ddos_get():
             return R()
 
     DETAILS_FIXTURE = "<div class='title-wrapper'><h1><span>T</span></h1></div>"
-    provider = AnimePaheProvider(scraper=type("S", (), {"ddos": FakeDdos(), "BASE": "https://animepahe.com"})())
+    # The real scraper exposes ddos but NOT a BASE attribute (it is a
+    # module constant) — a fake that invents one hides that mismatch.
+    provider = AnimePaheProvider(scraper=type("S", (), {"ddos": FakeDdos()})())
     anime = asyncio.run(provider.anime("some-session"))
     assert anime is not None and anime.title == "T"
+    assert seen == ["https://animepahe.com/anime/some-session"]
 
 
 def test_kwik_referer_follows_the_issued_host():

@@ -186,6 +186,29 @@ async def test_follows_never_store_base64_posters(store):
 
 
 @pytest.mark.asyncio
+async def test_legacy_favorites_section_migrates_to_follows(store):
+    """A 1.0.4 file carries a `favorites` section and no `follows`: the
+    upgrade path must rename it on read, persist that, and never raise.
+    The branch once called a helper that does not exist, so every user
+    arriving with a 1.0.4 library crashed here."""
+    import json
+
+    legacy = {"s1": {"title": "Naruto", "poster": "http://p/1.jpg"}}
+    with open(store.path, "w", encoding="utf-8") as f:
+        json.dump({"favorites": legacy}, f)
+
+    assert await store.get_follows() == legacy
+
+    on_disk = json.load(open(store.path, encoding="utf-8"))
+    assert on_disk["follows"] == legacy
+    assert "favorites" not in on_disk  # the old name is retired, not kept
+
+    # A second instance reads the migrated section without migrating again.
+    reloaded = JsonStore(filename=os.path.basename(store.path))
+    assert await reloaded.get_follows() == legacy
+
+
+@pytest.mark.asyncio
 async def test_external_player_round_trip(store):
     assert await store.get_external_player() is False
     await store.save_external_player(True)
