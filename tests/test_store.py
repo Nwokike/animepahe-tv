@@ -214,7 +214,9 @@ def teardown_module():
 async def test_position_resume_rules(store):
     await store.save_position("ep1", 120.0, 1440.0)
     entry = await store.get_position("ep1")
-    assert entry == {"position": 120.0, "duration": 1440.0}
+    # the row travels whole — the rate and any later field ride with it
+    assert entry["position"] == 120.0 and entry["duration"] == 1440.0
+    assert entry["timestamp"] > 0
 
     # Under the minimum: not resumable.
     await store.save_position("ep2", 1.5, 1440.0)
