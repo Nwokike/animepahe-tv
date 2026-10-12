@@ -337,11 +337,11 @@ def AnimeDetailScreen() -> ft.Control:
     )
 
     # Favorites are per-ANIME, never per episode: one button in the header.
-    _ = state.favorites_version
-    favorited = anime_session in (state.favorites or {})
+    _ = state.follows_version
+    following = anime_session in (state.follows or {})
 
-    def _toggle_favorite():
-        controller.toggle_favorite(
+    def _toggle_follow():
+        controller.toggle_follow(
             {
                 "anime_session": anime_session,
                 "title": title,
@@ -353,21 +353,21 @@ def AnimeDetailScreen() -> ft.Control:
             }
         )
 
-    favorite_button = attach_focus_zoom(
+    follow_button = attach_focus_zoom(
         ft.FilledButton(
-            content=ft.Text("Favorited" if favorited else "Favorite"),
+            content=ft.Text("Following" if following else "Follow"),
             icon=ft.Icons.FAVORITE_ROUNDED
-            if favorited
+            if following
             else ft.Icons.FAVORITE_BORDER_ROUNDED,
             style=ft.ButtonStyle(
                 bgcolor=AppColors.PRIMARY
-                if favorited
+                if following
                 else ft.Colors.TRANSPARENT,
-                color=ft.Colors.WHITE if favorited else ft.Colors.ON_SURFACE,
+                color=ft.Colors.WHITE if following else ft.Colors.ON_SURFACE,
                 shape=ft.RoundedRectangleBorder(radius=10),
-                side=ft.BorderSide(1 if not favorited else 0, AppColors.PRIMARY),
+                side=ft.BorderSide(1 if not following else 0, AppColors.PRIMARY),
             ),
-            on_click=lambda e: _toggle_favorite(),
+            on_click=lambda e: _toggle_follow(),
         )
     )
 
@@ -416,7 +416,7 @@ def AnimeDetailScreen() -> ft.Control:
                                         ft.Container(height=8),
                                         _metadata_row(anime),
                                         ft.Container(height=12),
-                                        favorite_button,
+                                        follow_button,
                                     ],
                                     expand=True,
                                     alignment=ft.MainAxisAlignment.CENTER,

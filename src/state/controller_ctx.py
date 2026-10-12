@@ -40,7 +40,7 @@ class ControllerMethods:
     cancel_resolve: object = lambda: None
 
     # Favorites (whole anime)
-    toggle_favorite: object = lambda row: None
+    toggle_follow: object = lambda row: None
 
 
 ControllerMethodsCtx = ft.create_context(ControllerMethods())

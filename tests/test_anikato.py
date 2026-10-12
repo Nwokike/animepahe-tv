@@ -492,3 +492,41 @@ def test_position_row_carries_and_restores_rate():
 
     os.close(fd)
     asyncio.run(run(path))
+
+
+def test_adapter_no_op_without_extension():
+    """Every call site degrades: the import may succeed while the calls
+    no-op off-platform — nothing may raise."""
+    import asyncio
+
+    from core import notifications
+
+    assert notifications.anime_session_from(notifications.payload_for("s")) == "s"
+    assert asyncio.run(notifications.ensure_channel()) in (True, False)
+    assert asyncio.run(
+        notifications.show_new_episode(anime_session="s", title="T", episode=3)
+    ) in (True, False)
+
+
+def test_follow_progress_round_trip():
+    import asyncio
+
+    from services.store import JsonStore
+
+    import tempfile
+
+    async def run(path):
+        store = JsonStore(filename=path)
+        await store.add_follow({"anime_session": "s", "title": "T", "poster": ""})
+        assert await store.get_follow_progress("s") == 0  # legacy row reads 0
+        await store.set_follow_progress("s", 42)
+        assert await store.get_follow_progress("s") == 42
+        await store.set_follow_progress("unknown", 7)  # not a follow: ignored
+        row = (await store.get_follows())["s"]
+        assert row["title"] == "T" and row["last_seen_episode"] == 42
+
+    fd, path = tempfile.mkstemp()
+    import os
+
+    os.close(fd)
+    asyncio.run(run(path))

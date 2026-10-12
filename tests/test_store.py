@@ -162,26 +162,26 @@ async def test_remove_search_drops_one_row(store):
 
 
 @pytest.mark.asyncio
-async def test_favorites_round_trip_and_cap(store):
+async def test_follows_round_trip_and_cap(store):
     for i in range(230):
-        await store.add_favorite({"anime_session": f"s{i}", "title": f"T{i}"})
-    favorites = await store.get_favorites()
+        await store.add_follow({"anime_session": f"s{i}", "title": f"T{i}"})
+    favorites = await store.get_follows()
     assert len(favorites) == 200
     assert "s229" in favorites  # newest kept
     assert "s0" not in favorites  # oldest pruned
-    assert await store.is_favorite("s229") is True
+    assert await store.is_following("s229") is True
     assert (
-        await store.toggle_favorite({"anime_session": "s229", "title": "T"}) is False
+        await store.toggle_follow({"anime_session": "s229", "title": "T"}) is False
     )
-    assert await store.is_favorite("s229") is False
+    assert await store.is_following("s229") is False
 
 
 @pytest.mark.asyncio
-async def test_favorites_never_store_base64_posters(store):
-    await store.add_favorite(
+async def test_follows_never_store_base64_posters(store):
+    await store.add_follow(
         {"anime_session": "s1", "title": "T", "poster": "data:image/webp;base64,AAAA"}
     )
-    row = (await store.get_favorites())["s1"]
+    row = (await store.get_follows())["s1"]
     assert row["poster"] == ""
 
 

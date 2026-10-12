@@ -323,22 +323,54 @@ class JsonStore:
     # is never a favorite). Ordered newest-first at read time.
     # ------------------------------------------------------------------
 
-    FAVORITES_LIMIT = 200
+    FOLLOWS_LIMIT = 200
 
-    async def get_favorites(self) -> dict:
-        entries = await self.section("favorites", {})
+    async def get_follows(self) -> dict:
+        """Follows (was FAVORITES — the 1.0.4 file's section is migrated
+        on read so nobody's library is lost)."""
+        await self._ensure_loaded()
+        entries = self._data.get("follows")
+        if entries is None:
+            legacy = self._data.get("favorites")
+            if isinstance(legacy, dict):
+                # One-time migration: the 1.0.4 file's section becomes
+                # follows and the old name is retired on disk.
+                self._data["follows"] = legacy
+                self._data.pop("favorites", None)
+                self._touch()
+                await self._flush()
+                return legacy
+            return {}
         return entries if isinstance(entries, dict) else {}
 
-    async def is_favorite(self, anime_session: str) -> bool:
+    async def is_following(self, anime_session: str) -> bool:
         if not anime_session:
             return False
-        return anime_session in await self.get_favorites()
+        return anime_session in await self.get_follows()
 
-    async def add_favorite(self, row: dict) -> None:
+    async def get_follow_progress(self, anime_session: str) -> int:
+        """The highest episode number already notified for a follow."""
+        row = (await self.get_follows()).get(anime_session) or {}
+        try:
+            return int(float(row.get("last_seen_episode") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    async def set_follow_progress(self, anime_session: str, episode: int) -> None:
+        """Record the newest notified episode so a re-check doesn't
+        re-alert (additive — rows without it read as 0)."""
+        follows = await self.get_follows()
+        row = follows.get(anime_session)
+        if row is None:
+            return
+        row["last_seen_episode"] = int(episode)
+        await self.put_section("follows", follows)
+
+    async def add_follow(self, row: dict) -> None:
         anime_session = row.get("anime_session")
         if not anime_session:
             return
-        entries = await self.get_favorites()
+        follows = await self.get_follows()
         # Never persist a base64 data: URI — one poster bloats the store.
         poster = row.get("poster") or ""
         if poster.startswith("data:"):
@@ -347,30 +379,28 @@ class JsonStore:
         entry["poster"] = poster
         entry["anime_session"] = anime_session
         entry["added_at"] = time.time()
-        entries[anime_session] = entry
-        if len(entries) > self.FAVORITES_LIMIT:
-            oldest = sorted(
-                entries.items(), key=lambda kv: kv[1].get("added_at", 0)
-            )
-            for session, _ in oldest[: len(entries) - self.FAVORITES_LIMIT]:
-                entries.pop(session, None)
-        await self.put_section("favorites", entries)
+        follows[anime_session] = entry
+        if len(follows) > self.FOLLOWS_LIMIT:
+            oldest = sorted(follows.items(), key=lambda kv: kv[1].get("added_at", 0))
+            for session, _ in oldest[: len(follows) - self.FOLLOWS_LIMIT]:
+                follows.pop(session, None)
+        await self.put_section("follows", follows)
 
-    async def remove_favorite(self, anime_session: str) -> None:
-        entries = await self.get_favorites()
-        if anime_session in entries:
-            entries.pop(anime_session, None)
-            await self.put_section("favorites", entries)
+    async def remove_follow(self, anime_session: str) -> None:
+        follows = await self.get_follows()
+        if anime_session in follows:
+            follows.pop(anime_session, None)
+            await self.put_section("follows", follows)
 
-    async def toggle_favorite(self, row: dict) -> bool:
-        """Returns the NEW favorite state."""
+    async def toggle_follow(self, row: dict) -> bool:
+        """Returns the NEW follow state."""
         anime_session = row.get("anime_session")
         if not anime_session:
             return False
-        if await self.is_favorite(anime_session):
-            await self.remove_favorite(anime_session)
+        if await self.is_following(anime_session):
+            await self.remove_follow(anime_session)
             return False
-        await self.add_favorite(row)
+        await self.add_follow(row)
         return True
 
     # ------------------------------------------------------------------

@@ -399,17 +399,17 @@ def SearchScreen() -> ft.Control:
             icon=ft.Icons.SEARCH_ROUNDED,
         )
 
-    # Favorites shelf (whole anime) — the Browse tab doubles as Discover,
+    # Following shelf (whole anime) — the Browse tab doubles as Discover,
     # so a curated library is one tab away. Hidden while a query is active.
-    _ = state.favorites_version
-    favorites_shelf = ft.Container(width=0)
+    _ = state.follows_version
+    follows_shelf = ft.Container(width=0)
     if not state.search_results and not state.search_query:
-        favorites = sorted(
-            (state.favorites or {}).values(),
+        follows = sorted(
+            (state.follows or {}).values(),
             key=lambda row: row.get("added_at", 0),
             reverse=True,
         )
-        if favorites:
+        if follows:
             cards = [
                 attach_focus_zoom(
                     ft.FilledButton(
@@ -460,9 +460,9 @@ def SearchScreen() -> ft.Control:
                         ),
                     )
                 )
-                for row in favorites[:20]
+                for row in follows[:20]
             ]
-            favorites_shelf = ft.Column(
+            follows_shelf = ft.Column(
                 [
                     ft.Text(
                         "Favorites",
@@ -482,7 +482,7 @@ def SearchScreen() -> ft.Control:
         content=ft.Column(
             [
                 header,
-                favorites_shelf,
+                follows_shelf,
                 ft.Row([ft.Container(expand=True), clear_btn], spacing=8),
                 suggestion_rows,
                 ft.Container(content=results, expand=True),

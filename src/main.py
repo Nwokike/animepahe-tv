@@ -156,7 +156,7 @@ class AppController:
         state.search_history = await self.store.get_search_history()
         state.continue_watching = await self.store.get_continue_watching()
         state.downloads = await self.store.get_downloads()
-        state.favorites = await self.store.get_favorites()
+        state.follows = await self.store.get_follows()
 
         # Restore the theme choice before the first render so the shell
         # never flashes the wrong mode.
@@ -1014,6 +1014,99 @@ class AppController:
         else:
             self._show_error_snackbar("No other source has this title.")
 
+    async def check_new_episodes(self, *, force: bool = False) -> int:
+        """Diff every follow's stored episode count against the router's
+        current one and alert on new episodes. Returns the alerts fired.
+
+        force=True re-checks even when a check ran recently (the user
+        tapped Retry / the Sources panel)."""
+        import time as _time
+
+        follows = await self.store.get_follows()
+        if not follows:
+            return 0
+        from core import notifications
+
+        fired = 0
+        for anime_session, row in follows.items():
+            if not anime_session:
+                continue
+            last_seen = await self.store.get_follow_progress(anime_session)
+            try:
+                episodes, _ = await self.router.episodes(anime_session, 1)
+            except Exception as ex:
+                logger.debug("new-episode check failed for %s: %s", anime_session, ex)
+                continue
+            if not episodes:
+                continue
+            newest = max((e.episode for e in episodes), default=0)
+            if newest <= last_seen:
+                continue
+            title = str(row.get("title") or "Anime")
+            poster = str(row.get("poster") or "")
+            ok = await notifications.show_new_episode(
+                anime_session=anime_session,
+                title=title,
+                episode=newest,
+                poster_path=self._cache_poster_local(poster, anime_session),
+            )
+            if ok:
+                fired += 1
+            await self.store.set_follow_progress(anime_session, newest)
+        return fired
+
+    def _cache_poster_local(self, poster_url: str, anime_session: str) -> str | None:
+        """BigPicture needs a LOCAL file — mirror the poster once into the
+        app storage dir. None when it can't be fetched (the notification
+        then ships without the art)."""
+        if not poster_url or not poster_url.startswith("http"):
+            return None
+        import os
+
+        from core.tasks import spawn
+
+        async def _fetch():
+            try:
+                client = self.kwik._get_client()
+                resp = await client.get(poster_url, timeout=15)
+                if resp.status_code == 200 and resp.content:
+                    cache_dir = os.path.join("storage", "posters")
+                    os.makedirs(cache_dir, exist_ok=True)
+                    path = os.path.join(
+                        cache_dir,
+                        f"notify-{notifications_stable(anime_session)}.img",
+                    )
+                    with open(path, "wb") as f:
+                        f.write(resp.content)
+            except Exception as ex:
+                logger.debug("poster cache failed: %s", ex)
+
+        from core import notifications as _n
+
+        notifications_stable = _n.stable_id
+        spawn(_fetch(), name="cache-notify-poster")
+        # First run: no local file yet (the next notification has it).
+        cache_dir = os.path.join("storage", "posters")
+        path = os.path.join(cache_dir, f"notify-{notifications_stable(anime_session)}.img")
+        return path if os.path.exists(path) else None
+
+    async def start_episode_checker(self) -> None:
+        """App start + every 6 hours: the new-episode pass for follows."""
+        from core import notifications
+        from core.tasks import spawn
+
+        async def _loop():
+            await asyncio.sleep(5.0)
+            await notifications.ensure_channel()
+            while True:
+                try:
+                    await self.check_new_episodes()
+                except Exception as ex:
+                    logger.warning("episode checker pass failed: %s", ex)
+                await asyncio.sleep(6 * 3600)
+
+        spawn(_loop(), name="episode-checker")
+
     async def set_backend_pin(self, name: str):
         """Settings: 'auto' or a provider name. Applies immediately and
         persists — the router still fails over when the pin is down."""
@@ -1426,15 +1519,15 @@ class AppController:
                     state.is_loading = False
                     state.search_version += 1
 
-    async def toggle_favorite(self, row: dict) -> bool:
-        """Favorite/unfavorite a WHOLE anime; bumps the version so every
-        shelf showing favorites re-renders."""
+    async def toggle_follow(self, row: dict) -> bool:
+        """Follow/unfollow a WHOLE anime; bumps the version so every
+        shelf showing follows re-renders."""
         if not isinstance(row, dict):
             return False
-        favorited = await self.store.toggle_favorite(row)
-        state.favorites = await self.store.get_favorites()
-        state.favorites_version += 1
-        return favorited
+        following = await self.store.toggle_follow(row)
+        state.follows = await self.store.get_follows()
+        state.follows_version += 1
+        return following
 
     async def record_search_selection(self, anime) -> None:
         """A search result was opened: remember the ANIME (title + session),
@@ -1506,8 +1599,8 @@ async def main(page: ft.Page):
     methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
     # Sync action: no spawn() — create_task(None) would raise.
     methods.cancel_resolve = lambda: controller.cancel_resolve()
-    methods.toggle_favorite = lambda row: spawn(
-        controller.toggle_favorite(row), name="toggle-favorite"
+    methods.toggle_follow = lambda row: spawn(
+        controller.toggle_follow(row), name="toggle-follow"
     )
     methods.record_search_selection = lambda anime: spawn(
         controller.record_search_selection(anime), name="record-search-selection"
