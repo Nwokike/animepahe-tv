@@ -24,7 +24,23 @@ KUSONIME_BASE = "https://kusonime.com"
 
 # Hosts with a public, direct, documented API (verified in Phase 0).
 # Anything else on the page is ignored — no fragile leecher resolvers.
+# Hosts with a verified public direct route: pixeldrain (its /api/file
+# route, 206-verified) and Google Drive (usercontent, 206-verified).
 _SUPPORTED_HOSTS = ("pixeldrain.com",)
+_SUPPORTED_DRIVE = ("drive.usercontent.google.com", "drive.google.com/uc")
+
+
+def _pixeldrain_id(url: str) -> str:
+    m = re.search(r"pixeldrain\.com/u/([A-Za-z0-9]+)", url)
+    return m.group(1) if m else ""
+
+
+def _human_size(size) -> str:
+    try:
+        n = int(size or 0)
+    except (TypeError, ValueError):
+        return ""
+    return f"{n // (1024 * 1024)}MB" if n >= 1024 * 1024 else ""
 
 
 def _clean_title(raw: str) -> tuple[str, int, str]:
@@ -50,20 +66,50 @@ def _title_relevance(query: str, title: str) -> int:
     return hits * 100 // len(q_words) if hits else 0
 
 
-def _batch_range(filename: str) -> tuple[int, int]:
-    """'[Kusonime] Title BD 01-16 360p.rar' -> (1, 16)."""
-    m = re.search(r"\b(\d{1,4})\s*-\s*(\d{1,4})\b", filename)
+def _block_quality(header: str) -> int:
+    """The .smokeurlrh block's <strong> header IS the quality — the
+    anchor text is only a host label. Both header shapes the site has
+    served: the '360P' form and the pixel-dimension form ('848×352',
+    '1280×720') whose HEIGHT is the quality."""
+    m = re.search(r"(\d{3,4})\s*[x×]\s*(\d{3,4})", header or "")
     if m:
-        return int(m.group(1)), int(m.group(2))
-    m = re.search(r"\b(\d{1,4})\b", filename)
-    if m:
-        return int(m.group(1)), int(m.group(1))
-    return 1, 1
-
-
-def _quality(filename: str) -> int:
-    m = re.search(r"(\d{3,4})p", filename, re.I)
+        return int(m.group(2))
+    m = re.search(r"(\d{3,4})\s*p", header or "", re.I)
     return int(m.group(1)) if m else 0
+
+
+def _quality_from_slug(url: str) -> int:
+    """acefile slugs end with the range+quality+extension
+    ('...-01-15-480p-rar')."""
+    m = re.search(r"-(\d{3,4})p-(?:mkv|mp4|rar)", url or "", re.I)
+    return int(m.group(1)) if m else 0
+
+
+def _range_from_slug(url: str) -> tuple[int, int] | None:
+    """'...-01-15-480p-rar' -> (1, 15)."""
+    m = re.search(r"-(\d{1,4})-(\d{1,4})-\d{3,4}p-(?:mkv|mp4|rar)", url or "", re.I)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _range_from_text(page_text: str) -> tuple[int, int] | None:
+    """A textual 'Episode 01-12' fragment on the page."""
+    m = re.search(r"Episode\s*(\d{1,4})\s*[-–]\s*(\d{1,4})", page_text or "", re.I)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _batch_range(filename: str) -> tuple[int, int] | None:
+    """The rar NAME when it carries the range — the last resort; pixeldrain
+    names are often range-less."""
+    m = re.search(r"\b(\d{1,4})\s*-\s*(\d{1,4})\b", filename or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _is_archive(name: str) -> bool:
+    return name.lower().endswith(".rar")
+
+
+def _is_video(name: str) -> bool:
+    return name.lower().endswith((".mkv", ".mp4"))
 
 
 class KusonimeProvider:
@@ -103,7 +149,7 @@ class KusonimeProvider:
 
     async def probe(self) -> bool:
         try:
-            resp = await self._client.get(f"{KUSONIME_API}/posts", params={"per_page": 1, "_fields": "id"}, timeout=10.0)
+            resp = await self._client.get(f"{KUSONIME_API}/posts", params={"per_page": "1", "_fields": "id"}, timeout=10.0)
             return resp.status_code == 200
         except Exception as ex:
             logger.debug("kusonime probe failed: %s", ex)
@@ -160,7 +206,7 @@ class KusonimeProvider:
             return cached
         resp = await self._client.get(
             f"{KUSONIME_API}/posts",
-            params={"per_page": 12, "page": page, "orderby": "date", "order": "desc", "_fields": "id,title,featured_media,link"},
+            params={"per_page": "12", "page": str(page), "orderby": "date", "order": "desc", "_fields": "id,title,featured_media,link"},
         )
         if resp.status_code != 200:
             raise RuntimeError(f"kusonime HTTP {resp.status_code}")
@@ -176,7 +222,7 @@ class KusonimeProvider:
             return cached
         resp = await self._client.get(
             f"{KUSONIME_API}/posts",
-            params={"search": query, "per_page": 12, "page": page, "_fields": "id,title,featured_media,link"},
+            params={"search": query, "per_page": "12", "page": str(page), "_fields": "id,title,featured_media,link"},
         )
         if resp.status_code != 200:
             raise RuntimeError(f"kusonime HTTP {resp.status_code}")
@@ -216,9 +262,57 @@ class KusonimeProvider:
         link = resp.json().get("link", "")
         return link or ""
 
+    async def _pixeldrain_info(self, file_id: str) -> dict:
+        """pixeldrain's public file record — the TRUE name+extension
+        (site-visible names are host labels or range-less)."""
+        key = f"pd_info_{file_id}"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        try:
+            resp = await self._client.get(f"https://pixeldrain.com/api/file/{file_id}/info")
+            if resp.status_code != 200:
+                return {}
+            info = resp.json()
+        except Exception as ex:
+            logger.debug("pixeldrain info failed: %s", ex)
+            return {}
+        self._cache_put(key, info, CACHE_TTL_EPISODES)
+        return info
+
+    def _parse_download_blocks(self, html: str) -> list[dict]:
+        """#dl's .smokeurlrh blocks — quality from the <strong> header,
+        links per block. Returns [{quality, href, host_kind}] for the
+        hosts we can resolve (pixeldrain, Drive). The pixeldrain id is
+        the dedup key (the map caught the same id under two blocks)."""
+        dl = re.search(r'id="dl"[^>]*>(.*?)(?:id="dl-notif"|<footer|</body)', html, re.S)
+        section = dl.group(1) if dl else html
+        files: list[dict] = []
+        seen_pd: set[str] = set()
+        for block in re.split(r'<div class="smokeurlrh">', section)[1:]:
+            strong = re.match(r"\s*<strong>([^<]*)</strong>", block)
+            quality = _block_quality(strong.group(1)) if strong else 0
+            for href in re.findall(r'href="(https?://[^"]+)"', block):
+                pd_id = _pixeldrain_id(href)
+                if pd_id:
+                    if pd_id in seen_pd:
+                        continue
+                    seen_pd.add(pd_id)
+                    files.append(
+                        {"url": href, "quality": quality, "kind": "pixeldrain",
+                         "pixeldrain_id": pd_id, "filename": ""}
+                    )
+                elif any(h in href for h in _SUPPORTED_DRIVE):
+                    files.append(
+                        {"url": href, "quality": _quality_from_slug(href) or quality,
+                         "kind": "drive", "filename": ""}
+                    )
+        return files
+
     async def _batch_files(self, native_id: str) -> list[dict]:
-        """Download links from the post page, restricted to hosts with a
-        public direct API. Returns [{url, quality, filename}]."""
+        """The post's files: block quality, host-resolved names, and the
+        episode range from real evidence (acefile slug, textual fragment,
+        or the rar name) — never block order."""
         key = f"files_{native_id}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -233,18 +327,36 @@ class KusonimeProvider:
         except Exception as ex:
             logger.debug("kusonime page fetch failed: %s", ex)
             return []
-        files = []
-        # The filename lives in the anchor TEXT (pixeldrain URLs end in an
-        # opaque id), so pairs of (href, text) are needed.
-        for href, text in re.findall(r'<a[^>]+href="(https?://[^"]+)"[^>]*>([^<]*)</a>', page.text):
-            if not any(host in href for host in _SUPPORTED_HOSTS):
-                continue
-            filename = (text or href.rsplit("/", 1)[-1]).strip()
-            files.append({"url": href, "quality": _quality(filename), "filename": filename})
+        files = self._parse_download_blocks(page.text)
+        text_range = _range_from_text(page.text)
+        for f in files:
+            name = ""
+            if f["kind"] == "pixeldrain":
+                info = await self._pixeldrain_info(f["pixeldrain_id"])
+                name = info.get("name", "")
+                f["size_bytes"] = info.get("size")
+            f["filename"] = name or f["url"].rsplit("/", 1)[-1]
+            if name or _is_video(name):
+                # Movie/special detection needs the true extension.
+                f["video"] = _is_video(name)
+                f["archive"] = _is_archive(name)
+            else:
+                f["video"] = _is_video(f["url"])
+                f["archive"] = _is_archive(f["url"])
+            f.setdefault("size_bytes", None)
+            rng = _range_from_slug(f["url"])
+            if rng is None and f.get("pixeldrain_id"):
+                rng = _batch_range(name)
+            if rng is None:
+                rng = text_range
+            f["range"] = None if f["video"] else (rng or (1, 1))
         self._cache_put(key, files, CACHE_TTL_EPISODES)
         return files
 
     async def episodes(self, session: str, page: int) -> tuple[list[Episode], bool]:
+        """Series posts synthesize their episodes from the archives'
+        evidence ranges; movie/special posts surface as ONE playable
+        episode (the film) — never a batch."""
         _, native = split_session(session)
         if not native.isdigit():
             return []
@@ -254,42 +366,62 @@ class KusonimeProvider:
             return cached
         files = await self._batch_files(native)
         results: list[Episode] = []
-        seen: set[int] = set()
-        for f in files:
-            lo, hi = _batch_range(f["filename"])
-            for ep in range(lo, hi + 1):
-                if ep in seen:
-                    continue
-                seen.add(ep)
-                results.append(
-                    Episode(
-                        id=ep,
-                        anime_id=int(native),
-                        episode=ep,
-                        title=f"Episode {ep}",
-                        snapshot="",
-                        disc=f["quality"] and f"{f['quality']}p",
-                        audio="jpn",
-                        duration="",
-                        session=f"{native}|{ep}",  # resolved to a file in sources()
-                        filler=False,
-                    )
+        if any(f.get("video") for f in files):
+            # Movie / special / single video: one episode, all qualities.
+            results.append(
+                Episode(
+                    id=1,
+                    anime_id=int(native),
+                    episode=1,
+                    title="Movie",
+                    snapshot="",
+                    disc="",
+                    audio="jpn",
+                    duration="",
+                    session=f"{native}|movie",
+                    filler=False,
                 )
+            )
+        else:
+            seen: set[int] = set()
+            for f in files:
+                for ep in range(f["range"][0], f["range"][1] + 1):
+                    if ep in seen:
+                        continue
+                    seen.add(ep)
+                    results.append(
+                        Episode(
+                            id=ep,
+                            anime_id=int(native),
+                            episode=ep,
+                            title=f"Episode {ep}",
+                            snapshot="",
+                            disc=f["quality"] and f"{f['quality']}p",
+                            audio="jpn",
+                            duration="",
+                            session=f"{native}|{ep}",  # resolved to a file in sources()
+                            filler=False,
+                        )
+                    )
         results.sort(key=lambda e: e.episode)
         self._cache_put(key, results, CACHE_TTL_EPISODES)
         return (results, False)
 
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
+        """Movies stream (direct per-quality files, pixeldrain 206
+        verified); series episodes resolve to the archive that covers
+        them (download flow). Only verified hosts are claimed."""
         _, native = split_session(anime_session)
         episode = _parse_episode_session(episode_session)
+        is_movie = (episode_session or "").endswith("|movie")
         files = await self._batch_files(native)
         matches = []
         for f in files:
-            lo, hi = _batch_range(f["filename"])
-            if episode and lo <= episode <= hi:
+            if is_movie and f.get("video"):
                 matches.append(f)
-        if not matches:
-            return []
+            elif not is_movie and not f.get("video") and episode and f["range"]:
+                if f["range"][0] <= episode <= f["range"][1]:
+                    matches.append(f)
         results = []
         for f in matches:
             direct = _pixeldrain_direct(f["url"])
@@ -300,6 +432,19 @@ class KusonimeProvider:
                         resolution=f["quality"],
                         audio="jpn",
                         fansub="Kusonime",
+                        size=_human_size(f.get("size_bytes")),
+                    )
+                )
+            elif any(h in f["url"] for h in _SUPPORTED_DRIVE):
+                # The Drive route for this host verified as a range-serving
+                # route (same shape as kayoanime's keyless download).
+                results.append(
+                    Source(
+                        url=f["url"],
+                        resolution=f["quality"],
+                        audio="jpn",
+                        fansub="Kusonime",
+                        headers={"Referer": "https://drive.google.com/"},
                     )
                 )
         return results
