@@ -55,30 +55,47 @@ async def show_interstitial(page) -> None:
     """One-shot interstitial between episodes."""
     if not is_ads_supported(page):
         return
+    ad = None
     try:
         ad = fya.InterstitialAd(unit_id=AD_INTERSTITIAL_UNIT_ID)
         page.services.append(ad)
         await asyncio.wait_for(ad.show(), timeout=20.0)
-        await ad.destroy()
-        if ad in page.services:
-            page.services.remove(ad)
+        # show() returns as the ad OPENS; destroy() before the dismissal
+        # races the visible ad (the study's §7.2). Wait for the actual
+        # dismissal, then tear down.
+        await asyncio.wait_for(ad.wait_for_dismiss(), timeout=120.0)
     except Exception as ex:
         logger.warning("interstitial failed: %s", ex)
+    finally:
+        if ad is not None:
+            try:
+                await ad.destroy()
+            except Exception:
+                pass
+            if ad in page.services:
+                page.services.remove(ad)
 
 
 async def show_app_open(page) -> None:
     """Cold-start app open ad (the 'comeback' format)."""
     if not is_ads_supported(page):
         return
+    ad = None
     try:
         ad = fya.AppOpenAd(unit_id=AD_APP_OPEN_UNIT_ID)
         page.services.append(ad)
         await asyncio.wait_for(ad.show(), timeout=20.0)
-        await ad.destroy()
-        if ad in page.services:
-            page.services.remove(ad)
+        await asyncio.wait_for(ad.wait_for_dismiss(), timeout=120.0)
     except Exception as ex:
         logger.warning("app-open failed: %s", ex)
+    finally:
+        if ad is not None:
+            try:
+                await ad.destroy()
+            except Exception:
+                pass
+            if ad in page.services:
+                page.services.remove(ad)
 
 
 def build_rewarded_ad(page, episode_key: str, store, on_granted=None):
@@ -108,4 +125,24 @@ def build_rewarded_ad(page, episode_key: str, store, on_granted=None):
         on_load_failed=lambda e: logger.warning("rewarded load failed"),
     )
     page.services.append(ad)
+
+    async def _preload_and_teardown():
+        """Preload, then tear down only after the viewer has dismissed —
+        the rewarded instance is otherwise never destroyed (§7.4)."""
+        try:
+            await asyncio.wait_for(ad.load(), timeout=30.0)
+            await asyncio.wait_for(ad.wait_for_dismiss(), timeout=300.0)
+        except Exception as ex:
+            logger.info("rewarded lifecycle: %s", ex)
+        finally:
+            try:
+                await ad.destroy()
+            except Exception:
+                pass
+            if ad in page.services:
+                page.services.remove(ad)
+
+    from core.tasks import spawn
+
+    spawn(_preload_and_teardown(), name="rewarded-lifecycle")
     return ad
