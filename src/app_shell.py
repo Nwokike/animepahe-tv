@@ -381,34 +381,16 @@ def _use_player_overlay(state, controller) -> None:
         # url when a quality or an audio track is pinned.
         app_controller = getattr(controller, "_app_controller", None)
         player.hls_proxy = getattr(app_controller, "hls_proxy", None)
-        # A plain KeyboardListener, NOT hooks.use_focus_scope.FocusScope:
-        # FocusScope is a @ft.component, and its rendered subtree is frozen
-        # after mount — the exact bug this overlay mount avoids.
-        mount = ft.KeyboardListener(
-            content=player,
-            autofocus=True,
-            on_key_down=_make_back_handler(),
-        )
+        # focus_scope is a plain FUNCTION (KTV's form): the old
+        # @ft.component FocusScope rendered a frozen subtree — the exact
+        # crash class this overlay mount exists to avoid.
+        from hooks.use_focus_scope import focus_scope
+
+        mount = focus_scope(player, lambda: _player_back())
 
     _active_player, _active_mount, _active_key = player, mount, key
     page.overlay.append(mount)
     page.update()
-
-
-_BACK_KEYS = {"Back", "Escape", "BrowserBack", "Go Back", "Browser Back"}
-
-
-def _make_back_handler():
-    """Back/Escape handler for the overlay player (same key set as
-    hooks.use_focus_scope, but as a plain handler — not a component)."""
-
-    def _handler(e: ft.KeyboardEvent):
-        if e.key in _BACK_KEYS:
-            page = flet_context.page
-            if page is not None:
-                page.run_task(_player_back)
-
-    return _handler
 
 
 def _build_player_error(state, controller, message: str) -> ft.Control:

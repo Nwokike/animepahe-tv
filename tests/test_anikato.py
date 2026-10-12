@@ -530,3 +530,48 @@ def test_follow_progress_round_trip():
 
     os.close(fd)
     asyncio.run(run(path))
+
+
+def test_focus_scope_is_a_plain_function():
+    """The component form is a crash class (frozen subtree) — the hook
+    must be a plain function returning the listener."""
+    from hooks.use_focus_scope import focus_scope
+
+    import flet as ft
+
+    seen = []
+
+    class _FakePage:
+        def run_task(self, fn):
+            seen.append(fn)
+
+    import flet as _ft
+
+    listener = focus_scope(ft.Container(), lambda: seen.append("back"))
+    assert isinstance(listener, ft.KeyboardListener)
+    assert listener.autofocus is True
+
+
+def test_focus_manager_chains_instead_of_overwriting():
+    """A second installer must not kill the first's handler."""
+    import types
+
+    import flet as ft
+
+    from core.focus_manager import FocusManager
+
+    page = types.SimpleNamespace()
+    seen = []
+    page.on_keyboard_event = lambda e: seen.append("old")
+    mgr = FocusManager(page)
+    mgr.set_back_handler(lambda: seen.append("back"))
+    # simulate a Back event through the chain
+    ev = types.SimpleNamespace(key="Back")
+    page.on_keyboard_event(ev)
+    assert "old" in seen and "back" in seen
+    # restore is identity-guarded
+    mgr.restore()
+    assert page.on_keyboard_event is not None
+    seen.clear()
+    page.on_keyboard_event(ev)
+    assert seen == ["old"]  # ours stepped aside, the old handler remains
