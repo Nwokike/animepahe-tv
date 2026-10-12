@@ -332,8 +332,33 @@ def SearchScreen() -> ft.Control:
     )
 
     if state.is_loading and not state.search_results:
+        # Skeleton cards under the progress bar — the lone ring reads
+        # as a frozen screen on a slow source.
+        def _skeleton(col: dict):
+            return ft.Container(
+                col=col,
+                height=250,
+                border_radius=14,
+                bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+            )
+
         results = ft.Container(
-            content=ft.ProgressRing(color=AppColors.PRIMARY),
+            content=ft.Column(
+                [
+                    ft.ProgressRing(color=AppColors.PRIMARY),
+                    ft.Container(height=16),
+                    ft.ResponsiveRow(
+                        controls=[
+                            _skeleton({"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2})
+                            for _ in range(10)
+                        ],
+                        spacing=12,
+                        run_spacing=12,
+                    ),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
+            ),
             alignment=ft.Alignment.CENTER,
             expand=True,
         )

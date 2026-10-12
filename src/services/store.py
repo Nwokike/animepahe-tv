@@ -157,8 +157,17 @@ class JsonStore:
         ]
         await self.put_section("search_history", history)
 
-    async def clear_search_history(self) -> None:
+    async def clear_search_history(self) -> list[dict]:
+        """Clear and return the cleared rows — the Undo restores exactly
+        what was there (deep copy, MRU order intact)."""
+        history = await self.get_search_history()
         await self.put_section("search_history", [])
+        return [dict(r) for r in history]
+
+    async def restore_search_history(self, rows: list[dict]) -> None:
+        """Undo a clear: put the exact rows back."""
+        rows = [r for r in rows if isinstance(r, dict) and r.get("title")]
+        await self.put_section("search_history", rows[:SEARCH_HISTORY_LIMIT])
 
     # ------------------------------------------------------------------
     # Continue watching (keyed by anime session, newest-first read)

@@ -575,3 +575,31 @@ def test_focus_manager_chains_instead_of_overwriting():
     seen.clear()
     page.on_keyboard_event(ev)
     assert seen == ["old"]  # ours stepped aside, the old handler remains
+
+
+def test_history_clear_returns_rows_and_restore_puts_them_back():
+    """Undo: the clear hands back the exact rows; the restore returns
+    them (MRU order intact)."""
+    import asyncio
+
+    from services.store import JsonStore
+
+    import tempfile
+
+    async def run(path):
+        store = JsonStore(filename=path)
+        await store.add_search_selection("One Piece", "s1")
+        await store.add_search_selection("Frieren", "s2")
+        cleared = await store.clear_search_history()
+        assert await store.get_search_history() == []
+        assert [r["title"] for r in cleared] == ["Frieren", "One Piece"]
+        await store.restore_search_history(cleared)
+        restored = await store.get_search_history()
+        assert [r["title"] for r in restored] == ["Frieren", "One Piece"]
+        assert restored[0]["session"] == "s2"
+
+    fd, path = tempfile.mkstemp()
+    import os
+
+    os.close(fd)
+    asyncio.run(run(path))

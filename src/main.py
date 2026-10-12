@@ -1549,9 +1549,27 @@ class AppController:
         state.search_history = await self.store.get_search_history()
 
     async def clear_search_history(self):
-        await self.store.clear_search_history()
+        """Clear with Undo (DDGS's shape): the snack action restores the
+        exact rows — one-tap data loss was the old behavior."""
+        rows = await self.store.clear_search_history()
         state.search_history = []
         state.search_version += 1
+        if not rows:
+            return
+
+        def _undo():
+            async def _restore():
+                await self.store.restore_search_history(rows)
+                state.search_history = await self.store.get_search_history()
+                state.search_version += 1
+
+            from core.tasks import spawn
+
+            spawn(_restore(), name="undo-clear-history")
+
+        from core.notify import show_snack
+
+        show_snack(self.page, "Recent searches cleared", action_label="Undo", on_action=_undo)
 
 
 async def main(page: ft.Page):

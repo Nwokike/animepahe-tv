@@ -110,13 +110,16 @@ def SettingsScreen() -> ft.Control:
             color=AppColors.PRIMARY,
             weight=ft.FontWeight.W_600,
         )
+        # FIXED height (not expand=True): expand inside a dialog grows
+        # the box without bound as logs accumulate — the dialog-burst
+        # bug Sherlock already documented.
         log_box = ft.Container(
-            content=ft.Column(controls=[log_text], scroll=ft.ScrollMode.AUTO, expand=True),
+            content=ft.Column(controls=[log_text], scroll=ft.ScrollMode.AUTO),
             bgcolor="#0D0D0D",
             border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.WHITE)),
             border_radius=8,
             padding=12,
-            expand=True,
+            height=320,
         )
 
         def _refresh(e=None):
@@ -127,11 +130,13 @@ def SettingsScreen() -> ft.Control:
             page.update(log_text, telemetry_text)
 
         def _copy(e):
+            from core.notify import show_snack
             from core.shared_services import get_shared_services
 
             page.run_task(
                 get_shared_services(page).set_clipboard, log_text.value
             )
+            show_snack(page, "Logs copied")
 
         def _clear(e):
             in_memory_log_handler.clear_logs()
