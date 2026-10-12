@@ -327,6 +327,10 @@ class AniKatoProvider:
             poster=watch["poster"],
             session=make_session("anikato", slug),
             synopsis=watch.get("synopsis") or "",
+            # _parse_watch already extracts the genre list; it was being
+            # dropped on the floor here, so the detail chips stayed empty.
+            genres=watch.get("genres") or [],
+            aired=watch.get("aired") or "",
         )
 
     # ------------------------------------------------------------------

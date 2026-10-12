@@ -35,7 +35,9 @@ _PROGRESS_FLUSH_SECONDS = 0.5
 
 
 def _anime_dict(anime) -> dict:
-    """Anime dataclass -> the detail header's dict."""
+    """Anime dataclass -> the detail header's dict. Every field the
+    providers fill is carried: dropping one here is what made synopsis,
+    genres and the external ids invisible on the detail screen."""
     return {
         "title": anime.title,
         "poster": anime.poster,
@@ -46,6 +48,11 @@ def _anime_dict(anime) -> dict:
         "score": anime.score,
         "season": anime.season,
         "synopsis": getattr(anime, "synopsis", "") or "",
+        "genres": list(getattr(anime, "genres", None) or []),
+        "mal_id": getattr(anime, "mal_id", 0) or 0,
+        "anilist_id": getattr(anime, "anilist_id", 0) or 0,
+        "studios": list(getattr(anime, "studios", None) or []),
+        "aired": getattr(anime, "aired", "") or "",
     }
 
 

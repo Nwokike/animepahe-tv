@@ -246,6 +246,8 @@ def test_provider_anime_maps_the_watch_page():
     assert anime.year == 2002
     assert anime.synopsis.startswith("Moments prior")
     assert anime.session == "anikato:naruto-eybxz"
+    # Genres parse on the watch page and reach the detail chips.
+    assert "Action" in anime.genres and "Adventure" in anime.genres
 
 
 def test_parse_schedule_tabs_and_day():
@@ -396,6 +398,31 @@ def test_animepahe_details_parses_the_page():
     assert anime.mal_id == 56621
     assert anime.id == 4471  # the numeric id m=links needs
     assert anime.session == "shangri-la-frontier"
+    # Studios and the aired range are on the page and reach the screen now.
+    assert anime.studios == ["C2C"]
+    assert anime.aired == "Oct 1, 2023 to Mar 24, 2024"
+
+
+def test_animepahe_details_co_production_splits_studios():
+    from services.providers.animepahe_provider import _parse_details
+
+    html = """
+    <div class="title-wrapper"><h1><span>T</span></h1></div>
+    <div class="anime-info"><p><b>Studio:</b> C2C, SoftBank / Hull</p></div>
+    """
+    anime = _parse_details(html, "t")
+    assert anime is not None
+    assert anime.studios == ["C2C", "SoftBank", "Hull"]
+
+
+def test_animepahe_details_absent_studio_is_empty_not_invented():
+    from services.providers.animepahe_provider import _parse_details
+
+    html = '<div class="title-wrapper"><h1><span>T</span></h1></div>'
+    anime = _parse_details(html, "t")
+    assert anime is not None
+    assert anime.studios == []
+    assert anime.aired == ""
 
 
 def test_animepahe_details_garbage_returns_none():

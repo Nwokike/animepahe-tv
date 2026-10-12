@@ -18,6 +18,10 @@ class Anime:
     genres: list = field(default_factory=list)
     mal_id: int = 0
     anilist_id: int = 0
+    # Carried by the providers that parse them (animepahe's details page
+    # is the one that serves all three); defaults keep the others valid.
+    studios: list = field(default_factory=list)
+    aired: str = ""
 
 
 @dataclass(unsafe_hash=True)

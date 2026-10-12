@@ -214,6 +214,9 @@ def _parse_details(html: str, session: str) -> Anime | None:
     id_m = re.search(r"release&id=(\d+)&l=", html)
     episodes_raw = info("Episodes")
     year_m = re.search(r"(19|20)\d{2}", info("Aired") or info("Season"))
+    # A co-production lists several studios ("C2C, SoftBank") — keep them
+    # all, split on the separator the page uses.
+    studios = [s.strip() for s in re.split(r"[,/]", info("Studio")) if s.strip()]
     return Anime(
         id=int(id_m.group(1)) if id_m else 0,
         title=title[:200],
@@ -229,4 +232,6 @@ def _parse_details(html: str, session: str) -> Anime | None:
         genres=genres,
         mal_id=mal_id,
         anilist_id=ani_id,
+        studios=studios,
+        aired=info("Aired"),
     )

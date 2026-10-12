@@ -371,7 +371,8 @@ def AnimeDetailScreen() -> ft.Control:
     )
 
     def _metadata_row(anime: dict) -> ft.Control:
-        """year / type / status / N Episodes / score, as the original."""
+        """year / type / status / N Episodes / score / studio, as the
+        original."""
         parts = []
         if anime.get("year"):
             parts.append(str(anime["year"]))
@@ -383,6 +384,13 @@ def AnimeDetailScreen() -> ft.Control:
             parts.append(f"{anime['episodes']} Episodes")
         if anime.get("score"):
             parts.append(f"★ {float(anime['score']):.1f}")
+        # Studios as well as the aired range — both parsed, neither shown
+        # before now.
+        studios = [str(s).strip() for s in (anime.get("studios") or []) if str(s).strip()]
+        if studios:
+            parts.append("/".join(studios[:2]))
+        if anime.get("aired"):
+            parts.append(str(anime["aired"]))
         if not parts:
             return ft.Container(width=0, height=0)
         return ft.Text(
@@ -390,7 +398,66 @@ def AnimeDetailScreen() -> ft.Control:
             size=14,
             weight=ft.FontWeight.W_500,
             color=ft.Colors.ON_SURFACE_VARIANT,
+            max_lines=2,
+            overflow=ft.TextOverflow.ELLIPSIS,
         )
+
+    def _genre_chips(anime: dict) -> ft.Control:
+        """Genres as chips — the providers parse them, they just never
+        reached a screen."""
+        genres = [str(g).strip() for g in (anime.get("genres") or []) if str(g).strip()]
+        if not genres:
+            return ft.Container(width=0, height=0)
+        return ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text(g, size=12, weight=ft.FontWeight.W_500),
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+                    border_radius=14,
+                    bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+                    border=ft.Border.all(
+                        1, ft.Colors.with_opacity(0.25, ft.Colors.ON_SURFACE)
+                    ),
+                )
+                for g in genres[:8]
+            ],
+            spacing=6,
+            wrap=True,
+        )
+
+    def _synopsis_block(anime: dict) -> ft.Control:
+        """Synopsis + the external ids. Clamped, not scrolled: the
+        episodes grid below is the point of the screen."""
+        synopsis = str(anime.get("synopsis") or "").strip()
+        ids = []
+        if anime.get("mal_id"):
+            ids.append(f"MAL {anime['mal_id']}")
+        if anime.get("anilist_id"):
+            ids.append(f"AniList {anime['anilist_id']}")
+        if not synopsis and not ids:
+            return ft.Container(width=0, height=0)
+        children: list[ft.Control] = [ft.Container(height=16)]
+        if synopsis:
+            children.append(
+                ft.Text(
+                    synopsis,
+                    size=13,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                    max_lines=4,
+                    overflow=ft.TextOverflow.ELLIPSIS,
+                )
+            )
+        if ids:
+            children.append(ft.Container(height=6))
+            children.append(
+                ft.Text(
+                    " • ".join(ids),
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    color=ft.Colors.with_opacity(0.7, ft.Colors.ON_SURFACE_VARIANT),
+                )
+            )
+        return ft.Column(children, tight=True, spacing=0)
 
     return ft.Stack(
         [
@@ -415,6 +482,8 @@ def AnimeDetailScreen() -> ft.Control:
                                         ft.Container(height=8),
                                         _metadata_row(anime),
                                         ft.Container(height=12),
+                                        _genre_chips(anime),
+                                        ft.Container(height=12),
                                         follow_button,
                                     ],
                                     expand=True,
@@ -423,8 +492,9 @@ def AnimeDetailScreen() -> ft.Control:
                             ],
                             alignment=ft.MainAxisAlignment.START,
                         ),
-                        ft.Container(height=24),
-                        ft.Row(
+                        ft.Container(height=16),
+                        _synopsis_block(anime),
+                        ft.Container(height=24),                        ft.Row(
                             [
                                 ft.Text(
                                     "Episodes",
