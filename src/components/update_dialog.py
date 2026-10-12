@@ -38,7 +38,19 @@ def show_update_dialog(page: ft.Page, update_data: dict):
 
     def dismiss(e):
         _dismiss_dialog()
-        page.update()
+        if mandatory:
+            # A mandatory update cannot be backed out of: dismissing
+            # (or Back) re-shows it (KTV's version_dialog discipline).
+            page.run_task(_reshow)
+        else:
+            page.update()
+
+    async def _reshow():
+        await asyncio.sleep(0.35)
+        try:
+            show_update_dialog(page, update_data)
+        except Exception:
+            pass
 
     actions = [
         ft.TextButton(content="Later", on_click=dismiss),

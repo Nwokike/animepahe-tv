@@ -402,15 +402,20 @@ class JsonStore:
             await self.put_section("follows", follows)
 
     async def toggle_follow(self, row: dict) -> bool:
-        """Returns the NEW follow state."""
+        """Returns the NEW follow state.
+
+        Re-read-after-write: a rapid double-tap asks twice, and the
+        second answer must be read from the store as it is NOW, not
+        from the answer the first tap produced (the clobber KTV's
+        utils/favorites.py fixed)."""
         anime_session = row.get("anime_session")
         if not anime_session:
             return False
         if await self.is_following(anime_session):
             await self.remove_follow(anime_session)
-            return False
-        await self.add_follow(row)
-        return True
+        else:
+            await self.add_follow(row)
+        return await self.is_following(anime_session)
 
     # ------------------------------------------------------------------
     # Playback preference: hand streams to KTV Player (the old app's only

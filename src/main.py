@@ -239,6 +239,9 @@ class AppController:
         elif not was_online and state.is_online:
             logger.info("Connectivity restored")
             state.connectivity_version += 1
+            # The user needs the good news too — losing connectivity warns,
+            # and regaining it silently leaves them guessing.
+            show_snack(self.page, "Back online", bgcolor=AppColors.SUCCESS)
             # A network blip must not leave the CF gate latched on: probe
             # the feed again now that we're back.
             if state.cf_blocked:
