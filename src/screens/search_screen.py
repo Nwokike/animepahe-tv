@@ -29,6 +29,35 @@ from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
+def _build_clear_confirm_dialog(controller) -> ft.AlertDialog:
+    """The confirm for the destructive clear: one tap wipes every recent
+    pick, so it asks first. The controller's Undo snack stays as the
+    second net (DDGS's history pattern)."""
+    def _do_clear():
+        controller.close_dialog()
+        controller.clear_search_history()
+
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Clear recent searches?"),
+        content=ft.Text(
+            "Every recent pick on this device is removed. You get one Undo right after."
+        ),
+        actions=[
+            ft.TextButton(
+                content="Cancel",
+                on_click=lambda e: controller.close_dialog(),
+            ),
+            ft.FilledButton(
+                content="Clear",
+                style=ft.ButtonStyle(bgcolor=AppColors.ERROR),
+                on_click=lambda e: _do_clear(),
+            ),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+
 def _row_title_session(row) -> tuple[str, str]:
     """Normalize one recent-search row to (title, session).
 
@@ -234,6 +263,11 @@ def SearchScreen() -> ft.Control:
             bgcolor=AppColors.ERROR,
         )
 
+    def _confirm_clear_recent(e=None):
+        """The clear goes through the confirm builder — the actions close
+        the dialog and clear, never one without the other."""
+        controller.open_sheet(_build_clear_confirm_dialog(controller))
+
     # Suggestions: recent selections filtered by what has been typed
     # (debounced). Filter matches the row's title — the anime that was
     # opened — so typing "black" still surfaces "Black Clover Season 1".
@@ -326,7 +360,7 @@ def SearchScreen() -> ft.Control:
     )
 
     clear_btn = (
-        ft.TextButton(content="Clear recent", on_click=lambda e: controller.clear_search_history())
+        ft.TextButton(content="Clear recent", on_click=_confirm_clear_recent)
         if history
         else ft.Container(width=0, height=0)
     )

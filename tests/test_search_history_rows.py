@@ -12,7 +12,55 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from screens.search_screen import _row_title_session
+import flet as ft
+
+from screens.search_screen import _build_clear_confirm_dialog, _row_title_session
+
+
+class _Controller:
+    """Records the portal calls the screen's dialog path makes."""
+
+    def __init__(self):
+        self.opened: list = []
+        self.cleared = 0
+        self.closed = 0
+
+    def open_sheet(self, dialog):
+        self.opened.append(dialog)
+
+    def close_dialog(self):
+        self.closed += 1
+
+    def clear_search_history(self):
+        self.cleared += 1
+
+
+def test_clear_recent_asks_first_and_never_leaves_the_dialog_open():
+    controller = _Controller()
+    dialog = _build_clear_confirm_dialog(controller)
+
+    # The screen's handler opens the built dialog — same call, so the
+    # Cancel/Clear actions here are exactly what the user taps.
+    controller.open_sheet(dialog)
+    assert len(controller.opened) == 1
+    assert isinstance(controller.opened[0], ft.AlertDialog)
+    def _label(button) -> str:
+        content = button.content
+        return content.value if hasattr(content, "value") else str(content)
+
+    assert _label(dialog.actions[0]) == "Cancel"
+    assert _label(dialog.actions[1]) == "Clear"
+
+    # Cancel: closes, clears nothing.
+    dialog.actions[0].on_click(None)
+    assert controller.closed == 1
+    assert controller.cleared == 0
+
+    # Clear: closes AND clears — a clear without a close would strand the
+    # modal on screen.
+    dialog.actions[1].on_click(None)
+    assert controller.closed == 2
+    assert controller.cleared == 1
 
 
 def test_dict_rows_normalize_to_title_and_session():
