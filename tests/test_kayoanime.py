@@ -155,6 +155,29 @@ def test_episodes_walk_folders_dedupe_and_use_file_ids():
     assert all(s.resolution == 1080 for s in sources)
     assert sources[0].url.startswith("https://www.googleapis.com/drive/v3/files/f274?alt=media")
     assert "confirm=t" in sources[1].url
+    # The gated folder is named (not just logged) and the real filename survives.
+    assert provider.gated_folders("kayoanime:961") == ["1080p [Private Drive]"]
+    assert provider.file_name("kayoanime:961", "f274") == "Boruto - 274.mkv"
+    assert provider.file_name("kayoanime:961", "nope") is None
+
+
+def test_kayoanime_box_labels_are_batches_not_seasons():
+    """BOX labels name the FOLDER (a batch volume), which is why the walk
+    stays flat: splitting the episode list by them would invent a season
+    structure the post does not have."""
+    from services.providers.kayoanime import _folder_pairs
+
+    html = (
+        '<a href="https://drive.google.com/drive/folders/1mkuqtOVMUJ6Q6hwmRyojGaYcTm_tsYBs">BOX 6</a>'
+        '<a href="https://drive.google.com/drive/folders/1UKWccvPLOD1MycpDFYMpB6EKK7kJFIJV">Season 2</a>'
+    )
+    pairs = _folder_pairs(html)
+    assert pairs == [
+        ("1mkuqtOVMUJ6Q6hwmRyojGaYcTm_tsYBs", "BOX 6"),
+        ("1UKWccvPLOD1MycpDFYMpB6EKK7kJFIJV", "Season 2"),
+    ]
+    # the label is kept for the gated report, and never splits the list
+    assert [label for _fid, label in pairs] == ["BOX 6", "Season 2"]
 
 
 def test_maintenance_post_surfaces_no_episodes():

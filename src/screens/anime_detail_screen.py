@@ -83,7 +83,11 @@ def _episode_card(
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         ft.Text(
-                            ep.duration or "24m",
+                            " • ".join(
+                                [ep.duration or "24m"]
+                                + (["SUB"] if getattr(ep, "subs", False) else [])
+                                + (["DUB"] if getattr(ep, "dub", False) else [])
+                            ),
                             size=12,
                             color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
                         ),

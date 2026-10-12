@@ -115,6 +115,44 @@ def parse_key_uri(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+_ILLEGAL_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_component(name, fallback: str = "unknown") -> str:
+    """One path component every platform this app ships on accepts.
+
+    Our session ids carry a namespace colon ('kayoanime:961') and the
+    kusonime ones a pipe ('5789|7') — both are NTFS-illegal, and
+    ``makedirs`` raises WinError 267 on them, which silently killed every
+    download on Windows. The mapping is STABLE (the same session always
+    maps to the same directory) because resume has to find the job again.
+    """
+    text = _ILLEGAL_PATH_CHARS.sub("_", str(name or "")).strip(" .")
+    return text[:80] or fallback
+
+
+def _safe_filename(name) -> str | None:
+    """A provider-supplied filename, reduced to something a filesystem
+    will take on every platform this app ships on. None when there is
+    nothing usable — the caller then names the file itself.
+
+    The point is fidelity: the saved copy keeps the name the source gave
+    it (which carries the quality and the fansub) instead of a bare
+    file.mkv, and nothing is converted to achieve that.
+    """
+    if not name:
+        return None
+    # A Drive id like "1AbC..." has no extension and no separators — it is
+    # an identifier, not a name.
+    text = str(name).strip().replace("\\", "/").rsplit("/", 1)[-1]
+    if not text or not os.path.splitext(text)[1]:
+        return None
+    cleaned = _ILLEGAL_PATH_CHARS.sub("_", text).strip(" .")
+    if not cleaned or cleaned in {".", ".."} or len(cleaned) > 120:
+        return None
+    return cleaned
+
+
 class DownloadManager:
     """Owns download jobs: one asyncio task per episode, shared primp client."""
 
@@ -168,10 +206,8 @@ class DownloadManager:
         """Enqueue (or resume) an episode download."""
         if episode_session in self._tasks:
             return
-        job_dir = os.path.join(
-            self.downloads_dir,
-            metadata.get("anime_session", "unknown"),
-            episode_session,
+        job_dir = self._job_dir(
+            metadata.get("anime_session", "unknown"), episode_session
         )
         os.makedirs(job_dir, exist_ok=True)
         manifest_path = os.path.join(job_dir, "manifest.json")
@@ -237,10 +273,8 @@ class DownloadManager:
         progress/cancel surface as the HLS path; no second system."""
         if episode_session in self._tasks:
             return
-        job_dir = os.path.join(
-            self.downloads_dir,
-            metadata.get("anime_session", "unknown"),
-            episode_session,
+        job_dir = self._job_dir(
+            metadata.get("anime_session", "unknown"), episode_session
         )
         os.makedirs(job_dir, exist_ok=True)
         manifest_path = os.path.join(job_dir, "manifest.json")
@@ -267,6 +301,24 @@ class DownloadManager:
         self._tasks[episode_session] = task
         task.add_done_callback(lambda t: self._on_done(episode_session))
 
+    def _job_dir(self, anime_session: str, episode_session: str) -> str:
+        """Where an episode's job lives. One place, so delete/resume/play
+        can never disagree — and one place to keep the names legal on
+        every platform (see _safe_component)."""
+        return os.path.join(
+            self.downloads_dir,
+            _safe_component(anime_session or "unknown"),
+            _safe_component(episode_session),
+        )
+
+    def remove_job(self, anime_session: str, episode_session: str) -> None:
+        """Delete a job's files (partials included). Safe when absent."""
+        import shutil
+
+        shutil.rmtree(
+            self._job_dir(anime_session, episode_session), ignore_errors=True
+        )
+
     async def _run_direct(
         self,
         episode_session: str,
@@ -277,8 +329,16 @@ class DownloadManager:
         cancel: asyncio.Event,
     ) -> None:
         """One file, chunked, with the app's progress contract."""
-        ext = os.path.splitext(url.split("?")[0])[1] or ".mkv"
-        final_path = os.path.join(job_dir, f"file{ext}")
+        # The provider's own filename when we have it (kayoanime's Drive
+        # files carry a real one) — the saved copy keeps what the source
+        # named it, so nothing is converted or renamed. Falls back to the
+        # URL's extension, which the Drive routes do not have.
+        filename = _safe_filename(metadata.get("filename"))
+        if filename:
+            final_path = os.path.join(job_dir, filename)
+        else:
+            ext = os.path.splitext(url.split("?")[0])[1] or ".mkv"
+            final_path = os.path.join(job_dir, f"file{ext}")
         part_path = f"{final_path}.part"
         progress = self._progress[episode_session]
         have = os.path.getsize(part_path) if os.path.exists(part_path) else 0
@@ -623,8 +683,7 @@ class DownloadManager:
             return {}
 
     @staticmethod
-    def _write_manifest(path: str, manifest: dict) -> None:
-        DownloadManager._atomic_write_text(
+    def _write_manifest(path: str, manifest: dict) -> None:        DownloadManager._atomic_write_text(
             path, json.dumps(manifest, indent=2, default=str)
         )
 

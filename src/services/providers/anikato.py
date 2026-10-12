@@ -144,16 +144,32 @@ def _parse_watch(html: str) -> dict:
     }
 
 
-def _parse_episode_list(html: str) -> list[tuple[int, str]]:
-    """Episode entries: data-num + data-ids (the server-list key)."""
-    entries: list[tuple[int, str]] = []
-    for m in re.finditer(r'data-num="(\d+)"[^>]*data-ids="([^"]+)"', html):
-        entries.append((int(m.group(1)), m.group(2)))
-    # Some layouts order the attributes the other way around.
-    for m in re.finditer(r'data-ids="([^"]+)"[^>]*data-num="(\d+)"', html):
-        entry = (int(m.group(2)), m.group(1))
-        if entry not in entries:
-            entries.append(entry)
+def _parse_episode_list(html: str) -> list[tuple[int, str, bool, bool]]:
+    """Episode entries: data-num + data-ids (the server-list key), plus the
+    per-episode sub/dub flags the page also carries (they used to be
+    dropped, so the detail screen couldn't say whether an episode has a
+    dub). The site serves the flags as the strings "1"/"0".
+
+    Read per TAG, not per attribute order: layouts differ (the flags ride
+    an `<a>` inside the `<li>`, and attribute order varies), and a
+    positional regex is how the flags were silently lost in the first
+    place."""
+    entries: list[tuple[int, str, bool, bool]] = []
+    for tag in re.findall(r"<[a-zA-Z]+([^>]*\bdata-num=\"\d+\"[^>]*)>", html):
+        num_m = re.search(r'data-num="(\d+)"', tag)
+        ids_m = re.search(r'data-ids="([^"]+)"', tag)
+        if not (num_m and ids_m):
+            continue
+        sub_m = re.search(r'data-sub="([01])"', tag)
+        dub_m = re.search(r'data-dub="([01])"', tag)
+        entries.append(
+            (
+                int(num_m.group(1)),
+                ids_m.group(1),
+                bool(sub_m and sub_m.group(1) == "1"),
+                bool(dub_m and dub_m.group(1) == "1"),
+            )
+        )
     entries.sort(key=lambda e: e[0])
     return entries
 
@@ -396,8 +412,12 @@ class AniKatoProvider:
                 duration="",
                 session=f"{slug}|{num}",  # sources() resolves this server-side
                 filler=False,
+                # The per-episode flags the page carries — the card reads
+                # them (nothing invented: absent flags stay False).
+                subs=subs,
+                dub=dub,
             )
-            for num, _ids in entries
+            for num, _ids, subs, dub in entries
         ]
         result = (results, False)
         self._cache_put(key, result, CACHE_TTL_EPISODES)

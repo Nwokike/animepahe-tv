@@ -36,6 +36,10 @@ class Episode:
     duration: str
     session: str
     filler: bool
+    # Per-episode audio availability (anikato's data-sub/data-dub flags).
+    # Defaults keep providers that don't publish them valid.
+    subs: bool = False
+    dub: bool = False
 
 
 @dataclass(unsafe_hash=True)

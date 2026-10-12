@@ -8,6 +8,11 @@ call out as wrong.
 
 Collapses to a 0x0 container on desktop/web (and whenever flet-yandex-ads
 isn't installed), so shared screens stay safe.
+
+Reload strategy: a banner that fails to fill leaves a blank slot, so a
+failed load rebuilds the banner once after a delay (bounded — a dead ad
+unit must not spin forever), and a successful load is left alone. The
+rebuild goes through the same builder so the caller needs no logic.
 """
 
 import flet as ft
@@ -26,6 +31,10 @@ AD_BANNER_UNIT_ID = "demo-banner-yandex"
 
 _STICKY_WIDTH = 320
 _STICKY_HEIGHT = 50
+# One rebuild attempt, after this delay. Yandex's own guidance is to let
+# the next refresh handle it; this is that refresh, once.
+_RELOAD_DELAY_SECONDS = 30.0
+_MAX_RELOADS = 1
 
 
 def _is_supported(page) -> bool:
@@ -50,14 +59,43 @@ def build_banner_ad(page=None, inline: bool = False) -> ft.Control:
     if not _is_supported(page):
         return ft.Container(width=0, height=0, visible=False)
 
+    def _ad() -> ft.Control:
+        try:
+            return fya.BannerAd(
+                unit_id=AD_BANNER_UNIT_ID,
+                size_type=fya.BannerSizeType.INLINE if inline else fya.BannerSizeType.STICKY,
+                on_load=lambda e: None,
+                on_load_failed=lambda e: _reload(),
+                on_click=lambda e: None,
+            )
+        except Exception:
+            return ft.Container(width=0, height=0, visible=False)
+
+    state = {"attempts": 0}
+
+    def _reload() -> None:
+        """One bounded rebuild after a failed fill: a fresh BannerAd in the
+        same slot. Without it a dead unit leaves that row blank for the
+        rest of the session; with more attempts it would spin forever."""
+        if state["attempts"] >= _MAX_RELOADS:
+            return
+        state["attempts"] += 1
+        from core.tasks import spawn
+
+        async def _later():
+            import asyncio
+
+            await asyncio.sleep(_RELOAD_DELAY_SECONDS)
+            try:
+                ad_box.content = _ad()
+                ad_box.update()
+            except Exception:
+                pass
+
+        spawn(_later(), name="banner-reload")
+
     try:
-        ad = fya.BannerAd(
-            unit_id=AD_BANNER_UNIT_ID,
-            size_type=fya.BannerSizeType.INLINE if inline else fya.BannerSizeType.STICKY,
-            on_load=lambda e: None,
-            on_load_failed=lambda e: None,
-            on_click=lambda e: None,
-        )
+        ad = _ad()
     except Exception:
         return ft.Container(width=0, height=0, visible=False)
 

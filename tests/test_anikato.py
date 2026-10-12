@@ -60,10 +60,14 @@ def test_parse_episode_list_maps_220_entries():
 
     entries = _parse_episode_list(_read("anikato_episode_list.html"))
     assert len(entries) == 220
-    nums = [n for n, _ in entries]
+    nums = [n for n, *_ in entries]
     assert nums[0] == 1 and 220 in nums
     # every entry carries the server-list token
-    assert all(ids for _, ids in entries)
+    assert all(ids for _, ids, *_ in entries)
+    # and the per-episode sub/dub flags the page serves (not invented:
+    # at least one of each shape exists in a 220-episode run)
+    assert any(subs for _n, _i, subs, _d in entries)
+    assert any(dub for _n, _i, _s, dub in entries)
 
 
 def test_parse_servers_maps_sub_and_dub_groups():
@@ -638,3 +642,31 @@ def test_history_clear_returns_rows_and_restore_puts_them_back():
 
     os.close(fd)
     asyncio.run(run(path))
+
+
+def test_episode_flags_are_captured_not_dropped():
+    """data-sub/data-dub were parsed away, so the card could never say an
+    episode has a dub. The parser reads them per tag (order-independent).
+    """
+    from services.providers.anikato import _parse_episode_list
+
+    html = (
+        '<li><a href="#" data-id="1" data-num="1" data-slug="1" data-mal="20"'
+        ' data-timestamp="1729197616" data-sub="1" data-dub="1" data-ids="AAA"'
+        ' class="active"></a></li>'
+        '<li><a href="#" data-ids="BBB" data-num="2" data-sub="0" data-dub="0"></a></li>'
+        '<li><a href="#" data-num="3" data-ids="CCC" data-sub="1" data-dub="0"></a></li>'
+    )
+    entries = _parse_episode_list(html)
+    assert entries == [
+        (1, "AAA", True, True),
+        (2, "BBB", False, False),
+        (3, "CCC", True, False),
+    ]
+
+
+def test_episode_flags_absent_means_false_not_a_crash():
+    from services.providers.anikato import _parse_episode_list
+
+    entries = _parse_episode_list('<a data-num="5" data-ids="ZZZ"></a>')
+    assert entries == [(5, "ZZZ", False, False)]

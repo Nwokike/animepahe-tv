@@ -35,6 +35,28 @@ def _pixeldrain_id(url: str) -> str:
     return m.group(1) if m else ""
 
 
+def _drive_file_id(url: str) -> str:
+    """The file id out of any of Drive's page shapes (/file/d/ID/view,
+    open?id=ID, uc?id=ID). Empty for folders — those are not streamable."""
+    m = re.search(r"drive\.google\.com/file/d/([A-Za-z0-9_-]+)", url) or re.search(
+        r"[?&]id=([A-Za-z0-9_-]+)", url
+    )
+    return m.group(1) if m else ""
+
+
+def _drive_direct(url: str) -> str:
+    """The keyless usercontent route for a Drive file link — the shape
+    kayoanime verified (206 with seek, no key, no consent). The raw page
+    href is HTML, so it is never playable as-is."""
+    file_id = _drive_file_id(url)
+    if not file_id:
+        return ""
+    return (
+        "https://drive.usercontent.google.com/download"
+        f"?id={file_id}&export=download&confirm=t"
+    )
+
+
 def _human_size(size) -> str:
     try:
         n = int(size or 0)
@@ -417,7 +439,12 @@ class KusonimeProvider:
         files = await self._batch_files(native)
         matches = []
         for f in files:
-            if is_movie and f.get("video"):
+            drive = _drive_direct(f["url"]) if any(
+                h in f["url"] for h in _SUPPORTED_DRIVE
+            ) else ""
+            # A Drive file streams like a movie file (it IS one) — the
+            # page shape just never says "video" the way a .rar does.
+            if is_movie and (f.get("video") or drive):
                 matches.append(f)
             elif not is_movie and not f.get("video") and episode and f["range"]:
                 if f["range"][0] <= episode <= f["range"][1]:
@@ -435,18 +462,21 @@ class KusonimeProvider:
                         size=_human_size(f.get("size_bytes")),
                     )
                 )
-            elif any(h in f["url"] for h in _SUPPORTED_DRIVE):
-                # The Drive route for this host verified as a range-serving
-                # route (same shape as kayoanime's keyless download).
-                results.append(
-                    Source(
-                        url=f["url"],
-                        resolution=f["quality"],
-                        audio="jpn",
-                        fansub="Kusonime",
-                        headers={"Referer": "https://drive.google.com/"},
+            else:
+                keyless = _drive_direct(f["url"])
+                if keyless:
+                    # The usercontent route (206-verified, same shape as
+                    # kayoanime's keyless download) rather than the page
+                    # href, which is HTML.
+                    results.append(
+                        Source(
+                            url=keyless,
+                            resolution=f["quality"],
+                            audio="jpn",
+                            fansub="Kusonime",
+                            headers={"Referer": "https://drive.google.com/"},
+                        )
                     )
-                )
         return results
 
     async def episodes_for_title(self, title: str) -> list[Episode]:

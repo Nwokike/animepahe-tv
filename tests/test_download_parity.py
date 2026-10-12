@@ -172,3 +172,125 @@ def test_start_direct_reuses_progress_and_store(tmp_path):
     assert row["state"] == _STATE_COMPLETE
     assert row["file"].endswith("file.mkv")
     assert row["size_bytes"] == len(b"DATA" * 512)
+
+
+# ---------------------------------------------------------------------
+# The provider's own filename, kept (Phase 7.5)
+# ---------------------------------------------------------------------
+
+def test_safe_filename_keeps_the_real_name_and_rejects_identifiers():
+    from services.downloads import _safe_filename
+
+    # A Drive name with quality + fansub survives intact.
+    assert _safe_filename("[Kayoanime] Frieren - 01 [1080p] (SubsPlease).mkv") == (
+        "[Kayoanime] Frieren - 01 [1080p] (SubsPlease).mkv"
+    )
+    # Windows-illegal characters are replaced, never the whole name.
+    assert _safe_filename("a:b*c?.mkv") == "a_b_c_.mkv"
+    # A bare id (no extension) is an identifier, not a name.
+    assert _safe_filename("1AbCdEfGhIjKlMnOpQrSt") is None
+    # Drive serves ids with a query string on the URL; the NAME is what
+    # matters here, and a path prefix is stripped.
+    assert _safe_filename("sub/dir/Ep 01.mkv") == "Ep 01.mkv"
+    for junk in (None, "", "   ", ".", "..", "no-extension"):
+        assert _safe_filename(junk) is None
+
+
+def test_direct_download_keeps_the_provided_filename(tmp_path):
+    """The keyless Drive route ends in an id, not a name — so the file on
+    disk keeps whatever the provider said it was called. No renaming, no
+    converting."""
+    import asyncio
+    import os
+
+    from services.downloads import DownloadManager
+
+    name = "[Kayoanime] Frieren - 01 [1080p] (SubsProvide).mkv"
+    body = b"x" * 2048
+    mgr = DownloadManager(store=None, downloads_dir=str(tmp_path / "dl"))
+
+    async def _fake(url, headers, part, final, **kw):
+        with open(part, "wb") as f:
+            f.write(body)
+        os.replace(part, final)
+        return True
+
+    mgr._download_file = _fake
+
+    async def scenario():
+        await mgr.start_direct(
+            "ep1",
+            "https://drive.usercontent.google.com/download?id=abc&export=download&confirm=t",
+            {},
+            {"anime_session": "kayoanime:961", "filename": name},
+        )
+        await asyncio.sleep(0.3)
+
+    asyncio.run(scenario())
+    # a namespace colon is illegal on Windows, so the job dir is the
+    # sanitized mapping — stable, because resume has to find it again
+    import json
+
+    job = tmp_path / "dl" / "kayoanime_961" / "ep1"
+    saved = job / name
+    assert saved.exists()
+    assert saved.read_bytes() == body
+    # the manifest records the same name, so a resume finds the file
+    manifest = json.loads((job / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["metadata"]["filename"] == name
+
+
+def test_direct_download_falls_back_to_the_url_extension(tmp_path):
+    import asyncio
+    import os
+
+    from services.downloads import DownloadManager
+
+    body = b"y" * 512
+    mgr = DownloadManager(store=None, downloads_dir=str(tmp_path / "dl"))
+
+    async def _fake(url, headers, part, final, **kw):
+        with open(part, "wb") as f:
+            f.write(body)
+        os.replace(part, final)
+        return True
+
+    mgr._download_file = _fake
+
+    async def scenario():
+        await mgr.start_direct(
+            "ep2", "https://cdn/x/episode.mkv", {}, {"anime_session": "anikato:a"}
+        )
+        await asyncio.sleep(0.3)
+
+    asyncio.run(scenario())
+    assert (tmp_path / "dl" / "anikato_a" / "ep2" / "file.mkv").exists()
+
+
+def test_job_paths_are_stable_and_legal_on_every_platform(tmp_path):
+    """Our session ids carry a namespace colon ('kayoanime:961') and the
+    kusonime ones a pipe ('5789|7'). NTFS rejects both, which is how every
+    download silently failed to start on Windows: makedirs raised
+    WinError 267 inside the spawned task, so the row was saved as partial
+    and nothing ever downloaded. The mapping is stable, so a resume (or a
+    delete) finds the same directory again."""
+    import os
+
+    from services.downloads import DownloadManager
+
+    mgr = DownloadManager(store=None, downloads_dir=str(tmp_path))
+    first = mgr._job_dir("kayoanime:961", "f274")
+    assert mgr._job_dir("kayoanime:961", "f274") == first  # stable
+    assert mgr._job_dir("kusonime:5789", "5789|7") == mgr._job_dir(
+        "kusonime:5789", "5789|7"
+    )
+    # the directory is actually creatable now
+    os.makedirs(first, exist_ok=True)
+    assert os.path.isdir(first)
+    # and the pipe session too
+    pipe_dir = mgr._job_dir("kusonime:5789", "5789|7")
+    os.makedirs(pipe_dir, exist_ok=True)
+    assert os.path.isdir(pipe_dir)
+    # remove_job deletes what start_direct created
+    mgr.remove_job("kayoanime:961", "f274")
+    assert not os.path.isdir(first)

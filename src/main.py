@@ -1418,6 +1418,16 @@ class AppController:
             self._show_error_snackbar("Couldn't resolve the stream for download.")
             return
 
+        # The provider's own filename when it has one — the saved copy
+        # keeps what the source called it (quality and fansub included).
+        provider = self.router.get(self._owner_of(anime_session or ""))
+        filename = None
+        if provider is not None and hasattr(provider, "file_name"):
+            try:
+                filename = provider.file_name(anime_session, episode_session)
+            except Exception as ex:
+                logger.debug("provider filename lookup failed: %s", ex)
+
         metadata = {
             "anime_session": anime_session,
             "anime_id": (ep.anime_id if ep else 0)
@@ -1425,6 +1435,7 @@ class AppController:
             "title": (anime or {}).get("title", ""),
             "poster": (anime or {}).get("poster", ""),
             "episode_num": ep.episode if ep else 0,
+            "filename": filename or "",
         }
         rows = await self.store.get_downloads()
         row = dict(metadata)
@@ -1464,13 +1475,11 @@ class AppController:
     async def delete_download(self, episode_session: str):
         rows = await self.store.get_downloads()
         row = rows.get(episode_session) or {}
-        anime_session = row.get("anime_session", "unknown")
-        job_dir = os.path.join(
-            self.downloads.downloads_dir, anime_session, episode_session
+        # The manager owns the layout (and its platform-safe name mapping);
+        # computing the path here would drift from where the file lives.
+        self.downloads.remove_job(
+            row.get("anime_session", "unknown"), episode_session
         )
-        import shutil
-
-        shutil.rmtree(job_dir, ignore_errors=True)
         await self.store.remove_download(episode_session)
         rows.pop(episode_session, None)
         state.downloads = rows

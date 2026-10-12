@@ -133,6 +133,8 @@ class KayoanimeProvider:
         self._folders: dict[str, list] = {}
         # file_id -> (episode num, filename, size) for the open post.
         self._files: dict[str, dict] = {}
+        # post_id -> [(folderId, label)] the walk could NOT open.
+        self._gated: dict[str, list] = {}
         # post_id -> resolution parsed from the post's title (never invented).
         self._quality: dict[str, int] = {}
 
@@ -334,14 +336,16 @@ class KayoanimeProvider:
             return ([], False)
         # Walk every folder, collect (episode -> file), dedupe by number —
         # boxes overlap (Box 8 duplicates 6/7's range) and the larger file
-        # is the complete copy.
+        # is the complete copy. BOX labels are BATCH volumes, not seasons,
+        # so they name a folder in the gated report rather than splitting
+        # the episode list.
         by_episode: dict[int, dict] = {}
-        restricted = False
-        for folder_id, _label in folders:
+        restricted_folders: list[tuple[str, str]] = []
+        for folder_id, label in folders:
             files = await self._list_folder(folder_id)
             if not files:
                 if await self._is_restricted(folder_id):
-                    restricted = True
+                    restricted_folders.append((folder_id, label))
                 continue
             for f in files:
                 num = _episode_number(f.get("name", ""))
@@ -361,6 +365,9 @@ class KayoanimeProvider:
                         "size": size,
                     }
         self._files[post_id] = by_episode
+        self._gated[post_id] = [
+            (folder_id, label) for folder_id, label in restricted_folders
+        ]
         results = [
             Episode(
                 id=i,
@@ -378,9 +385,33 @@ class KayoanimeProvider:
         ]
         result = (results, False)
         self._cache_put(key, result, CACHE_TTL_EPISODES)
-        if restricted:
-            logger.info("kayoanime post %s: some folders are Group-gated", post_id)
+        if self._gated[post_id]:
+            # Group-gated folders are a silent gap in the episode list, so
+            # they are named here (the settings health panel shows them)
+            # instead of disappearing into a log line.
+            logger.warning(
+                "kayoanime post %s: Group-gated folders: %s",
+                post_id,
+                ", ".join(f"{label or folder_id}" for folder_id, label in self._gated[post_id]),
+            )
         return result
+
+    def gated_folders(self, anime_session: str) -> list[str]:
+        """Folder labels this post's episode walk could not open. Empty
+        unless episodes() ran and found some."""
+        _, post_id = split_session(anime_session)
+        return [
+            label or folder_id for folder_id, label in self._gated.get(post_id, [])
+        ]
+
+    def file_name(self, anime_session: str, episode_session: str) -> str | None:
+        """The Drive file's real name for an episode — carried into the
+        download so the saved copy keeps what the source called it."""
+        _, post_id = split_session(anime_session)
+        for row in (self._files.get(post_id) or {}).values():
+            if row.get("file_id") == episode_session:
+                return row.get("name") or None
+        return None
 
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
         """The episode's direct file on the two routes the map verified:
