@@ -46,3 +46,11 @@ BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+
+# Kayoanime (WordPress + Google Drive). The Drive "web key" is Google's
+# own public client key (shipped inside drive.google.com's own app) with
+# its HTTP-referrer restriction — the documented keyless listing route.
+KAYOANIME_API = "https://kayoanime.com/wp-json/wp/v2"
+DRIVE_API = "https://www.googleapis.com/drive/v3"
+DRIVE_WEB_KEY = "AIzaSyC1qbk75NzWBvSaDh6KnsjjA9pIrP4lYIE"
+DRIVE_REFERER = "https://drive.google.com/"

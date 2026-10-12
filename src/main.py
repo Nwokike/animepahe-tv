@@ -97,6 +97,7 @@ class AppController:
         from services.providers.anikato import AniKatoProvider
         from services.providers.animeout import AnimeOutProvider
         from services.providers.animepahe_provider import AnimePaheProvider
+        from services.providers.kayoanime import KayoanimeProvider
         from services.providers.kusonime import KusonimeProvider
         from services.router import ProviderRouter
 
@@ -105,6 +106,7 @@ class AppController:
                 AniKatoProvider(),
                 AnimeOutProvider(),
                 KusonimeProvider(),
+                KayoanimeProvider(),
                 AnimePaheProvider(self.scraper),
             ]
         )
