@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 PARALLEL_SEGMENTS = 6
 SEGMENT_TIMEOUT = 30
 PLAYLIST_TIMEOUT = 15
+# A whole-file download is not a segment: the timeout must cover the
+# full response body, not a 30s segment. User aborts still arrive via
+# the cancel event (and Cancel on a stuck transfer via aclose).
+FILE_TIMEOUT = 600
 
 _ERR_THREAD = None
 _STATE_PARTIAL = "partial"
@@ -186,6 +190,160 @@ class DownloadManager:
         )
         self._tasks[episode_session] = task
         task.add_done_callback(lambda t: self._on_done(episode_session))
+
+    async def detect_kind(self, url: str, headers: dict) -> str:
+        """What the resolved URL actually is: an HLS playlist or a file.
+
+        The peek is the URL's own first bytes — never the provider's
+        name and never the extension. 'hls' -> segment download; 'file'
+        -> one range-resumed file. Everything else is a file: if it
+        doesn't declare EXT-X-M3U, there is nothing to segment."""
+        client = self._get_client()
+        try:
+            resp = await client.get(url, headers=headers, stream=True, timeout=PLAYLIST_TIMEOUT)
+            if url.split("?")[0].endswith(".m3u8") or resp.headers.get(
+                "content-type", ""
+            ).startswith("application/vnd.apple.mpegurl"):
+                await resp.aclose()
+                return "hls"
+            try:
+                first = await resp.anext()
+            except StopAsyncIteration:
+                first = b""
+            finally:
+                await resp.aclose()
+            if b"#EXTM3U" in (first or b"")[:1024]:
+                return "hls"
+        except Exception as ex:
+            logger.warning("download shape peek failed for %s: %s", url, ex)
+        return "file"
+
+    async def start_direct(
+        self,
+        episode_session: str,
+        url: str,
+        headers: dict,
+        metadata: dict,
+    ) -> None:
+        """Enqueue (or resume) a direct-file download — one file, any
+        size, range-resumable. Same lifecycle, same store rows, same
+        progress/cancel surface as the HLS path; no second system."""
+        if episode_session in self._tasks:
+            return
+        job_dir = os.path.join(
+            self.downloads_dir,
+            metadata.get("anime_session", "unknown"),
+            episode_session,
+        )
+        os.makedirs(job_dir, exist_ok=True)
+        manifest_path = os.path.join(job_dir, "manifest.json")
+        manifest = self._read_manifest(manifest_path)
+        if manifest.get("state") == _STATE_COMPLETE:
+            return
+        manifest.update(
+            {
+                "url": url,
+                "headers": headers,
+                "state": _STATE_PARTIAL,
+                "metadata": metadata,
+            }
+        )
+        self._write_manifest(manifest_path, manifest)
+        self._jobs[episode_session] = {"dir": job_dir, "manifest": manifest_path}
+        cancel = asyncio.Event()
+        self._cancel[episode_session] = cancel
+        self._progress[episode_session] = {"done": 0, "total": 0, "bytes": 0}
+        task = asyncio.create_task(
+            self._run_direct(episode_session, url, headers, metadata, job_dir, cancel),
+            name=f"download-{episode_session}",
+        )
+        self._tasks[episode_session] = task
+        task.add_done_callback(lambda t: self._on_done(episode_session))
+
+    async def _run_direct(
+        self,
+        episode_session: str,
+        url: str,
+        headers: dict,
+        metadata: dict,
+        job_dir: str,
+        cancel: asyncio.Event,
+    ) -> None:
+        """One file, chunked, with the app's progress contract."""
+        ext = os.path.splitext(url.split("?")[0])[1] or ".mkv"
+        final_path = os.path.join(job_dir, f"file{ext}")
+        part_path = f"{final_path}.part"
+        progress = self._progress[episode_session]
+        have = os.path.getsize(part_path) if os.path.exists(part_path) else 0
+        progress["bytes"] = have
+        on_progress = getattr(self, "on_progress", None)
+
+        def _chunk(n: int):
+            progress["bytes"] = have + n if not progress["done"] else progress["bytes"] + n
+            progress["done"] = 1
+            if on_progress is not None:
+                try:
+                    on_progress(episode_session, progress["bytes"], 0)
+                except Exception:
+                    pass
+
+        try:
+            ok = await self._download_file(
+                url, headers, part_path, final_path, on_progress=_chunk, cancel=cancel
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as ex:
+            logger.warning("direct download failed for %s: %s", episode_session, ex)
+            if self._store is not None:
+                await self._store.save_download_error(episode_session, str(ex))
+            return
+        finally:
+            manifest_path = os.path.join(job_dir, "manifest.json")
+            if not os.path.exists(os.path.join(job_dir, "manifest.json")) or (
+                self._read_manifest(manifest_path).get("state") != _STATE_COMPLETE
+            ):
+                self._write_manifest(
+                    manifest_path,
+                    {
+                        "url": url,
+                        "headers": headers,
+                        "state": _STATE_PARTIAL,
+                        "metadata": metadata,
+                    },
+                )
+        if not ok:
+            # Cancelled mid-file: the partial stays on disk (resumable).
+            return
+        size_bytes = os.path.getsize(final_path)
+        if on_progress is not None:
+            try:
+                on_progress(episode_session, size_bytes, size_bytes)
+            except Exception:
+                pass
+        self._write_manifest(
+            os.path.join(job_dir, "manifest.json"),
+            {
+                "url": url,
+                "headers": headers,
+                "state": _STATE_COMPLETE,
+                "file": final_path,
+                "metadata": metadata,
+            },
+        )
+        if self._store is not None:
+            row = dict(metadata)
+            row.update(
+                {
+                    "state": _STATE_COMPLETE,
+                    "file": final_path,
+                    "size_bytes": size_bytes,
+                    "completed_at": time.time(),
+                }
+            )
+            await self._store.save_download(episode_session, row)
+        self._progress.pop(episode_session, None)
+        logger.info("download complete (direct): %s (%d bytes)", episode_session, size_bytes)
 
     def cancel(self, episode_session: str):
         cancel = self._cancel.get(episode_session)
@@ -389,21 +547,43 @@ class DownloadManager:
             logger.warning("GET %s failed: %s", url, ex)
         return None
 
-    async def _download_file(self, url: str, headers: dict, part_path: str, final_path: str):
-        """Download (or resume) one file; atomically move it into place."""
+    async def _download_file(
+        self,
+        url: str,
+        headers: dict,
+        part_path: str,
+        final_path: str,
+        on_progress=None,
+        cancel=None,
+        timeout=None,
+    ):
+        """Download (or resume) one file; atomically move it into place.
+
+        The chunk loop optionally reports byte progress and honors a
+        cancel event — the HLS segment callers pass neither, the
+        direct-file path passes both, and both share this one body."""
         have = os.path.getsize(part_path) if os.path.exists(part_path) else 0
         request_headers = dict(headers)
         if have:
             request_headers["Range"] = f"bytes={have}-"
         client = self._get_client()
         resp = await client.get(
-            url, headers=request_headers, stream=True, timeout=SEGMENT_TIMEOUT
+            url,
+            headers=request_headers,
+            stream=True,
+            timeout=FILE_TIMEOUT if timeout is None else timeout,
         )
         mode = "ab" if have and resp.status_code == 206 else "wb"
         with open(part_path, mode) as f:
             async for chunk in resp.aiter_bytes():
+                if cancel is not None and cancel.is_set():
+                    await resp.aclose()
+                    return False
                 f.write(chunk)
+                if on_progress is not None:
+                    on_progress(len(chunk))
         os.replace(part_path, final_path)
+        return True
 
     # ------------------------------------------------------------------
     # Filesystem helpers

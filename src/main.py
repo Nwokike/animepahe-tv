@@ -1194,8 +1194,8 @@ class AppController:
             self._show_error_snackbar("No stream found for this episode.")
             self._finish_download_start(episode_session)
             return
-        m3u8 = await self._resolve_source(sources[0], anime_session)
-        if not m3u8:
+        resolved = await self._resolve_source(sources[0], anime_session)
+        if not resolved:
             self._show_error_snackbar("Couldn't resolve the stream for download.")
             self._finish_download_start(episode_session)
             return
@@ -1213,17 +1213,26 @@ class AppController:
         state.downloads = rows | {episode_session: row}
         state.downloads_version += 1
 
-        from components.player.immersive_player import KWIK_USER_AGENT
+        # One resolution, two shapes — decided by what the media IS, never
+        # by which source it came from: a file is fetched directly, an
+        # m3u8 by its segments, at whatever quality it serves.
+        source_headers = dict(sources[0].headers) if sources[0].headers else {}
+        kind = await self.downloads.detect_kind(resolved, source_headers)
+        if kind == "file":
+            await self.downloads.start_direct(
+                episode_session, resolved, source_headers, metadata
+            )
+        else:
+            from components.player.immersive_player import KWIK_USER_AGENT
 
-        await self.downloads.start(
-            episode_session,
-            m3u8,
-            {
-                "User-Agent": KWIK_USER_AGENT,
-                "Referer": "https://kwik.cx/",
-            },
-            metadata,
-        )
+            if not source_headers:
+                source_headers = {
+                    "User-Agent": KWIK_USER_AGENT,
+                    "Referer": "https://kwik.cx/",
+                }
+            await self.downloads.start(
+                episode_session, resolved, source_headers, metadata
+            )
         self._finish_download_start(episode_session)
 
     def _finish_download_start(self, episode_session: str) -> None:
@@ -1252,27 +1261,24 @@ class AppController:
     async def play_downloaded(self, episode_session: str):
         rows = await self.store.get_downloads()
         row = rows.get(episode_session) or {}
-        playlist = row.get("playlist")
-        if not playlist or not os.path.exists(playlist):
+        local = row.get("playlist") or row.get("file")
+        if not local or not os.path.exists(local):
             # Open the player branch on the error card — staying on Downloads
             # with no feedback looks like the tap did nothing.
             state.player_error = "The downloaded file is missing."
             state.player_open = True
             state.episodes_version += 1
             return
-        from components.player.immersive_player import KWIK_USER_AGENT
-
         state.player_error = None
+        # Local playback (an .m3u8 rewrite or a fetched file) needs no
+        # request headers — the bytes are already on disk.
         state.player_spec = {
-            "resource": playlist,
+            "resource": local,
             "variants": [],
             "title": row.get("title", "AnimePahe"),
             "episode_session": episode_session,
             "anime_session": row.get("anime_session", ""),
-            "headers": {
-                "User-Agent": KWIK_USER_AGENT,
-                "Referer": "https://kwik.cx/",
-            },
+            "headers": {},
         }
         state.player_open = True
         state.episodes_version += 1
