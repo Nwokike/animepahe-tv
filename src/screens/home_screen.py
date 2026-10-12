@@ -27,7 +27,7 @@ from core.constants import (
     LBL_CF_VERIFY_BUTTON,
     LBL_OFFLINE_BODY,
 )
-from core.theme import AppColors
+from core.theme import AppColors, next_theme_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -221,17 +221,23 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
     )
 
 
+_THEME_ICONS = {
+    ft.ThemeMode.DARK: ft.Icons.DARK_MODE_ROUNDED,
+    ft.ThemeMode.LIGHT: ft.Icons.LIGHT_MODE_ROUNDED,
+    ft.ThemeMode.SYSTEM: ft.Icons.SETTINGS_SYSTEM_DAYDREAM_ROUNDED,
+}
+
+
 def _theme_cycle(page) -> tuple[str, object]:
-    """3-way cycle: DARK -> LIGHT -> SYSTEM (Sherlock's pattern)."""
-    mode = getattr(page, "theme_mode", ft.ThemeMode.SYSTEM) if page else ft.ThemeMode.SYSTEM
-    order = (ft.ThemeMode.DARK, ft.ThemeMode.LIGHT, ft.ThemeMode.SYSTEM)
-    nxt = order[(order.index(mode) + 1) % 3] if mode in order else ft.ThemeMode.SYSTEM
-    icon = {
-        ft.ThemeMode.DARK: ft.Icons.LIGHT_MODE_ROUNDED,
-        ft.ThemeMode.LIGHT: ft.Icons.SETTINGS_SYSTEM_DAYDREAM_ROUNDED,
-        ft.ThemeMode.SYSTEM: ft.Icons.DARK_MODE_ROUNDED,
-    }[mode]
-    return icon, nxt
+    """3-way cycle: DARK -> LIGHT -> SYSTEM (Sherlock's pattern), on the
+    shared order. The icon names the mode the tap lands on."""
+    mode = (
+        getattr(page, "theme_mode", ft.ThemeMode.SYSTEM)
+        if page
+        else ft.ThemeMode.SYSTEM
+    )
+    nxt = next_theme_mode(mode)
+    return _THEME_ICONS.get(nxt, ft.Icons.DARK_MODE_ROUNDED), nxt
 
 
 def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:

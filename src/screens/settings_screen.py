@@ -12,7 +12,7 @@ from core.logger_handler import (
     get_telemetry_snapshot,
     in_memory_log_handler,
 )
-from core.theme import AppColors
+from core.theme import AppColors, mode_for_token, token_for_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -251,13 +251,7 @@ def SettingsScreen() -> ft.Control:
         ("light", "Light", ft.Icons.LIGHT_MODE_ROUNDED),
         ("system", "System", ft.Icons.SETTINGS_SYSTEM_DAYDREAM_ROUNDED),
     ]
-    _current_theme = state.theme_mode
-    if _current_theme == ft.ThemeMode.DARK:
-        _current_theme = "dark"
-    elif _current_theme == ft.ThemeMode.LIGHT:
-        _current_theme = "light"
-    else:
-        _current_theme = "system"
+    _current_theme = token_for_mode(state.theme_mode)
 
     def _pick_theme(token, mode):
 
@@ -284,12 +278,9 @@ def SettingsScreen() -> ft.Control:
                         )
                     },
                 ),
-                on_click=lambda e, tk=token, md=md: _pick_theme(tk, md),
+                on_click=lambda e, tk=token, md=mode_for_token(token): _pick_theme(tk, md),
             )
             for token, label, icon in _THEME_OPTIONS
-            for md in [
-                {"dark": ft.ThemeMode.DARK, "light": ft.ThemeMode.LIGHT, "system": ft.ThemeMode.SYSTEM}[token]
-            ]
         ],
         spacing=8,
     )

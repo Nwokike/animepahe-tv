@@ -19,7 +19,7 @@ from core.constants import APP_NAME
 from core.logger_handler import in_memory_log_handler  # noqa: F401
 from core.notify import show_snack
 from core.tasks import spawn
-from core.theme import AppColors, AppTheme
+from core.theme import AppColors, AppTheme, mode_for_token, token_for_mode
 from services.animepahe import AnimePaheScraper
 from services.cache import Cache
 from services.kwik_resolver import KwikResolver
@@ -165,35 +165,22 @@ class AppController:
         spawn(self._check_for_updates_bg(), name="update-check")
 
     async def _restore_theme_mode(self):
-        modes = {
-            "dark": ft.ThemeMode.DARK,
-            "light": ft.ThemeMode.LIGHT,
-            "system": ft.ThemeMode.SYSTEM,
-        }
         try:
             saved = await self.store.get_theme_mode()
         except Exception as ex:
             logger.warning("theme restore failed: %s", ex)
             return
-        if saved in modes:
-            self.page.theme_mode = modes[saved]
-            state.theme_mode = modes[saved]
+        if saved:
+            mode = mode_for_token(saved)
+            self.page.theme_mode = mode
+            state.theme_mode = mode
 
     async def save_theme_mode(self, mode: ft.ThemeMode):
         state.theme_mode = mode
         try:
-            await self.store.save_theme_mode(self._theme_name(mode))
+            await self.store.save_theme_mode(token_for_mode(mode))
         except Exception as ex:
             logger.warning("theme save failed: %s", ex)
-
-    @staticmethod
-    def _theme_name(mode: ft.ThemeMode) -> str:
-        names = {
-            ft.ThemeMode.DARK: "dark",
-            ft.ThemeMode.LIGHT: "light",
-            ft.ThemeMode.SYSTEM: "system",
-        }
-        return names.get(mode, "system")
 
     async def _check_for_updates_bg(self):
         await asyncio.sleep(2.0)

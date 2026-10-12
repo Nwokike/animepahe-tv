@@ -1,6 +1,36 @@
 import flet as ft
 
 
+# The 3-way theme (house pattern): token <-> ThemeMode in ONE place each,
+# so the settings picker, the persisted name, and the header cycle cannot
+# drift apart.
+THEME_MODES = {
+    "dark": ft.ThemeMode.DARK,
+    "light": ft.ThemeMode.LIGHT,
+    "system": ft.ThemeMode.SYSTEM,
+}
+THEME_TOKENS = {mode: token for token, mode in THEME_MODES.items()}
+# The header toggle cycles in this order.
+THEME_ORDER = (ft.ThemeMode.DARK, ft.ThemeMode.LIGHT, ft.ThemeMode.SYSTEM)
+
+
+def mode_for_token(token: str) -> ft.ThemeMode:
+    """The stored token's mode; unknown tokens fall back to SYSTEM."""
+    return THEME_MODES.get(token, ft.ThemeMode.SYSTEM)
+
+
+def token_for_mode(mode) -> str:
+    """The persisted token for a mode; unknown modes fall back to system."""
+    return THEME_TOKENS.get(mode, "system")
+
+
+def next_theme_mode(mode) -> ft.ThemeMode:
+    """3-way cycle: DARK -> LIGHT -> SYSTEM."""
+    if mode not in THEME_ORDER:
+        return ft.ThemeMode.SYSTEM
+    return THEME_ORDER[(THEME_ORDER.index(mode) + 1) % len(THEME_ORDER)]
+
+
 class AppColors:
     # Animepahe-TV custom premium palette
     PRIMARY = "#F43F5E"  # Rose 500
@@ -32,79 +62,25 @@ class AppColors:
     TRANSPARENT = ft.Colors.TRANSPARENT
 
     @staticmethod
-    def _is_dark(page: ft.Page) -> bool:
-        if page.theme_mode == ft.ThemeMode.LIGHT:
-            return False
-        if page.theme_mode == ft.ThemeMode.DARK:
-            return True
-        try:
-            return page.platform_brightness == ft.Brightness.DARK
-        except Exception:
-            return True
-
-    @staticmethod
     def is_dark_mode(mode: ft.ThemeMode | None, platform_brightness=None) -> bool:
-        """The branch every accessor shares: SYSTEM resolves through the
-        platform brightness (dark when unknown — a TV default)."""
+        """The branch every mode-dependent decision shares: SYSTEM resolves
+        through the platform brightness (dark when unknown — a TV default).
+
+        Callers pass the values they already have; nothing reads the page
+        itself, so this stays pure and testable.
+        """
         if mode == ft.ThemeMode.LIGHT:
             return False
         if mode == ft.ThemeMode.DARK:
+            return True
+        # SYSTEM with no brightness answer yet (or a platform that refuses
+        # the question) is dark — the app's own default, not a coin flip.
+        if platform_brightness is None:
             return True
         try:
             return platform_brightness == ft.Brightness.DARK
         except Exception:
             return True
-
-    @staticmethod
-    def get_text(page: ft.Page):
-        """The on-surface text color for the page's effective mode."""
-        try:
-            mode = getattr(page, "theme_mode", None)
-            brightness = getattr(page, "platform_brightness", None)
-        except Exception:
-            mode, brightness = None, None
-        return AppColors.DARK_TEXT if AppColors.is_dark_mode(mode, brightness) else AppColors.LIGHT_TEXT
-
-    @staticmethod
-    def get_text_dim(page: ft.Page):
-        try:
-            mode = getattr(page, "theme_mode", None)
-            brightness = getattr(page, "platform_brightness", None)
-        except Exception:
-            mode, brightness = None, None
-        return (
-            AppColors.DARK_TEXT_DIM
-            if AppColors.is_dark_mode(mode, brightness)
-            else AppColors.LIGHT_TEXT_DIM
-        )
-
-    @staticmethod
-    def get_glass_bg(page: ft.Page):
-        return ft.Colors.with_opacity(
-            0.05, ft.Colors.WHITE if AppColors._is_dark(page) else ft.Colors.BLACK
-        )
-
-    @staticmethod
-    def get_hover_bg(page: ft.Page):
-        return ft.Colors.with_opacity(
-            0.1, ft.Colors.WHITE if AppColors._is_dark(page) else ft.Colors.BLACK
-        )
-
-    @staticmethod
-    def get_surface_variant(page: ft.Page):
-        if page.theme_mode == ft.ThemeMode.LIGHT:
-            return AppColors.LIGHT_SURFACE_VARIANT
-        if page.theme_mode == ft.ThemeMode.DARK:
-            return AppColors.DARK_SURFACE_VARIANT
-        try:
-            is_dark = page.platform_brightness == ft.Brightness.DARK
-            return (
-                AppColors.DARK_SURFACE_VARIANT
-                if is_dark
-                else AppColors.LIGHT_SURFACE_VARIANT
-            )
-        except Exception:
-            return AppColors.DARK_SURFACE_VARIANT
 
 
 class AppTheme:

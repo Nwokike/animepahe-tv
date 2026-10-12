@@ -12,7 +12,7 @@ import asyncio
 
 import flet as ft
 
-from core.theme import AppTheme
+from core.theme import AppTheme, mode_for_token, next_theme_mode, token_for_mode
 from services.store import JsonStore
 
 
@@ -53,16 +53,36 @@ def test_theme_mode_round_trip(tmp_path, monkeypatch):
 
 
 def test_theme_names_map_every_mode():
-    from main import AppController
-
-    class _Page:
-        pass
-
-    controller = AppController(_Page())
+    """token <-> mode is one mapping, shared by the store name, the
+    settings picker highlight, and the header cycle — so it is tested
+    here as data, not per call site."""
     names = {
         ft.ThemeMode.DARK: "dark",
         ft.ThemeMode.LIGHT: "light",
         ft.ThemeMode.SYSTEM: "system",
     }
     for mode, name in names.items():
-        assert controller._theme_name(mode) == name
+        assert token_for_mode(mode) == name
+        assert mode_for_token(name) is mode
+    # Unknown values degrade, never raise.
+    assert token_for_mode(None) == "system"
+    assert mode_for_token("banana") is ft.ThemeMode.SYSTEM
+
+
+def test_theme_cycle_order_is_shared():
+    assert next_theme_mode(ft.ThemeMode.DARK) is ft.ThemeMode.LIGHT
+    assert next_theme_mode(ft.ThemeMode.LIGHT) is ft.ThemeMode.SYSTEM
+    assert next_theme_mode(ft.ThemeMode.SYSTEM) is ft.ThemeMode.DARK
+    assert next_theme_mode(None) is ft.ThemeMode.SYSTEM
+
+
+def test_system_resolves_through_platform_brightness():
+    """The one branch every mode-dependent decision shares: SYSTEM is the
+    platform's answer, and an unknown platform is dark (a TV default)."""
+    from core.theme import AppColors
+
+    assert AppColors.is_dark_mode(ft.ThemeMode.DARK, ft.Brightness.LIGHT) is True
+    assert AppColors.is_dark_mode(ft.ThemeMode.LIGHT, ft.Brightness.DARK) is False
+    assert AppColors.is_dark_mode(ft.ThemeMode.SYSTEM, ft.Brightness.DARK) is True
+    assert AppColors.is_dark_mode(ft.ThemeMode.SYSTEM, ft.Brightness.LIGHT) is False
+    assert AppColors.is_dark_mode(None, None) is True
