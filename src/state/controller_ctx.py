@@ -24,6 +24,10 @@ class ControllerMethods:
     open_anime: object = lambda session: None
     back: object = lambda: None
 
+    # Dialogs (the shell's single dialog portal)
+    open_sheet: object = lambda dialog: None
+    close_dialog: object = lambda: None
+
     # Data actions
     load_latest: object = lambda: None
     load_episodes: object = lambda session: None

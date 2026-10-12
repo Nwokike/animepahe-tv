@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, __file__.rsplit("tests", 1)[0] + "src")
 
+import app_shell
 import main as app_main
 from state.controller_ctx import ControllerMethods
 
@@ -94,3 +95,17 @@ def test_every_controller_method_slot_has_a_wiring_or_is_documented():
                       "choose_quality", "open_sheet", "close_dialog"}
     uncovered = slots - wired - shell_assigned
     assert not uncovered, f"ControllerMethods slots never wired: {sorted(uncovered)}"
+
+
+def test_dialog_slots_are_typed_noops_the_shell_then_assigns():
+    """open_sheet/close_dialog are shell-owned (the single dialog portal).
+    The typed default matters: a screen that renders before the shell's
+    first render must get a no-op, not an AttributeError on a dynamic
+    attribute."""
+    methods = ControllerMethods()
+    assert methods.open_sheet("a dialog") is None
+    assert methods.close_dialog() is None
+
+    shell_source = inspect.getsource(app_shell.AppShell)
+    for name in ("open_sheet", "close_dialog"):
+        assert f"controller.{name} =" in shell_source, f"the shell never assigns {name}"
