@@ -117,6 +117,16 @@ class AppTheme:
         "outline_variant": "#CBD5E1",
     }
 
+    # One motion everywhere: the platform defaults differ per OS, which
+    # makes the same tap feel like a different app on a TV and a phone.
+    _PAGE_TRANSITIONS = ft.PageTransitionsTheme(
+        android=ft.PageTransitionTheme.CUPERTINO,
+        ios=ft.PageTransitionTheme.CUPERTINO,
+        linux=ft.PageTransitionTheme.CUPERTINO,
+        macos=ft.PageTransitionTheme.CUPERTINO,
+        windows=ft.PageTransitionTheme.CUPERTINO,
+    )
+
     @staticmethod
     def get_dark_theme() -> ft.Theme:
         return ft.Theme(
@@ -138,8 +148,19 @@ class AppTheme:
             ),
             card_theme=ft.CardTheme(
                 color=AppColors.DARK_SURFACE,
-                shadow_color=ft.Colors.TRANSPARENT,
+                shadow_color=AppColors.TRANSPARENT,
             ),
+            navigation_bar_theme=ft.NavigationBarTheme(
+                bgcolor=AppColors.DARK_SURFACE,
+                indicator_color=AppColors.PRIMARY,
+                label_text_style=ft.TextStyle(color=AppColors.DARK_TEXT_DIM),
+            ),
+            appbar_theme=ft.AppBarTheme(
+                bgcolor=AppColors.DARK_SURFACE,
+                title_text_style=ft.TextStyle(color=AppColors.DARK_TEXT),
+                toolbar_text_style=ft.TextStyle(color=AppColors.DARK_TEXT_DIM),
+            ),
+            page_transitions=AppTheme._PAGE_TRANSITIONS,
         )
 
     @staticmethod
@@ -163,6 +184,17 @@ class AppTheme:
             ),
             card_theme=ft.CardTheme(
                 color=AppColors.LIGHT_SURFACE,
-                shadow_color=ft.Colors.TRANSPARENT,
+                shadow_color=AppColors.TRANSPARENT,
             ),
+            navigation_bar_theme=ft.NavigationBarTheme(
+                bgcolor=AppColors.LIGHT_SURFACE,
+                indicator_color=AppColors.PRIMARY,
+                label_text_style=ft.TextStyle(color=AppColors.LIGHT_TEXT_DIM),
+            ),
+            appbar_theme=ft.AppBarTheme(
+                bgcolor=AppColors.LIGHT_SURFACE,
+                title_text_style=ft.TextStyle(color=AppColors.LIGHT_TEXT),
+                toolbar_text_style=ft.TextStyle(color=AppColors.LIGHT_TEXT_DIM),
+            ),
+            page_transitions=AppTheme._PAGE_TRANSITIONS,
         )

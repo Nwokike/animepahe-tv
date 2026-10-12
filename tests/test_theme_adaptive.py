@@ -16,6 +16,24 @@ from core.theme import AppTheme, mode_for_token, next_theme_mode, token_for_mode
 from services.store import JsonStore
 
 
+def test_both_themes_carry_every_slot_the_ui_uses():
+    """The shell renders a NavigationBar and app bars; both schemes must
+    theme them (an unthemed NavigationBar gets Material's purple tint in
+    light mode) and pin one page transition so a tab tap feels the same
+    on every OS."""
+    for theme in (AppTheme.get_dark_theme(), AppTheme.get_light_theme()):
+        nav = theme.navigation_bar_theme
+        assert nav is not None and nav.bgcolor, "the nav bar has no themed background"
+        assert nav.indicator_color, "the nav bar has no selection indicator"
+        appbar = theme.appbar_theme
+        assert appbar is not None and appbar.bgcolor, "the app bar has no themed background"
+        assert appbar.title_text_style is not None
+        transitions = theme.page_transitions
+        assert transitions is not None
+        for platform in ("android", "ios", "linux", "macos", "windows"):
+            assert getattr(transitions, platform) == ft.PageTransitionTheme.CUPERTINO
+
+
 def test_both_themes_carry_surface_roles():
     for theme in (AppTheme.get_dark_theme(), AppTheme.get_light_theme()):
         scheme = theme.color_scheme
