@@ -29,12 +29,16 @@ import primp
 logger = logging.getLogger(__name__)
 
 PARALLEL_SEGMENTS = 6
+import anyio
+
 SEGMENT_TIMEOUT = 30
 PLAYLIST_TIMEOUT = 15
 # A whole-file download is not a segment: the timeout must cover the
 # full response body, not a 30s segment. User aborts still arrive via
 # the cancel event (and Cancel on a stuck transfer via aclose).
 FILE_TIMEOUT = 600
+# Concurrent direct-file downloads — the rest queue on the limiter.
+MAX_FILE_DOWNLOADS = 2
 
 _ERR_THREAD = None
 _STATE_PARTIAL = "partial"
@@ -115,6 +119,9 @@ class DownloadManager:
     """Owns download jobs: one asyncio task per episode, shared primp client."""
 
     def __init__(self, store=None, downloads_dir: str | None = None):
+        # A queue of direct-file downloads shares one limiter so a big
+        # batch can't starve the app's own fetches (the UI, the router).
+        self._file_limiter = anyio.CapacityLimiter(MAX_FILE_DOWNLOADS)
         self._store = store
         self.downloads_dir = downloads_dir or self._default_dir()
         self._jobs: dict[str, dict] = {}
@@ -288,9 +295,10 @@ class DownloadManager:
                     pass
 
         try:
-            ok = await self._download_file(
-                url, headers, part_path, final_path, on_progress=_chunk, cancel=cancel
-            )
+            async with self._file_limiter:
+                ok = await self._download_file(
+                    url, headers, part_path, final_path, on_progress=_chunk, cancel=cancel
+                )
         except asyncio.CancelledError:
             raise
         except Exception as ex:
@@ -574,15 +582,23 @@ class DownloadManager:
             timeout=FILE_TIMEOUT if timeout is None else timeout,
         )
         mode = "ab" if have and resp.status_code == 206 else "wb"
-        with open(part_path, mode) as f:
-            async for chunk in resp.aiter_bytes():
-                if cancel is not None and cancel.is_set():
-                    await resp.aclose()
-                    return False
+        done = have
+
+        def _write(chunk: bytes) -> None:
+            # Off-loop: a per-chunk disk write competes with the UI's
+            # frames when it runs on the event loop.
+            with open(part_path, mode) as f:
                 f.write(chunk)
-                if on_progress is not None:
-                    on_progress(len(chunk))
-        os.replace(part_path, final_path)
+
+        async for chunk in resp.aiter_bytes():
+            if cancel is not None and cancel.is_set():
+                await resp.aclose()
+                return False
+            await anyio.to_thread.run_sync(_write, chunk)
+            done += len(chunk)
+            if on_progress is not None:
+                on_progress(len(chunk))
+        await anyio.to_thread.run_sync(os.replace, part_path, final_path)
         return True
 
     # ------------------------------------------------------------------
