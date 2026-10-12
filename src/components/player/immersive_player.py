@@ -232,7 +232,7 @@ class ImmersivePlayer(ft.Stack):
             controls=self._build_controls(),
             subtitle_configuration=fv.VideoSubtitleConfiguration(
                 text_style=ft.TextStyle(
-                    size=16,
+                    size=self._subtitle_size(),
                     color=ft.Colors.WHITE,
                     weight=ft.FontWeight.W_600,
                     bgcolor=ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
@@ -271,11 +271,24 @@ class ImmersivePlayer(ft.Stack):
             visible=False,
             on_click=self._on_skip_chip,
         )
+        # Fullscreen toast: native fullscreen swallows the snackbar, so
+        # confirmations (resume/speed/skip) also land here and dispatch
+        # through core.notify's registry.
+        self.toast_chip = ft.Container(
+            content=ft.Text("", size=13, weight=ft.FontWeight.W_600),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.BLACK),
+            top=56,
+            left=24,
+            visible=False,
+        )
         self.controls = [
             ft.Container(expand=True, bgcolor=ft.Colors.BLACK),
             self.video,
             self.overlay,
             self.skip_chip,
+            self.toast_chip,
         ]
 
     def _build_controls(self) -> fv.AdaptiveVideoControls:
@@ -355,6 +368,14 @@ class ImmersivePlayer(ft.Stack):
                     ink=True,
                     tooltip="Playback speed",
                     on_click=_cycle_speed,
+                )
+            )
+            items.append(
+                ft.IconButton(
+                    icon=ft.Icons.PHOTO_CAMERA_ROUNDED,
+                    icon_size=16,
+                    tooltip="Screenshot",
+                    on_click=lambda e: spawn(self._take_snapshot(), name="snapshot"),
                 )
             )
             # VideoSkipNext/PreviousButton are value objects without event
@@ -825,6 +846,18 @@ class ImmersivePlayer(ft.Stack):
 
         spawn(_seek(), name="player-seek")
 
+    async def will_unmount(self):
+        """Overlay-removal safety net: the shell can drop the player
+        without handle_close (remount races) — the position save must
+        not depend on the close path landing."""
+        if self._position_saved or self._is_closing:
+            return
+        try:
+            await asyncio.wait_for(self._save_current_position(), timeout=2.0)
+        except Exception:
+            pass
+        self._position_saved = True
+
     async def _save_current_position(self):
         if self._position_saved or self._is_closing:
             return
@@ -964,6 +997,28 @@ class ImmersivePlayer(ft.Stack):
             sections.append(ft.Text("Subtitles", size=13, weight=ft.FontWeight.W_700))
             sections.append(ft.Column(sub_rows, tight=True, spacing=6))
 
+        # Subtitle size + aspect fit — presentation controls that ride
+        # every track (the source's own list stays untouched above).
+        size_section: list[ft.Control] = []
+        if self.subtitles:
+            size_section.append(
+                ft.Text("Subtitle size", size=13, weight=ft.FontWeight.W_700)
+            )
+            size_section.append(
+                ft.Row(
+                    [
+                        ft.OutlinedButton(
+                            content=f"{s}",
+                            on_click=lambda e, sz=s: self._set_subtitle_size(sz),
+                        )
+                        for s in self.SUBTITLE_SIZES
+                    ],
+                    spacing=6,
+                )
+            )
+        if size_section:
+            sections.extend(size_section)
+
         show_app_dialog(
             page,
             ft.AlertDialog(
@@ -1016,6 +1071,12 @@ class ImmersivePlayer(ft.Stack):
 
     def _on_first_ready(self, e=None):
         logger.info("player ready")
+        try:
+            from core.notify import register_fullscreen_toast
+
+            register_fullscreen_toast(self._toast_show)
+        except Exception:
+            pass
         self._hide_overlay()
         self._check_and_trigger_seek()
         self._apply_default_subtitle()
@@ -1036,6 +1097,86 @@ class ImmersivePlayer(ft.Stack):
                 self._hide_overlay()
                 self._check_and_trigger_seek()
             self._update_skip_chip(seconds)
+
+    # ------------------------------------------------------------------
+    # Snapshot: take_screenshot (Android writes to MediaStore natively;
+    # the desktop fallback saves the file next to the app's storage)
+    # ------------------------------------------------------------------
+
+    async def _take_snapshot(self, e=None):
+        try:
+            from core.notify import show_snack
+
+            show_snack(self._page(), "Saved a screenshot", bgcolor=AppColors.PRIMARY)
+            await asyncio.wait_for(self.video.take_screenshot(), timeout=5.0)
+        except Exception as ex:
+            logger.info("snapshot failed: %s", ex)
+
+    def _page(self):
+        from flet import context as flet_context
+
+        try:
+            return flet_context.page
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
+    # Subtitle presentation (size persisted; the source's tracks are
+    # picked from the settings sheet)
+    # ------------------------------------------------------------------
+
+    SUBTITLE_SIZES = [12, 16, 22, 30]
+
+    def _subtitle_size(self) -> int:
+        if self.store is None:
+            return 16
+        try:
+            size = int(self.store.get_setting("subtitle_size", 16))
+        except Exception:
+            size = 16
+        return size if size in self.SUBTITLE_SIZES else 16
+
+    def _set_subtitle_size(self, size: int) -> None:
+        if self.store is None or size not in self.SUBTITLE_SIZES:
+            return
+
+        async def _save():
+            await self.store.save_setting("subtitle_size", size)
+            try:
+                self.video.subtitle_configuration.text_style.size = size
+                self.video.update()
+            except Exception:
+                pass
+
+        from core.tasks import spawn
+
+        spawn(_save(), name="save-subtitle-size")
+
+    # ------------------------------------------------------------------
+    # Fullscreen toast (the snackbar's fullscreen-visible twin)
+    # ------------------------------------------------------------------
+
+    def _toast_show(self, message: str) -> None:
+        self.toast_chip.content.value = message
+        self.toast_chip.visible = True
+        try:
+            self.toast_chip.update()
+        except Exception:
+            pass
+
+        async def _hide():
+            await asyncio.sleep(2.0)
+            if self._is_closing:
+                return
+            self.toast_chip.visible = False
+            try:
+                self.toast_chip.update()
+            except Exception:
+                pass
+
+        from core.tasks import spawn
+
+        spawn(_hide(), name="player-toast-hide")
 
     # ------------------------------------------------------------------
     # Skip-intro / skip-outro (windows exactly as the source declared them)
@@ -1160,6 +1301,12 @@ class ImmersivePlayer(ft.Stack):
         if self._is_closing:
             return
         self._is_closing = True
+        try:
+            from core.notify import unregister_fullscreen_toast
+
+            unregister_fullscreen_toast()
+        except Exception:
+            pass
         self._is_final_error = True
         self._cancel_watchdog()
         if self._checkpoint_task and not self._checkpoint_task.done():

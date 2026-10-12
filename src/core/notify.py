@@ -22,6 +22,23 @@ import flet as ft
 logger = logging.getLogger(__name__)
 
 
+# The in-player fullscreen toast (KTV's pattern): native fullscreen
+# swallows the snackbar, so a player that is open registers its chip here
+# and every show_snack dispatches to BOTH.
+_toast: object | None = None
+
+
+def register_fullscreen_toast(handler) -> None:
+    """The player calls this on mount with its chip's show(text)."""
+    global _toast
+    _toast = handler
+
+
+def unregister_fullscreen_toast() -> None:
+    global _toast
+    _toast = None
+
+
 def show_snack(
     page: ft.Page,
     message: str,
@@ -43,6 +60,11 @@ def show_snack(
             action=action,
         )
         page.show_dialog(snack)
+        if _toast is not None:
+            try:
+                _toast(message)
+            except Exception:
+                pass
     except RuntimeError:
         # Same snack instance still on the stack: the message is already on
         # screen. Popping would close whatever real dialog is on top and
