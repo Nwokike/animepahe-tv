@@ -1,6 +1,5 @@
 """Tests for the durable store: history, continue watching, atomic writes."""
 
-import asyncio
 import itertools
 import json
 import os
@@ -72,9 +71,14 @@ async def test_record_watch_upsert_newest_first(store):
     assert list(entries)[0] == "aaa"
     assert entries["aaa"]["episode_num"] == 4
 
-    await store.remove_watch("aaa")
+    # There is no remove_watch API — a row leaves the shelf through the
+    # cap (oldest first) or by a direct section write.
     entries = await store.get_continue_watching()
-    assert list(entries) == ["bbb"]
+    assert list(entries) == ["aaa", "bbb"]
+    await store.put_section(
+        "continue_watching", {k: v for k, v in entries.items() if k != "aaa"}
+    )
+    assert list(await store.get_continue_watching()) == ["bbb"]
 
 
 @pytest.mark.asyncio
@@ -273,39 +277,3 @@ async def test_clearance_round_trip(store):
 async def test_clearance_empty_cookies_ignored(store):
     await store.save_clearance("", "UA/1.0")
     assert await store.get_clearance() is None
-
-
-def test_early_access_round_trip(tmp_path, monkeypatch):
-
-    monkeypatch.setenv("FLET_APP_STORAGE_DATA", str(tmp_path))
-    from services.store import JsonStore
-
-    (tmp_path / "animepahe").mkdir(parents=True, exist_ok=True)
-
-    async def _run():
-        store = JsonStore(filename="ea-test.json")
-        assert await store.is_early_access("ep1") is False
-        await store.grant_early_access("ep1")
-        assert await store.is_early_access("ep1") is True
-        # Survives a reload (fresh instance, same file).
-        reloaded = JsonStore(filename="ea-test.json")
-        assert await reloaded.is_early_access("ep1") is True
-
-    asyncio.run(_run())
-
-
-def test_early_access_expiry(tmp_path, monkeypatch):
-
-    monkeypatch.setenv("FLET_APP_STORAGE_DATA", str(tmp_path))
-    from services.store import JsonStore
-
-    (tmp_path / "animepahe").mkdir(parents=True, exist_ok=True)
-
-    async def _run():
-        store = JsonStore(filename="ea-expiry.json")
-        await store.put_section(
-            "early_access", {"ep1": 1.0}
-        )  # epoch 1 — long expired
-        assert await store.is_early_access("ep1") is False
-
-    asyncio.run(_run())

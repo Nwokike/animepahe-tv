@@ -91,25 +91,6 @@ class Cache:
             self._dirty = True
             await self._flush()
 
-    async def set_json(self, key: str, value, ttl: int = 3600):
-        await self.set(key, json.dumps(value, default=str), ttl)
-
-    async def get_json(self, key: str):
-        raw = await self.get(key)
-        if raw:
-            try:
-                return json.loads(raw)
-            except ValueError:
-                return None
-        return None
-
-    async def invalidate(self, key: str):
-        async with self._lock:
-            await self._ensure_loaded()
-            if self._data.pop(key, None) is not None:
-                self._dirty = True
-                await self._flush()
-
     async def clear(self):
         async with self._lock:
             self._data = {}

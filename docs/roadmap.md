@@ -103,3 +103,32 @@ unformatted — dep-test-stack), nightly canary CI, then the release ritual.
 Standing rules: every capability runtime-discovered (no hardcoding/limits),
 deps only via `uv add`, plan mode before each phase, commit per step,
 suite green at every commit, boots clean with INFO lines.
+
+## Phase 7.5 — Audit debt (complete)
+The Phase 7 audit found work that was claimed but dead, so Phases 1–6 got
+the same check (one agent per phase + a cross-cutting one). Findings and
+resolutions:
+
+- Live bugs found and fixed: AnimePahe details read a nonexistent
+  `self.scraper.BASE`; the 1.0.4 favorites→follows migration called a
+  nonexistent `self._touch()`; the notifications adapter called
+  flet-notifications APIs that do not exist in 0.1.3 (`create_channel`, a
+  `details=` kwarg, `BigPictureStyle(image_file_path=…)`).
+- Wired what had no consumer: the new-episode checker (`start_episode_checker`),
+  the notification tap deep-link, `request_permissions`, the startup probe
+  (`probe_all`), and `sources_for_title_any` (playback now fails over by
+  title, not just browsing).
+- Displayed what was already parsed: synopsis, genres, MAL/AniList ids,
+  studios, aired range.
+- Quality correctness: AnimeOut keeps every quality of an episode (the
+  dedupe dropped the second one); downloads ask instead of taking
+  `sources[0]`; `m=links` reads `hd`.
+- Deleted (dead, no gate to attach to): the rewarded-ad / early-access
+  path, `cache.set_json/get_json/invalidate`, `store.remove_watch`,
+  `app_shell._placeholder`, `BREAKER_HALF_OPEN_TRIALS`.
+
+**Owner decision still open:** the rewarded "early access" format was
+removed rather than wired, because it needs a free-line/paywall rule the
+app does not have and inventing one is a product call. `flet_yandex_ads`
+0.1.0 is installed and its test unit ids are used by the interstitial,
+app-open and banner formats.

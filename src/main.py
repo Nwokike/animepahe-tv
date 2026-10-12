@@ -209,6 +209,11 @@ class AppController:
         # absent.
         await self._setup_notifications()
 
+        # Warm the health panel and the breakers before the first render:
+        # a dead provider then costs one cheap probe instead of the user's
+        # first tap. Deadline-capped and never blocking (probe_all).
+        spawn(self.router.probe_all(), name="startup-probe")
+
         spawn(self._check_for_updates_bg(), name="update-check")
         await self.start_episode_checker()
 

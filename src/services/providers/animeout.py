@@ -57,7 +57,11 @@ def _title_relevance(query: str, title: str) -> int:
 
 class AnimeOutProvider:
     name = "animeout"
-    capabilities = {"files": True, "episodes": True, "episode_stills": False}
+    # files: False is the honest value — the file host is Cloudflare-walled
+    # today, so this provider serves catalog + episodes but not files. The
+    # router treats a False capability as "don't ask this provider for a
+    # file", which is exactly the wall.
+    capabilities = {"files": False, "episodes": True, "episode_stills": False}
 
     def __init__(self, client=None):
         self._client = client or primp.AsyncClient(

@@ -5,9 +5,10 @@ module owns the SDK service and the fullscreen formats.
 
 - Interstitial: between every episode (one-shot per instance — a fresh
   InterstitialAd per episode, like the official flet-ads example).
-- Rewarded: "watch for early access" — unlock the episode past the free
-  line for 24h, recorded in the durable store.
 - App-open: cold start, after the SDK initializes.
+- The rewarded format is NOT wired: "unlock the episode past the free
+  line" needs a gate the app does not have, and inventing a paywall is
+  the owner's call, not a code decision. Recorded in docs/roadmap.md.
 """
 
 import asyncio
@@ -26,7 +27,6 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 AD_INTERSTITIAL_UNIT_ID = "demo-interstitial-yandex"
-AD_REWARDED_UNIT_ID = "demo-rewarded-yandex"
 AD_APP_OPEN_UNIT_ID = "demo-appopenad-yandex"
 
 
@@ -96,53 +96,3 @@ async def show_app_open(page) -> None:
                 pass
             if ad in page.services:
                 page.services.remove(ad)
-
-
-def build_rewarded_ad(page, episode_key: str, store, on_granted=None):
-    """Rewarded ad that unlocks early access for one episode.
-
-    Returns the control so the caller can keep a reference; the reward
-    handler grants early access and invokes `on_granted`.
-    """
-    if not is_ads_supported(page):
-        return None
-
-    def _on_reward(e):
-        logger.info("reward granted for %s", episode_key)
-        from core.tasks import spawn
-
-        async def _grant():
-            await store.grant_early_access(episode_key)
-            if on_granted:
-                on_granted()
-
-        spawn(_grant(), name="grant-early-access")
-
-    ad = fya.RewardedAd(
-        unit_id=AD_REWARDED_UNIT_ID,
-        on_reward=_on_reward,
-        on_load=lambda e: None,
-        on_load_failed=lambda e: logger.warning("rewarded load failed"),
-    )
-    page.services.append(ad)
-
-    async def _preload_and_teardown():
-        """Preload, then tear down only after the viewer has dismissed —
-        the rewarded instance is otherwise never destroyed (§7.4)."""
-        try:
-            await asyncio.wait_for(ad.load(), timeout=30.0)
-            await asyncio.wait_for(ad.wait_for_dismiss(), timeout=300.0)
-        except Exception as ex:
-            logger.info("rewarded lifecycle: %s", ex)
-        finally:
-            try:
-                await ad.destroy()
-            except Exception:
-                pass
-            if ad in page.services:
-                page.services.remove(ad)
-
-    from core.tasks import spawn
-
-    spawn(_preload_and_teardown(), name="rewarded-lifecycle")
-    return ad

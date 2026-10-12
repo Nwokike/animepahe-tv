@@ -30,7 +30,6 @@ SUPPORT_URL = "https://github.com/Nwokike/animepahe-tv/issues"
 BREAKER_FAIL_THRESHOLD = 3       # consecutive failures -> OPEN
 BREAKER_OPEN_SECONDS = 30.0      # first cooldown; only failed trials double it
 BREAKER_OPEN_MAX_SECONDS = 300.0
-BREAKER_HALF_OPEN_TRIALS = 1     # trial requests when HALF_OPEN
 STARTUP_PROBE_BUDGET = 12.0      # wall-clock cap for the parallel probe race
 
 # Provider cache TTLs (seconds), per collection.

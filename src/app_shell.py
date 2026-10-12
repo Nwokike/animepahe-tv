@@ -543,26 +543,6 @@ def _detail_appbar(controller) -> ft.Control:
     )
 
 
-def _placeholder(title: str, message: str) -> ft.Control:
-    return ft.Container(
-        content=ft.Column(
-            [
-                ft.Text(
-                    title,
-                    size=22,
-                    weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.ON_SURFACE,
-                ),
-                ft.Text(message, size=13, color=ft.Colors.ON_SURFACE_VARIANT),
-            ],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=8,
-        ),
-        alignment=ft.Alignment.CENTER,
-        expand=True,
-    )
-
-
 def _build_download_quality_dialog(state, controller) -> ft.Control:
     """Which rendition to save offline — the same list the play dialog
     shows, because a silent sources[0] downloads whatever the provider
