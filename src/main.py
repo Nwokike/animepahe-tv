@@ -632,6 +632,8 @@ class AppController:
     async def _fetch_variants(self, m3u8: str, headers: dict | None = None) -> list[dict]:
         """Master-playlist variants through the proxy (correct headers),
         falling back to a direct fetch when the proxy isn't running."""
+        from components.player.immersive_player import KWIK_USER_AGENT
+
         headers = headers or {"User-Agent": KWIK_USER_AGENT, "Referer": "https://kwik.cx/"}
         if self.hls_proxy is not None:
             return await self.hls_proxy.fetch_variants(m3u8, headers=headers)
@@ -1235,19 +1237,17 @@ class AppController:
         title = (anime or {}).get("title", "Anime")
         ep_num = ep.episode if ep else None
 
+        from services.external_player import episode_title, launch_external
+
         if not self._resolved_m3u8:
             # Nothing resolved: send the play page (KTV will resolve itself).
             logger.warning("external fallback with no resolved stream")
-            from services.external_player import launch_external
-
             await launch_external(
                 self.page,
                 f"https://animepahe.com/play/{anime_session}/{episode_session}",
                 episode_title(title, ep_num),
             )
             return
-
-        from services.external_player import episode_title, launch_external
 
         resolution = (
             state.selected_source.resolution if state.selected_source else None

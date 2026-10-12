@@ -11,6 +11,8 @@ between content and navigation — an ad sandwiched against nav is the pattern
 both AdMob policy and TV focus design call out as wrong.
 """
 
+import asyncio
+
 import flet as ft
 from flet import context as flet_context
 
