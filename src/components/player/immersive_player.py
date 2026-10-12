@@ -43,6 +43,23 @@ KWIK_USER_AGENT = (
 )
 
 # Playback speeds for the chip, index 2 is normal.
+def _mpv_props(referer: str) -> dict:
+    """mpv tuning for network media. The source's own referer rides
+    http-header-fields so segment requests carry it even when a source
+    is fetched directly (no proxy in the path)."""
+    return {
+        "http-header-fields": f"Referer: {referer}",
+        "cache": "yes",
+        "cache-secs": 5,
+        "demuxer-max-bytes": "50M",
+        "demuxer-max-back-bytes": "10M",
+        "framedrop": "vo",
+        "hr-seek-framedrop": "yes",
+        # mpv's default 60s network timeout means a dead host spins this
+        # spinner for a minute. 10s makes failure deterministic.
+        "network-timeout": 10,
+    }
+
 SPEEDS = (0.25, 0.5, 1.0, 1.25, 1.5, 2.0)
 
 
@@ -225,18 +242,9 @@ class ImmersivePlayer(ft.Stack):
             ),
             configuration=fv.VideoConfiguration(
                 enable_hardware_acceleration=True,
-                mpv_properties={
-                    "cache": "yes",
-                    "cache-secs": 5,
-                    "demuxer-max-bytes": "50M",
-                    "demuxer-max-back-bytes": "10M",
-                    "framedrop": "vo",
-                    "hr-seek-framedrop": "yes",
-                    # mpv's default 60s network timeout means a dead host
-                    # spins this spinner for a minute. 10s makes failure
-                    # deterministic.
-                    "network-timeout": 10,
-                },
+                mpv_properties=_mpv_props(
+                    self.source_referer or "https://kwik.cx/"
+                ),
             ),
             on_load=self._on_first_ready,
             on_duration_change=self._on_duration_change,
@@ -436,6 +444,13 @@ class ImmersivePlayer(ft.Stack):
             if entry:
                 self._initial_resume_position = entry["position"]
                 self._last_duration = entry.get("duration") or 0.0
+                # The speed this episode was last watched at rides the
+                # resume record (absent = 1.0).
+                rate = entry.get("rate")
+                if rate and rate != self._speed_rate:
+                    self._speed_rate = float(rate)
+                    for text in self.speed_texts:
+                        text.value = f"{float(rate)}x"
                 logger.info(
                     "resume available for %s at %.1fs",
                     self.resume_key,
@@ -833,7 +848,9 @@ class ImmersivePlayer(ft.Stack):
         self._last_position = pos_sec
         if dur_sec > 0:
             self._last_duration = dur_sec
-        await self.store.save_position(self.resume_key, pos_sec, dur_sec or None)
+        await self.store.save_position(
+            self.resume_key, pos_sec, dur_sec or None, self._speed_rate
+        )
 
     # ------------------------------------------------------------------
     # Event handlers

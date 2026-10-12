@@ -218,23 +218,36 @@ class JsonStore:
             return None
         if duration is not None and position >= duration - self.RESUME_END_SKIP_SECONDS:
             return None
-        return {"position": position, "duration": duration}
+        # The row travels whole — the rate (and any later fields) ride
+        # with it instead of being rebuilt away here.
+        return entry
 
-    async def save_position(self, episode_session: str, position: float, duration: float | None) -> None:
+    async def save_position(
+        self,
+        episode_session: str,
+        position: float,
+        duration: float | None,
+        rate: float | None = None,
+    ) -> None:
         if not episode_session:
             return
         positions = await self.section("positions", {})
         if not isinstance(positions, dict):
             positions = {}
+        row = {
+            "position": round(float(position), 2),
+            "duration": round(float(duration), 2) if duration else None,
+            "timestamp": time.time(),
+        }
+        # The chosen playback speed rides the resume record so the next
+        # open continues at the same rate (additive; absent = 1.0).
+        if rate:
+            row["rate"] = round(float(rate), 2)
         # An episode watched to (nearly) the end is not resumable — drop it.
         if duration and position >= duration - self.RESUME_END_SKIP_SECONDS:
             positions.pop(episode_session, None)
         else:
-            positions[episode_session] = {
-                "position": round(float(position), 2),
-                "duration": round(float(duration), 2) if duration else None,
-                "timestamp": time.time(),
-            }
+            positions[episode_session] = row
         await self.put_section("positions", positions)
 
     # ------------------------------------------------------------------

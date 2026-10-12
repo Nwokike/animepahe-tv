@@ -467,3 +467,28 @@ def test_play_page_scrape_carries_av1_and_download_sizes():
     assert sources[0].resolution == 1080
     assert sources[0].size == "293MB"  # zipped positionally from pickDownload
     assert sources[1].size == "176MB"
+
+
+def test_position_row_carries_and_restores_rate():
+    """The chosen speed rides the resume record."""
+    import asyncio
+
+    from services.store import JsonStore
+
+    import tempfile
+
+    async def run(path):
+        store = JsonStore(filename=path)
+        await store.save_position("ep1", 30.0, 1440.0, rate=1.5)
+        entry = await store.get_position("ep1")
+        assert entry["rate"] == 1.5
+        assert entry["position"] == 30.0
+        # an old row without a rate still reads (None = 1.0)
+        await store.save_position("ep2", 10.0, 1440.0)
+        assert (await store.get_position("ep2")).get("rate") is None
+
+    fd, path = tempfile.mkstemp()
+    import os
+
+    os.close(fd)
+    asyncio.run(run(path))
