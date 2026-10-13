@@ -238,3 +238,65 @@ async def test_everything_is_a_noop_off_platform(monkeypatch):
     assert await notifications.show_progress(notification_id=1, title="t") is False
     assert await notifications.request_permissions() is False
     notifications.on_tap(lambda payload: None)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Download rows: their own id band, their own completion wording
+# ---------------------------------------------------------------------------
+
+
+def test_download_notification_id_band():
+    import core.notifications as n
+
+    ep_id = n.download_id("anikato:naruto-eybxz|1")
+    alert_id = n.stable_id("anikato:naruto-eybxz")
+    assert ep_id != alert_id
+    assert ep_id >= 1_000_000_000 > alert_id
+    assert n.download_id("a|1") != n.download_id("b|2")
+    assert n.download_id("x") == n.download_id("x")
+
+
+@pytest.mark.asyncio
+async def test_a_finished_download_reuses_the_same_row_as_its_progress(fake):
+    """The progress row and the completion row share an id, so the tray
+    never holds two rows for one episode — the package updates in place."""
+    await notifications.show_progress(
+        notification_id=notifications.download_id("ep1"),
+        title="Frieren",
+        body="40%",
+        progress=40,
+        max_progress=100,
+    )
+    await notifications.show_new_episode(
+        anime_session="anikato:frieren",
+        title="Frieren",
+        episode=1,
+        download_complete=True,
+        episode_session="ep1",
+    )
+    ids = [call["id"] for call in fake.shown]
+    assert len(ids) == 2
+    assert ids[0] == ids[1]  # one row, advanced
+    (progress_call, done_call) = fake.shown
+    assert progress_call["show_progress"] is True
+    # the completion row carries no progress bar at all
+    assert "show_progress" not in done_call
+    assert "Download complete" in done_call["body"]
+    assert done_call["payload"] == "animepahe://anime/anikato:frieren"
+
+
+@pytest.mark.asyncio
+async def test_a_series_alert_and_a_download_never_share_a_row(fake):
+    await notifications.show_new_episode(
+        anime_session="anikato:frieren", title="Frieren", episode=2
+    )
+    await notifications.show_new_episode(
+        anime_session="anikato:frieren",
+        title="Frieren",
+        episode=1,
+        download_complete=True,
+        episode_session="ep1",
+    )
+    ids = [call["id"] for call in fake.shown]
+    assert ids[0] != ids[1]
+    assert "Tap to watch" in fake.shown[0]["body"]

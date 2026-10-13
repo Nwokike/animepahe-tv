@@ -207,6 +207,7 @@ class AppController:
 
         self.downloads = DownloadManager(store=self.store)
         self.downloads.on_progress = self._on_download_progress
+        self.downloads.on_finished = self._on_download_finished
 
         await self.cache.start_sweep(interval=300)
 
@@ -1740,6 +1741,10 @@ class AppController:
             )
 
     async def _flush_download_progress(self):
+        """One flush every ~0.5s while any job is active: the UI's rows
+        AND the tray's progress notification (the package advances a row
+        by re-showing its id). The UI polls; nothing re-renders per
+        chunk."""
         while self._pending_progress:
             await asyncio.sleep(_PROGRESS_FLUSH_SECONDS)
             pending, self._pending_progress = self._pending_progress, {}
@@ -1749,6 +1754,53 @@ class AppController:
             merged.update(pending)
             state.download_progress = merged
             state.downloads_version += 1
+            await self._sync_download_notifications(merged)
+
+    async def _sync_download_notifications(self, progress: dict) -> None:
+        """One tray row per running download, advanced by re-showing its
+        id. Off-platform (and off dev-mode) it is a no-op."""
+        from core import notifications
+
+        for session, row in progress.items():
+            state_name = str(row.get("state") or "")
+            if state_name not in ("downloading", "queued", "paused", "failed"):
+                continue
+            percent = row.get("percent")
+            body = (
+                f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
+            )
+            if state_name == "paused":
+                body = "Paused"
+            elif state_name == "failed":
+                body = "Download failed — tap to retry"
+            await notifications.show_progress(
+                notification_id=notifications.download_id(session),
+                title=row.get("title") or "Downloading",
+                body=body,
+                payload=notifications.payload_for(row.get("anime_session") or ""),
+                progress=int(percent or 0),
+                max_progress=100,
+                indeterminate=not isinstance(percent, (int, float)),
+            )
+
+    def _on_download_finished(self, episode_session: str, metadata: dict) -> None:
+        """A finished download replaces its progress row with a
+        completion one — same id, so the tray never holds two rows for
+        one episode, and the tap deep-links to the anime."""
+        from core import notifications
+        from core.tasks import spawn
+
+        async def _announce():
+            await notifications.show_new_episode(
+                anime_session=str(metadata.get("anime_session") or ""),
+                title=str(metadata.get("title") or "Download"),
+                episode=int(metadata.get("episode_num") or 0),
+                poster_path=None,
+                download_complete=True,
+                episode_session=episode_session,
+            )
+
+        spawn(_announce(), name="download-done")
 
     async def _resolve_anime(self, anime_session: str) -> dict | None:
         """Title/poster/metadata for an anime, cheapest source first.

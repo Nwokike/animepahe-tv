@@ -145,7 +145,15 @@ def stable_id(anime_session: str) -> int:
     """A stable per-anime notification id (one row per series)."""
     import zlib
 
-    return zlib.crc32(anime_session.encode()) % 2_000_000_000
+    return zlib.crc32(anime_session.encode()) % 1_000_000_000
+
+
+def download_id(episode_session: str) -> int:
+    """A stable per-DOWNLOAD notification id. Its own band, so a
+    download's progress row can never collide with a series' alert."""
+    import zlib
+
+    return 1_000_000_000 + (zlib.crc32(episode_session.encode()) % 1_000_000_000)
 
 
 async def ensure_channel() -> bool:
@@ -176,8 +184,14 @@ async def show_new_episode(
     title: str,
     episode: int,
     poster_path: str | None = None,
+    download_complete: bool = False,
+    episode_session: str = "",
 ) -> bool:
-    """Show one new-episode notification. No-op off-platform."""
+    """Show one new-episode notification. No-op off-platform.
+
+    `download_complete` re-shapes the same row for a finished download
+    (id from the download's own band, body words 'download'), so a
+    download never replaces a series' alert row."""
     if not _ready():
         return False
     global _unavailable
@@ -194,9 +208,13 @@ async def show_new_episode(
                 summary_text="New episode on your followed show",
             )
         await _service.show(
-            id=stable_id(anime_session),
+            id=download_id(episode_session)
+            if download_complete
+            else stable_id(anime_session),
             title=f"{title} — Episode {episode}",
-            body="Tap to watch",
+            body="Download complete — tap to play"
+            if download_complete
+            else "Tap to watch",
             payload=payload_for(anime_session),
             style=style,
             channel_id=CHANNEL_NEW_EPISODES,
@@ -241,6 +259,7 @@ async def show_progress(
 
 
 __all__ = [
+    "download_id",
     "ensure_channel",
     "show_new_episode",
     "show_progress",

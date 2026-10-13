@@ -215,6 +215,9 @@ class DownloadManager:
         # setStopReason does.
         self._stop_reason: dict[str, str] = {}
         self.on_progress = None  # callable(episode_session, dict)
+        # callable(episode_session, metadata) when a job completes — the
+        # controller turns it into the tray's "download complete" row.
+        self.on_finished = None
 
     @staticmethod
     def _default_dir() -> str:
@@ -277,11 +280,16 @@ class DownloadManager:
         self._jobs[episode_session] = {"dir": job_dir, "manifest": manifest_path}
         cancel = asyncio.Event()
         self._cancel[episode_session] = cancel
+        # The row's title and anime session ride the progress dict too,
+        # so the tray notification can name what is downloading.
+        meta = metadata or {}
         self._progress[episode_session] = {
             "done": 0,
             "total": 0,
             "bytes": 0,
             "state": STATE_QUEUED,
+            "title": str(meta.get("title") or ""),
+            "anime_session": str(meta.get("anime_session") or ""),
         }
         task = asyncio.create_task(
             self._run(episode_session, m3u8_url, headers, metadata, job_dir, cancel),
@@ -361,11 +369,16 @@ class DownloadManager:
         self._jobs[episode_session] = {"dir": job_dir, "manifest": manifest_path}
         cancel = asyncio.Event()
         self._cancel[episode_session] = cancel
+        # The row's title and anime session ride the progress dict too,
+        # so the tray notification can name what is downloading.
+        meta = metadata or {}
         self._progress[episode_session] = {
             "done": 0,
             "total": 0,
             "bytes": 0,
             "state": STATE_QUEUED,
+            "title": str(meta.get("title") or ""),
+            "anime_session": str(meta.get("anime_session") or ""),
         }
         task = asyncio.create_task(
             self._run_direct(episode_session, url, headers, metadata, job_dir, cancel),
@@ -633,6 +646,11 @@ class DownloadManager:
         logger.info(
             "download complete (direct): %s (%d bytes)", episode_session, size_bytes
         )
+        if self.on_finished is not None:
+            try:
+                self.on_finished(episode_session, dict(metadata))
+            except Exception as ex:
+                logger.info("on_finished failed: %s", ex)
 
     def cancel(self, episode_session: str):
         cancel = self._cancel.get(episode_session)
@@ -750,6 +768,11 @@ class DownloadManager:
                 await self._store.save_download(episode_session, row)
             self._progress.pop(episode_session, None)
             logger.info("download complete: %s (%d segments)", episode_session, total)
+            if self.on_finished is not None:
+                try:
+                    self.on_finished(episode_session, dict(metadata))
+                except Exception as ex:
+                    logger.info("on_finished failed: %s", ex)
         except asyncio.CancelledError:
             raise
         except Exception as ex:
