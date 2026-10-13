@@ -175,3 +175,46 @@ own machinery, so a signature check reports false positives.
   POST-only and verified to work anonymously, offered on every episode's
   menu with the site's own issue vocabulary and its validation message
   surfaced verbatim.
+
+## Phase 8 — Downloads, YouTube-style (complete)
+Research first (sourced): Android Media3's seven-state machine — pause is a
+persisted stop reason that keeps the partials, resume is clearing it; a
+queue caps concurrency (default 3) in start order; progress is bytes +
+a percent that is explicitly unknown when the length isn't; progress
+updates do NOT fire the listener, the UI polls. YouTube documents no
+per-item pause (auto-resume on reconnect, "Retry download" the only
+manual action); Netflix is where "Download Season" comes from (one button
++ per-episode buttons, quality as a global setting); no app remuxes —
+they store bytes as served. flet-notifications 0.1.3 already advances one
+row by re-showing its id.
+
+1. **State machine**: queued / downloading / stopped / completed / failed
+   / removing / restarting in the manifest; pause = a persisted stop
+   reason keeping the partials; resume and retry from the job's own
+   manifest; ONE queue with a cap across both paths (the limiter used to
+   cover direct files only, so an HLS batch ran unbounded); one progress
+   contract — which fixed a live bug where the direct path's 3-arg
+   callback raised TypeError into a swallow, so a file download's
+   progress never reached the UI at all.
+2. **The row**: the bar lives INSIDE the name row; per-state actions
+   (Pause/Cancel, Resume/Delete, Retry/Delete, Play/Delete); unknown
+   length renders indeterminate rather than 0%.
+3. **The tray**: one row per download, advanced by re-showing its id in
+   the throttled flush; downloads live in their own id band so a
+   finished download can never replace a series' alert; the tap
+   deep-links to the anime.
+4+5. **Whole folder**: "Download the series" with a From/To range
+   (defaulting to everything not yet downloaded) + Highest/Lowest/As
+   served; each episode is an INDEPENDENT job, so a dead host, a walled
+   link or an I/O failure costs that episode only; the queue absorbs the
+   batch. The dialog is hook-free (built in an event handler) — the
+   report dialog had the same violation and is fixed the same way.
+6. **The badge**: the serving backend + a state colour; tapping opens a
+   picker with every provider's live health (breaker state, latency,
+   last error) and one-tap pinning.
+
+Also fixed along the way (found by the owner's live run): the home screen
+crash on first paint; the ~20s startup stall on web; the startup probe
+opening a Cloudflare window; the font 404. All recorded in
+docs/testing-findings.md along with the three open items (web image CORS,
+search showing 0 episodes, 170 episodes unpaged).
