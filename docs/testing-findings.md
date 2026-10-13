@@ -66,3 +66,12 @@ pager shape; study them before changing this.
   action.
 - `outfit.css` 404'd because the font path was addressed as
   `assets/outfit.css` while the assets dir already maps to `src/assets`.
+
+## Noted after the Phase 8 Step 2 boot (dev-mode only, benign)
+
+`[ERROR] unhandled page error: Exception: Unknown service: LocalNotifications`
+appears ONCE on the web renderer, before the adapter's session-level
+detection remembers the failure. The home screen renders correctly after
+it. A built app (which ships the Dart half) doesn't hit it; if it still
+annoys during testing, the fix is to construct the service lazily inside
+the first guarded call rather than at detect() time.

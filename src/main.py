@@ -69,6 +69,16 @@ def _source_choices(sources) -> list[dict]:
     return choices
 
 
+def _with_job_state(progress, episode_session: str, state: str) -> dict:
+    """The manager's job state travels in the same dict the throttled
+    flush already merges, so one flush carries state + bytes."""
+    merged = dict(progress or {})
+    row = dict(merged.get(episode_session) or {"done": 0, "total": 0, "bytes": 0})
+    row["state"] = state
+    merged[episode_session] = row
+    return merged
+
+
 def _anime_dict(anime) -> dict:
     """Anime dataclass -> the detail header's dict. Every field the
     providers fill is carried: dropping one here is what made synopsis,
@@ -1636,6 +1646,47 @@ class AppController:
         state.busy_version += 1
         state.downloads_version += 1
 
+    async def pause_download(self, episode_session: str):
+        """Pause keeps the partials — a Range resume continues from them."""
+        rows = await self.store.get_downloads()
+        row = rows.get(episode_session) or {}
+        self.downloads.pause(episode_session)
+        state.download_progress = _with_job_state(
+            state.download_progress, episode_session, "stopped"
+        )
+        row = {**row, "state": "partial"}
+        await self.store.save_download(episode_session, row)
+        state.downloads_version += 1
+
+    async def resume_download(self, episode_session: str):
+        """Resume (or retry) from the job's own manifest."""
+        rows = await self.store.get_downloads()
+        row = rows.get(episode_session) or {}
+        job_dir = self.downloads._job_dir(
+            row.get("anime_session", "unknown"), episode_session
+        )
+        manifest = self.downloads._read_manifest(
+            os.path.join(job_dir, "manifest.json")
+        )
+        state.download_progress = _with_job_state(
+            state.download_progress, episode_session, "downloading"
+        )
+        await self.downloads.resume(
+            episode_session,
+            manifest.get("url") or manifest.get("m3u8_url") or "",
+            manifest.get("headers") or {},
+            manifest.get("metadata") or row,
+        )
+        state.downloads_version += 1
+
+    async def retry_download(self, episode_session: str):
+        """A failed job re-queued from its own manifest."""
+        await self.downloads.retry(episode_session)
+        state.download_progress = _with_job_state(
+            state.download_progress, episode_session, "queued"
+        )
+        state.downloads_version += 1
+
     async def cancel_download(self, episode_session: str):
         self.downloads.cancel(episode_session)
 
@@ -1948,6 +1999,15 @@ async def main(page: ft.Page):
     )
     methods.cancel_download = lambda e: spawn(
         controller.cancel_download(e), name="cancel-download"
+    )
+    methods.pause_download = lambda e: spawn(
+        controller.pause_download(e), name="pause-download"
+    )
+    methods.resume_download = lambda e: spawn(
+        controller.resume_download(e), name="resume-download"
+    )
+    methods.retry_download = lambda e: spawn(
+        controller.retry_download(e), name="retry-download"
     )
     methods.delete_download = lambda e: spawn(
         controller.delete_download(e), name="delete-download"

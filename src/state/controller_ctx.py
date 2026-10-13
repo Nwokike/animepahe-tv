@@ -39,6 +39,12 @@ class ControllerMethods:
     report_broken_stream: object = lambda anime_session, episode_session, issues, note="": None
     download_episode: object = lambda anime_session, episode_session: None
     choose_download_quality: object = lambda index: None
+    pause_download: object = lambda episode_session: None
+    resume_download: object = lambda episode_session: None
+    retry_download: object = lambda episode_session: None
+    cancel_download: object = lambda episode_session: None
+    delete_download: object = lambda episode_session: None
+    play_downloaded: object = lambda episode_session: None
     retry_cloudflare: object = lambda: None
     load_search: object = lambda query, page=1: None
     clear_search_history: object = lambda: None

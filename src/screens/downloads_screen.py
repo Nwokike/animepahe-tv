@@ -1,8 +1,10 @@
 """Downloads — series-grouped offline episodes.
 
-Per-episode rows carry progress while active, a size once complete, and
-play/delete actions. The download flow itself starts on the series detail
-screen; this screen only lists and manages what exists.
+Per-episode rows carry the job's state and an inline progress bar inside
+the file-name row (the YouTube shape): Pause/Cancel while downloading,
+Resume/Delete when paused, Retry/Delete when failed, Play/Delete when
+complete. The download flow itself starts on the series detail screen;
+this screen only lists and manages what exists.
 """
 
 import flet as ft
@@ -12,6 +14,12 @@ from components.empty_state import EmptyState
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
+
+# The manager's job states (Media3's set) as the screens see them.
+STATE_DOWNLOADING = "downloading"
+STATE_QUEUED = "queued"
+STATE_STOPPED = "stopped"
+STATE_FAILED = "failed"
 
 
 def _fmt_size(num_bytes) -> str:
@@ -27,19 +35,50 @@ def _fmt_size(num_bytes) -> str:
 
 
 def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
-    state = row.get("state", "partial")
-    active = progress is not None
-    done = progress.get("done", 0) if active else 0
-    total = progress.get("total", 0) if active else 0
-    percent = (done / total) if total else 0
+    """One episode row: the state word, an inline bar while it runs, and
+    the actions that state allows."""
+    job_state = (progress or {}).get("state") or ""
+    percent = (progress or {}).get("percent")
+    row_state = row.get("state", "partial")
+    complete = row_state == "complete"
+
+    # The bar is inside the name row when it runs — YouTube's inline
+    # progress — and absent otherwise. An unknown length is indeterminate
+    # rather than a lie at 0%.
+    running = job_state in (STATE_DOWNLOADING, STATE_QUEUED)
+    bar_value = percent / 100.0 if isinstance(percent, (int, float)) else None
+    if job_state == STATE_DOWNLOADING:
+        status_text = (
+            f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
+        )
+    elif job_state == STATE_QUEUED:
+        status_text = "Waiting…"
+    elif job_state == STATE_STOPPED:
+        status_text = f"Paused · {_fmt_size((progress or {}).get('bytes'))} saved"
+    elif job_state == STATE_FAILED:
+        status_text = "Failed"
+    elif complete:
+        status_text = _fmt_size(row.get("size_bytes"))
+    else:
+        status_text = "Paused" if row.get("error") else "Not started"
 
     status = ft.Text(
-        f"{percent:.0%}" if active else _fmt_size(row.get("size_bytes")),
+        status_text,
         size=12,
-        color=ft.Colors.ON_SURFACE_VARIANT,
+        color=AppColors.WARNING if job_state == STATE_FAILED else ft.Colors.ON_SURFACE_VARIANT,
     )
+
     trailing: list[ft.Control] = [status]
-    if active:
+    if running:
+        # Pause keeps the partials (a Range resume continues from them).
+        trailing.append(
+            ft.IconButton(
+                icon=ft.Icons.PAUSE_ROUNDED,
+                icon_size=20,
+                tooltip="Pause",
+                on_click=lambda e: controller.pause_download(session),
+            )
+        )
         trailing.append(
             ft.IconButton(
                 icon=ft.Icons.CLOSE_ROUNDED,
@@ -49,11 +88,19 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
             )
         )
     else:
+        if job_state in (STATE_STOPPED, STATE_FAILED):
+            trailing.append(
+                ft.IconButton(
+                    icon=ft.Icons.PLAY_ARROW_ROUNDED if job_state == STATE_STOPPED else ft.Icons.REFRESH_ROUNDED,
+                    icon_size=20,
+                    tooltip="Resume" if job_state == STATE_STOPPED else "Retry",
+                    on_click=lambda e: controller.resume_download(session),
+                )
+            )
         # Play is a real focusable button: on TV the row itself can't take
-        # focus (a Container has no focus events in flet 1.0.4), and the
-        # IconButton family does — same reason the card builders are
-        # buttons. Delete stays next to it as the secondary action.
-        if state == "complete":
+        # focus (a Container has no focus events), and the IconButton
+        # family does — same reason the card builders are buttons.
+        if complete:
             trailing.append(
                 ft.IconButton(
                     icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
@@ -71,18 +118,51 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
             )
         )
 
+    name_column = ft.Column(
+        [
+            ft.Text(
+                f"Episode {row.get('episode_num', '?')}",
+                size=13,
+                weight=ft.FontWeight.W_600,
+                color=ft.Colors.ON_SURFACE,
+            ),
+        ],
+        spacing=2,
+        expand=True,
+    )
+    if running:
+        # The inline bar lives inside the name row, under the title.
+        name_column.controls.append(
+            ft.ProgressBar(
+                value=bar_value,
+                bar_height=3,
+                color=AppColors.PRIMARY,
+                bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.ON_SURFACE),
+            )
+        )
+
     return ft.Container(
         content=ft.Row(
             [
                 ft.Container(
                     content=ft.Icon(
                         ft.Icons.DOWNLOAD_DONE_ROUNDED
-                        if state == "complete"
-                        else ft.Icons.DOWNLOADING_ROUNDED,
+                        if complete
+                        else ft.Icons.DOWNLOADING_ROUNDED
+                        if running
+                        else ft.Icons.PAUSE_CIRCLE_OUTLINE_ROUNDED
+                        if job_state == STATE_STOPPED
+                        else ft.Icons.ERROR_OUTLINE_ROUNDED
+                        if job_state == STATE_FAILED
+                        else ft.Icons.DOWNLOAD_OUTLINE_ROUNDED,
                         size=20,
                         color=AppColors.SUCCESS
-                        if state == "complete"
-                        else AppColors.WARNING,
+                        if complete
+                        else AppColors.WARNING
+                        if running or job_state == STATE_STOPPED
+                        else AppColors.ERROR
+                        if job_state == STATE_FAILED
+                        else ft.Colors.ON_SURFACE_VARIANT,
                     ),
                     width=36,
                     height=36,
@@ -90,21 +170,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
                     alignment=ft.Alignment.CENTER,
                     bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
                 ),
-                ft.Column(
-                    [
-                        ft.Text(
-                            f"Episode {row.get('episode_num', '?')}",
-                            size=13,
-                            weight=ft.FontWeight.W_600,
-                            color=ft.Colors.ON_SURFACE,
-                        ),
-                        ft.ProgressBar(value=percent, bar_height=3)
-                        if active
-                        else ft.Container(height=3),
-                    ],
-                    spacing=4,
-                    expand=True,
-                ),
+                name_column,
                 *trailing,
             ],
             spacing=12,
@@ -112,9 +178,9 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
         ),
         padding=ft.Padding.symmetric(horizontal=12, vertical=8),
         border_radius=8,
-        # The play action moved into `trailing` as a focusable IconButton;
-        # the row itself is display-only now (tap-through would double-fire
-        # with the button on touch devices).
+        # The actions live in `trailing` as focusable buttons; the row
+        # itself is display-only (tap-through would double-fire with the
+        # button on touch devices).
         ink=True,
     )
 

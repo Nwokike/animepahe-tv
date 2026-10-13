@@ -277,7 +277,12 @@ class DownloadManager:
         self._jobs[episode_session] = {"dir": job_dir, "manifest": manifest_path}
         cancel = asyncio.Event()
         self._cancel[episode_session] = cancel
-        self._progress[episode_session] = {"done": 0, "total": 0, "bytes": 0}
+        self._progress[episode_session] = {
+            "done": 0,
+            "total": 0,
+            "bytes": 0,
+            "state": STATE_QUEUED,
+        }
         task = asyncio.create_task(
             self._run(episode_session, m3u8_url, headers, metadata, job_dir, cancel),
             name=f"download-{episode_session}",
@@ -356,7 +361,12 @@ class DownloadManager:
         self._jobs[episode_session] = {"dir": job_dir, "manifest": manifest_path}
         cancel = asyncio.Event()
         self._cancel[episode_session] = cancel
-        self._progress[episode_session] = {"done": 0, "total": 0, "bytes": 0}
+        self._progress[episode_session] = {
+            "done": 0,
+            "total": 0,
+            "bytes": 0,
+            "state": STATE_QUEUED,
+        }
         task = asyncio.create_task(
             self._run_direct(episode_session, url, headers, metadata, job_dir, cancel),
             name=f"download-{episode_session}",
@@ -495,6 +505,16 @@ class DownloadManager:
         row = dict(current)
         total = row.get("total") or 0
         row["percent"] = (100 * row.get("done", 0) / total) if total else None
+        # The state the UI shows: a job the user paused is stopped even
+        # while its partial bytes are still on disk.
+        if not row.get("state"):
+            row["state"] = (
+                STATE_STOPPED
+                if episode_session in self._stop_reason
+                else STATE_DOWNLOADING
+                if episode_session in self._tasks
+                else STATE_QUEUED
+            )
         return row
 
     async def _run_direct(
@@ -507,6 +527,7 @@ class DownloadManager:
         cancel: asyncio.Event,
     ) -> None:
         """One file, chunked, with the app's progress contract."""
+        self._progress[episode_session]["state"] = STATE_DOWNLOADING
         # The provider's own filename when we have it (kayoanime's Drive
         # files carry a real one) — the saved copy keeps what the source
         # named it, so nothing is converted or renamed. Falls back to the
