@@ -950,6 +950,27 @@ class AppController:
             [(r["name"], r["probe_ok"], r["search_count"]) for r in rows],
         )
 
+    async def report_broken_stream(
+        self, anime_session: str, episode_session: str, issues: list[str], note: str = ""
+    ) -> tuple[bool, str]:
+        """File one broken-stream report with the owning provider. Only
+        providers that expose the site's own report form answer; every
+        other one is a no-op with an honest message, never a crash."""
+        provider = self.router.get(self._owner_of(anime_session or ""))
+        if provider is None or not hasattr(provider, "report_broken"):
+            return (False, "This source has no report form.")
+        server = ""
+        src = state.selected_source
+        if src is not None and getattr(src, "fansub", ""):
+            server = str(src.fansub)
+        try:
+            return await provider.report_broken(
+                anime_session, episode_session, issues, note, server_name=server
+            )
+        except Exception as ex:
+            logger.warning("report failed: %s", ex)
+            return (False, "The report could not be sent.")
+
     # ------------------------------------------------------------------
     # Discover (provider-generated filters)
     # ------------------------------------------------------------------
@@ -1845,6 +1866,12 @@ async def main(page: ft.Page):
     )
     methods.play_episode = lambda anime_session, episode_session: spawn(
         controller.play_episode(anime_session, episode_session), name="play-episode"
+    )
+    methods.report_broken_stream = (
+        lambda anime_session, episode_session, issues, note="": spawn(
+            controller.report_broken_stream(anime_session, episode_session, issues, note),
+            name="report-broken",
+        )
     )
     methods.load_search = lambda query, page=1: spawn(
         controller.load_search(query, page), name="load-search"

@@ -796,3 +796,97 @@ def test_details_page_carries_the_cover():
         '<div class="title-wrapper"><h1><span>T</span></h1></div>', "t"
     )
     assert bare.backdrop == ""
+
+
+class _PostClient:
+    """anikato's client surface for the report: GET the watch page, POST
+    the form."""
+
+    def __init__(self, watch_text="", post_status=200, post_body='{"status":true,"msg":"Reported."}'):
+        self._watch_text = watch_text
+        self._post_status = post_status
+        self._post_body = post_body
+        self.posts: list[tuple[str, object]] = []
+        self.is_closed = False
+
+    async def get(self, url, headers=None):
+        class R:
+            status_code = 200
+            text = self._watch_text
+
+        return R()
+
+    async def post(self, url, headers=None, content=None):
+        self.posts.append((url, content))
+
+        class R:
+            status_code = self._post_status
+            text = self._post_body
+
+        return R()
+
+    async def aclose(self):
+        self.is_closed = True
+
+
+def test_report_broken_stream_posts_the_sites_own_form():
+    import asyncio
+
+    from services.providers.anikato import AniKatoProvider
+
+    watch = (
+        '<div id="watch-main" data-id="958"></div>'
+        '<div class="anime-synopsis">x</div>'
+    )
+    client = _PostClient(watch_text=watch)
+    provider = AniKatoProvider(client=client)
+    ok, message = asyncio.run(
+        provider.report_broken(
+            "anikato:naruto-eybxz",
+            "naruto-eybxz|220",
+            ["video_broken", "sub_sync"],
+            note="stops at 4:10",
+            server_name="HD-1",
+        )
+    )
+    assert ok is True
+    assert message == "Reported."
+    (url, body) = client.posts[0]
+    assert url.endswith("/ajax/episode/report")
+    # the repeated field survives: one issue[] per checked issue
+    assert body.count("issue%5B%5D=") == 2
+    assert "video_broken" in body and "sub_sync" in body
+    assert "show_id=958" in body
+    assert "show_slug=naruto-eybxz" in body
+    assert "stops+at+4%3A10" in body
+
+
+def test_report_broken_stream_validates_before_the_wire():
+    """The site's own rule: at least one issue or a note. Surfaced before
+    any request is made, in the site's words."""
+    import asyncio
+
+    from services.providers.anikato import AniKatoProvider
+
+    client = _PostClient()
+    provider = AniKatoProvider(client=client)
+    ok, message = asyncio.run(
+        provider.report_broken("anikato:x", "x|1", [], note="")
+    )
+    assert ok is False
+    assert "issue" in message
+    assert client.posts == []
+
+
+def test_report_broken_stream_with_a_note_only_is_sent():
+    import asyncio
+
+    from services.providers.anikato import AniKatoProvider
+
+    client = _PostClient(watch_text='<div id="watch-main" data-id="7"></div>')
+    provider = AniKatoProvider(client=client)
+    ok, _ = asyncio.run(
+        provider.report_broken("anikato:x", "x|2", [], note="audio drifts")
+    )
+    assert ok is True
+    assert len(client.posts) == 1

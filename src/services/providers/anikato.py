@@ -301,6 +301,23 @@ class AniKatoProvider:
             raise RuntimeError(f"anikato HTTP {resp.status_code} for {url}")
         return resp.text
 
+    async def _post_text(self, url: str, fields: list[tuple[str, str]]) -> str:
+        """POST the site's own form. Fields are PAIRS so a repeated key
+        (issue[] appears once per checked issue) survives the encoding."""
+        headers = {
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": f"{BASE}/",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        from urllib.parse import urlencode
+
+        resp = await self._client.post(
+            url, headers=headers, content=urlencode(fields)
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"anikato POST {resp.status_code} for {url}")
+        return resp.text
+
     async def probe(self) -> bool:
         try:
             html = await self._get_text(f"{BASE}/home")
@@ -563,6 +580,63 @@ class AniKatoProvider:
         servers = _parse_servers(data.get("result") or "")
         self._cache_put(key, servers, CACHE_TTL_EPISODES)
         return servers
+
+    # ------------------------------------------------------------------
+    # Broken-stream reporting (the watch page's own form, POST-only and
+    # verified to work ANONYMOUSLY — validation is reachable without a
+    # login, quota 5/day in localStorage)
+    # ------------------------------------------------------------------
+
+    # The site's own issue vocabulary; the UI renders these, nothing else.
+    REPORT_ISSUES = (
+        ("video_broken", "Video broken"),
+        ("audio_sync", "Audio out of sync"),
+        ("sub_sync", "Subtitles out of sync"),
+        ("skiptime", "Skip times wrong"),
+    )
+
+    async def report_broken(
+        self,
+        anime_session: str,
+        episode_session: str,
+        issues: list[str],
+        note: str = "",
+        server_name: str = "",
+    ) -> tuple[bool, str]:
+        """File one report. Returns (ok, message) — the site's own message
+        is surfaced verbatim, so a validation failure reads as the site
+        worded it rather than as our guess."""
+        _, slug = split_session(anime_session)
+        # The episode session is "{slug}|{num}" — the number is the part
+        # after the pipe (the site's own shape).
+        ep_num = 0
+        if "|" in (episode_session or ""):
+            tail = episode_session.rsplit("|", 1)[-1]
+            if tail.isdigit():
+                ep_num = int(tail)
+        if not slug or not ep_num:
+            return (False, "No episode to report.")
+        if not issues and not note.strip():
+            return (False, "Pick at least one issue or add a note.")
+        watch = await self._watch_page(slug)
+        fields: list[tuple[str, str]] = [
+            ("show_id", str(watch.get("anime_id") or "")),
+            ("episode_id", ""),
+            ("server_name", server_name),
+            ("show_slug", slug),
+            ("note", note.strip()[:500]),
+        ]
+        fields.extend(("issue[]", issue) for issue in issues)
+        try:
+            html = await self._post_text(f"{BASE}/ajax/episode/report", fields)
+        except Exception as ex:
+            logger.warning("anikato report failed: %s", ex)
+            return (False, "Couldn't reach the source to file that.")
+        try:
+            data = json.loads(html)
+        except ValueError:
+            return (False, "The source didn't answer in a way I understand.")
+        return (bool(data.get("status")), str(data.get("msg") or "Reported."))
 
     async def _resolve_link(self, link_id: str) -> tuple[str, str, str, dict] | None:
         """link-id -> megaplay embed -> (realid, type, s, skip_data). The

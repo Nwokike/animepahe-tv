@@ -36,6 +36,7 @@ class ControllerMethods:
     load_discover_filters: object = lambda: None
     load_discover: object = lambda selections=None, page=1: None
     play_episode: object = lambda anime_session, episode_session: None
+    report_broken_stream: object = lambda anime_session, episode_session, issues, note="": None
     download_episode: object = lambda anime_session, episode_session: None
     choose_download_quality: object = lambda index: None
     retry_cloudflare: object = lambda: None

@@ -159,3 +159,19 @@ leaked their files on delete.
 `ft.X` reference where X is not on the module), and the keyword-level
 walk is deliberately NOT part of it: Flet accepts many kwargs through its
 own machinery, so a signature check reports false positives.
+
+### Step 4 addendum — the two extras that do NOT fit (verdicts, not silence)
+- **Comments read**: the map documents the write path as login-only
+  (`ajax/comment/add` → "You must be logged in to comment"), and no
+  anonymous read endpoint is documented for it. A comments UI with nothing
+  to read is clutter, so it is out until the site exposes a read route.
+- **Watch2Gether chat**: `GET /ajax/watch2gether/chat/list/{room_id}` is
+  anonymously readable, but a chat fragment without a room picker and
+  without synchronized playback is half a feature. The write path (start /
+  end / change / chat-save) is 401 anonymous, so it can't be built out
+  either. Out until the whole watch-together surface is in scope.
+
+**Shipped**: broken-stream reporting — the watch page's own form,
+  POST-only and verified to work anonymously, offered on every episode's
+  menu with the site's own issue vocabulary and its validation message
+  surfaced verbatim.

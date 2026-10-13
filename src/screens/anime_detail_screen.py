@@ -318,7 +318,83 @@ def AnimeDetailScreen() -> ft.Control:
                     ),
                 )
             )
+        # Broken-stream reporting: the watch page's own form works
+        # anonymously, so the report is offered where the user actually is.
+        items.append(
+            ft.PopupMenuItem(
+                content="Report a problem",
+                icon=ft.Icons.FLAG_OUTLINED,
+                height=40,
+                on_click=lambda e, s=ep.session: _open_report(s),
+            )
+        )
         return trailing, items
+
+    checked: set[str] = set()
+
+    def _toggle_issue(value: str):
+        if value in checked:
+            checked.discard(value)
+        else:
+            checked.add(value)
+
+    def _open_report(episode_session: str):
+        """The site's own issue vocabulary, plus a note. An empty pick is
+        the site's own validation message, surfaced verbatim."""
+        from core.tasks import spawn
+
+        note, set_note = ft.use_state("")
+
+        def _send():
+            controller.close_dialog()
+            spawn(
+                controller.report_broken_stream(
+                    anime_session, episode_session, sorted(checked), note
+                ),
+                name="report-broken",
+            )
+
+        controller.open_sheet(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Report a problem", weight=ft.FontWeight.W_700),
+                content=ft.Column(
+                    [
+                        ft.Text(
+                            "This goes to the source's own report form.",
+                            size=12,
+                            color=ft.Colors.ON_SURFACE_VARIANT,
+                        ),
+                        *[
+                            ft.Checkbox(
+                                label=label,
+                                value=value in checked,
+                                on_change=lambda e, v=value: _toggle_issue(v),
+                            )
+                            for value, label in _report_issues()
+                        ],
+                        ft.TextField(
+                            hint_text="Anything else?",
+                            value=note,
+                            multiline=True,
+                            min_lines=2,
+                            max_lines=4,
+                            on_change=lambda e: set_note(e.control.value or ""),
+                        ),
+                    ],
+                    tight=True,
+                    spacing=8,
+                ),
+                actions=[
+                    ft.TextButton(
+                        content="Cancel",
+                        on_click=lambda e: controller.close_dialog(),
+                    ),
+                    ft.FilledButton(content="Send report", on_click=lambda e: _send()),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+        )
 
     grid = ft.ResponsiveRow(
         controls=[
@@ -563,3 +639,17 @@ def _fmt_air_date(ts: int) -> str:
     import datetime as _dt
 
     return _dt.datetime.fromtimestamp(int(ts)).strftime("%b %d %Y")
+
+
+_REPORT_ISSUES = ()
+
+
+def _report_issues() -> tuple[tuple[str, str], ...]:
+    """The serving provider's own issue vocabulary (anikato's form is the
+    one that works anonymously). Discovered, not hardcoded."""
+    global _REPORT_ISSUES
+    if not _REPORT_ISSUES:
+        from services.providers.anikato import REPORT_ISSUES
+
+        _REPORT_ISSUES = REPORT_ISSUES
+    return _REPORT_ISSUES
