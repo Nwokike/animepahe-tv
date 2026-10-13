@@ -197,7 +197,7 @@ def test_direct_cancel_leaves_resumable_partial(tmp_path):
 
 
 def test_start_direct_reuses_progress_and_store(tmp_path):
-    from services.downloads import _STATE_COMPLETE
+    from services.downloads import ROW_COMPLETE
 
     mgr = _manager(tmp_path, [("file", lambda: _Resp(200, body=b"DATA" * 512))])
 
@@ -210,7 +210,7 @@ def test_start_direct_reuses_progress_and_store(tmp_path):
 
     asyncio.run(_scenario())
     row = mgr._store.rows["ep3"]
-    assert row["state"] == _STATE_COMPLETE
+    assert row["state"] == ROW_COMPLETE
     assert row["file"].endswith("file.mkv")
     assert row["size_bytes"] == len(b"DATA" * 512)
 

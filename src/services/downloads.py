@@ -9,12 +9,19 @@ Format: one variant's media playlist plus all its segments, then a local
 ``index.m3u8`` whose segment URIs are rewritten to relative filenames (and
 key URIs to downloaded key files). No ffmpeg, no concatenation — a
 half-written episode is never marked complete, so it can never be opened as
-a finished download.
+a finished download. A direct file is stored byte-for-byte under the name
+the server gave it. Nothing is ever converted.
 
 Resume: per-segment ``.part`` files plus a ``manifest.json``. Restarting a
 job skips complete segments and continues partials from their byte offset
-with a ``Range`` request; cancelling leaves the partials on disk so a later
-resume works.
+with a ``Range`` request.
+
+Job states follow Android Media3's model (the reference the YouTube-class
+apps are built on): queued / downloading / stopped / completed / failed /
+removing / restarting — there is no "stopping". PAUSE is a persisted stop
+reason that keeps the partial bytes; resume is clearing it. A queue caps
+concurrency across both paths (files and segments) and orders the rest by
+start time, so a whole-series batch is a queue, not a burst.
 """
 
 import asyncio
@@ -37,12 +44,24 @@ PLAYLIST_TIMEOUT = 15
 # full response body, not a 30s segment. User aborts still arrive via
 # the cancel event (and Cancel on a stuck transfer via aclose).
 FILE_TIMEOUT = 600
-# Concurrent direct-file downloads — the rest queue on the limiter.
+# Concurrent jobs across BOTH paths — the rest queue on the limiter, in
+# start order (Media3's maxParallelDownloads, which defaults to 3 there).
 MAX_FILE_DOWNLOADS = 2
+MAX_PARALLEL_DOWNLOADS = 3
 
 _ERR_THREAD = None
-_STATE_PARTIAL = "partial"
-_STATE_COMPLETE = "complete"
+# Job states (Media3's set — the persisted vocabulary in manifest.json).
+STATE_QUEUED = "queued"
+STATE_DOWNLOADING = "downloading"
+STATE_STOPPED = "stopped"        # paused by the user; partials kept
+STATE_COMPLETED = "completed"
+STATE_FAILED = "failed"
+STATE_REMOVING = "removing"
+STATE_RESTARTING = "restarting"
+# The store row's two words — what the screens already speak. A row's
+# state maps to a job state, never the other way round.
+ROW_PARTIAL = "partial"
+ROW_COMPLETE = "complete"
 
 
 # ---------------------------------------------------------------------------
@@ -179,9 +198,11 @@ class DownloadManager:
     """Owns download jobs: one asyncio task per episode, shared primp client."""
 
     def __init__(self, store=None, downloads_dir: str | None = None):
-        # A queue of direct-file downloads shares one limiter so a big
-        # batch can't starve the app's own fetches (the UI, the router).
-        self._file_limiter = anyio.CapacityLimiter(MAX_FILE_DOWNLOADS)
+        # A queue of jobs shares one limiter so a big batch can't starve
+        # the app's own fetches (the UI, the router) — Media3's
+        # maxParallelDownloads, applied across BOTH paths (files and
+        # segments): the rest queue in start order.
+        self._job_limiter = anyio.CapacityLimiter(MAX_PARALLEL_DOWNLOADS)
         self._store = store
         self.downloads_dir = downloads_dir or self._default_dir()
         self._jobs: dict[str, dict] = {}
@@ -189,6 +210,10 @@ class DownloadManager:
         self._cancel: dict[str, asyncio.Event] = {}
         self._client: primp.AsyncClient | None = None
         self._progress: dict[str, dict] = {}
+        # Stop reasons: a PAUSED job keeps its partials (Range resume
+        # continues from the byte offset), exactly as Media3's
+        # setStopReason does.
+        self._stop_reason: dict[str, str] = {}
         self.on_progress = None  # callable(episode_session, dict)
 
     @staticmethod
@@ -230,19 +255,21 @@ class DownloadManager:
         """Enqueue (or resume) an episode download."""
         if episode_session in self._tasks:
             return
-        job_dir = self._job_dir(
-            metadata.get("anime_session", "unknown"), episode_session
-        )
+        if episode_session in self._stop_reason:
+            # Paused by the user: enqueueing again is a no-op until resume
+            # clears the stop reason.
+            return
+        job_dir = self._ensure_job_dir(episode_session, metadata)
         os.makedirs(job_dir, exist_ok=True)
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
-        if manifest.get("state") == _STATE_COMPLETE:
+        if manifest.get("state") == STATE_COMPLETED:
             return
         manifest.update(
             {
                 "m3u8_url": m3u8_url,
                 "headers": headers,
-                "state": _STATE_PARTIAL,
+                "state": STATE_QUEUED,
                 "metadata": metadata,
             }
         )
@@ -309,19 +336,19 @@ class DownloadManager:
         progress/cancel surface as the HLS path; no second system."""
         if episode_session in self._tasks:
             return
-        job_dir = self._job_dir(
-            metadata.get("anime_session", "unknown"), episode_session
-        )
+        if episode_session in self._stop_reason:
+            return  # paused until resume clears the stop reason
+        job_dir = self._ensure_job_dir(episode_session, metadata)
         os.makedirs(job_dir, exist_ok=True)
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
-        if manifest.get("state") == _STATE_COMPLETE:
+        if manifest.get("state") == STATE_COMPLETED:
             return
         manifest.update(
             {
                 "url": url,
                 "headers": headers,
-                "state": _STATE_PARTIAL,
+                "state": STATE_QUEUED,
                 "metadata": metadata,
             }
         )
@@ -364,6 +391,112 @@ class DownloadManager:
         if os.path.abspath(legacy) != os.path.abspath(job_dir):
             shutil.rmtree(legacy, ignore_errors=True)
 
+    # ------------------------------------------------------------------
+    # Pause / resume / retry — Media3's model: pause is a stop reason,
+    # not a delete, and the partial bytes are what make resume cheap
+    # ------------------------------------------------------------------
+
+    def _ensure_job_dir(self, episode_session: str, metadata: dict) -> str:
+        """The job's directory — the one already known for this session
+        when there is one, otherwise derived from the metadata.
+
+        Recomputing from metadata would move a resumed job (a manifest
+        with no metadata block lands in ``unknown/<ep>``) and orphan the
+        partials the resume was supposed to continue."""
+        known = self._jobs.get(episode_session)
+        if known and os.path.isdir(known.get("dir") or ""):
+            return known["dir"]
+        return self._job_dir(
+            metadata.get("anime_session", "unknown"), episode_session
+        )
+
+    def job_state(self, anime_session: str, episode_session: str) -> str:
+        """The persisted state of a job ('' when there is none)."""
+        manifest = self._read_manifest(
+            os.path.join(self._job_dir(anime_session, episode_session), "manifest.json")
+        )
+        return str(manifest.get("state") or "")
+
+    def pause(self, episode_session: str) -> bool:
+        """Stop a running job and KEEP its partials. False when the job
+        isn't running (nothing to pause)."""
+        if episode_session not in self._tasks:
+            return False
+        self._stop_reason[episode_session] = "paused"
+        cancel = self._cancel.get(episode_session)
+        if cancel is not None:
+            cancel.set()
+        self._tasks.pop(episode_session, None)
+        self._cancel.pop(episode_session, None)
+        job = self._jobs.get(episode_session)
+        if job is not None:
+            manifest = self._read_manifest(job["manifest"])
+            self._write_manifest(
+                job["manifest"],
+                {**manifest, "state": STATE_STOPPED, "stop_reason": "paused"},
+            )
+        logger.info("download paused: %s", episode_session)
+        return True
+
+    async def resume(self, episode_session: str, url: str, headers: dict, metadata: dict) -> bool:
+        """Clear the stop reason and re-enqueue. The partials on disk are
+        what make this a resume rather than a restart (Range continues
+        from the byte offset; complete segments are skipped)."""
+        job_dir = self._job_dir(
+            metadata.get("anime_session", "unknown"), episode_session
+        )
+        manifest_path = os.path.join(job_dir, "manifest.json")
+        manifest = self._read_manifest(manifest_path)
+        if manifest.get("state") == STATE_COMPLETED:
+            return False
+        self._stop_reason.pop(episode_session, None)
+        if manifest.get("m3u8_url") or url.endswith(".m3u8"):
+            await self.start(
+                episode_session, manifest.get("m3u8_url") or url, headers, metadata
+            )
+        else:
+            await self.start_direct(episode_session, url, headers, metadata)
+        return True
+
+    async def retry(self, episode_session: str) -> bool:
+        """Re-queue a FAILED job. The only manual retry YouTube documents,
+        and the per-episode answer when a batch item fails."""
+        job = self._jobs.get(episode_session)
+        if job is None:
+            return False
+        manifest = self._read_manifest(job["manifest"])
+        if manifest.get("state") not in (STATE_FAILED, STATE_STOPPED):
+            return False
+        self._stop_reason.pop(episode_session, None)
+        if manifest.get("m3u8_url"):
+            await self.start(
+                episode_session,
+                manifest["m3u8_url"],
+                manifest.get("headers") or {},
+                manifest.get("metadata") or {},
+            )
+        else:
+            await self.start_direct(
+                episode_session,
+                manifest.get("url") or "",
+                manifest.get("headers") or {},
+                manifest.get("metadata") or {},
+            )
+        return True
+
+    def progress(self, episode_session: str) -> dict | None:
+        """One progress row for the UI: bytes + the percent when the total
+        is known, explicitly percent=None when it isn't (Media3's
+        PERCENTAGE_UNSET) — the bar then shows indeterminate rather than
+        lying at 0%."""
+        current = self._progress.get(episode_session)
+        if not current:
+            return None
+        row = dict(current)
+        total = row.get("total") or 0
+        row["percent"] = (100 * row.get("done", 0) / total) if total else None
+        return row
+
     async def _run_direct(
         self,
         episode_session: str,
@@ -391,18 +524,23 @@ class DownloadManager:
         on_progress = getattr(self, "on_progress", None)
 
         def _chunk(n: int):
+            # ONE progress contract: (episode_session, dict) — the same
+            # shape the segment path emits. This used to call
+            # (session, bytes, 0), which raised TypeError against the
+            # controller's handler and was swallowed, so a direct-file
+            # download's byte progress never reached the UI at all.
             progress["bytes"] = (
                 have + n if not progress["done"] else progress["bytes"] + n
             )
             progress["done"] = 1
             if on_progress is not None:
                 try:
-                    on_progress(episode_session, progress["bytes"], 0)
+                    on_progress(episode_session, dict(progress))
                 except Exception:
                     pass
 
         try:
-            async with self._file_limiter:
+            async with self._job_limiter:
                 ok = await self._download_file(
                     url,
                     headers,
@@ -420,15 +558,23 @@ class DownloadManager:
             return
         finally:
             manifest_path = os.path.join(job_dir, "manifest.json")
-            if not os.path.exists(os.path.join(job_dir, "manifest.json")) or (
-                self._read_manifest(manifest_path).get("state") != _STATE_COMPLETE
+            if not os.path.exists(manifest_path) or (
+                self._read_manifest(manifest_path).get("state") != STATE_COMPLETED
             ):
+                # A paused job keeps its STOPPED state — overwriting it
+                # with queued would make the next enqueue resume a job the
+                # user paused.
+                state = (
+                    STATE_STOPPED
+                    if episode_session in self._stop_reason
+                    else STATE_QUEUED
+                )
                 self._write_manifest(
                     manifest_path,
                     {
                         "url": url,
                         "headers": headers,
-                        "state": _STATE_PARTIAL,
+                        "state": state,
                         "metadata": metadata,
                     },
                 )
@@ -438,7 +584,7 @@ class DownloadManager:
         size_bytes = os.path.getsize(final_path)
         if on_progress is not None:
             try:
-                on_progress(episode_session, size_bytes, size_bytes)
+                on_progress(episode_session, {"bytes": size_bytes, "done": 1, "total": 1})
             except Exception:
                 pass
         self._write_manifest(
@@ -446,7 +592,7 @@ class DownloadManager:
             {
                 "url": url,
                 "headers": headers,
-                "state": _STATE_COMPLETE,
+                "state": STATE_COMPLETED,
                 "file": final_path,
                 "metadata": metadata,
             },
@@ -455,7 +601,7 @@ class DownloadManager:
             row = dict(metadata)
             row.update(
                 {
-                    "state": _STATE_COMPLETE,
+                    "state": ROW_COMPLETE,
                     "file": final_path,
                     "size_bytes": size_bytes,
                     "completed_at": time.time(),
@@ -560,7 +706,7 @@ class DownloadManager:
             manifest = self._read_manifest(manifest_path)
             manifest.update(
                 {
-                    "state": _STATE_COMPLETE,
+                    "state": STATE_COMPLETED,
                     "segments": total,
                     "completed_at": time.time(),
                 }
@@ -570,7 +716,7 @@ class DownloadManager:
                 row = dict(manifest.get("metadata") or metadata)
                 row.update(
                     {
-                        "state": _STATE_COMPLETE,
+                        "state": ROW_COMPLETE,
                         "playlist": index_path,
                         "size_bytes": sum(
                             os.path.getsize(os.path.join(segs_dir, f))
@@ -592,8 +738,13 @@ class DownloadManager:
         finally:
             manifest_path = os.path.join(job_dir, "manifest.json")
             manifest = self._read_manifest(manifest_path)
-            if manifest.get("state") != _STATE_COMPLETE:
-                manifest["state"] = _STATE_PARTIAL
+            if manifest.get("state") != STATE_COMPLETED:
+                # A paused job keeps its STOPPED state.
+                manifest["state"] = (
+                    STATE_STOPPED
+                    if episode_session in self._stop_reason
+                    else STATE_QUEUED
+                )
                 self._write_manifest(manifest_path, manifest)
 
     async def _worker(
