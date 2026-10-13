@@ -338,18 +338,31 @@ def AnimeDetailScreen() -> ft.Control:
         else:
             checked.add(value)
 
+    def _open_series_download():
+        """The whole-series dialog: a range, a quality preset, and N
+        independent queued jobs (each failure is its own episode's)."""
+        controller.open_sheet(
+            _build_series_download_dialog(
+                state.episodes, controller, anime_session, state.downloads
+            )
+        )
+
     def _open_report(episode_session: str):
         """The site's own issue vocabulary, plus a note. An empty pick is
-        the site's own validation message, surfaced verbatim."""
+        the site's own validation message, surfaced verbatim.
+
+        No hooks: this dialog is built inside an event handler, so the
+        note rides a plain cell (a setter call would raise — use_state is
+        render-time only)."""
         from core.tasks import spawn
 
-        note, set_note = ft.use_state("")
+        cell = {"note": ""}
 
         def _send():
             controller.close_dialog()
             spawn(
                 controller.report_broken_stream(
-                    anime_session, episode_session, sorted(checked), note
+                    anime_session, episode_session, sorted(checked), cell["note"]
                 ),
                 name="report-broken",
             )
@@ -375,11 +388,12 @@ def AnimeDetailScreen() -> ft.Control:
                         ],
                         ft.TextField(
                             hint_text="Anything else?",
-                            value=note,
                             multiline=True,
                             min_lines=2,
                             max_lines=4,
-                            on_change=lambda e: set_note(e.control.value or ""),
+                            on_change=lambda e: cell.__setitem__(
+                                "note", e.control.value or ""
+                            ),
                         ),
                     ],
                     tight=True,
@@ -597,6 +611,14 @@ def AnimeDetailScreen() -> ft.Control:
                                     color=ft.Colors.ON_SURFACE,
                                 ),
                                 ft.Container(expand=True),
+                                # Whole-series download (Netflix's "Download
+                                # Season"): a range + a quality preset, then
+                                # N independent queued jobs.
+                                ft.TextButton(
+                                    content="Download the series",
+                                    icon=ft.Icons.DOWNLOAD_FOR_OFFLINE_ROUNDED,
+                                    on_click=lambda e: _open_series_download(),
+                                ),
                                 # Which provider served these episodes, and
                                 # one-tap failover when this source misses.
                                 ft.Text(
@@ -653,3 +675,109 @@ def _report_issues() -> tuple[tuple[str, str], ...]:
 
         _REPORT_ISSUES = REPORT_ISSUES
     return _REPORT_ISSUES
+
+
+def _build_series_download_dialog(episodes, controller, anime_session, downloads, ui=None):
+    """Range + quality preset for a whole-series download.
+
+    The range defaults to everything not already downloaded; the user
+    narrows it, picks a quality, and the batch queues as N independent
+    jobs. No hooks here — this is built inside an event handler, so the
+    UI state is a plain cell and a preset tap re-opens the sheet."""
+    from core.tasks import spawn
+
+    ui = ui if ui is not None else {"preset": "highest"}
+    episodes = list(episodes or [])
+    nums = [e.episode for e in episodes]
+    lo, hi = (min(nums), max(nums)) if nums else (1, 1)
+    # Already-complete episodes are excluded from the default range.
+    done = {s for s, r in (downloads or {}).items() if r.get("state") == "complete"}
+
+    from_ctl = ft.TextField(value=str(lo), width=70, keyboard_type=ft.KeyboardType.NUMBER)
+    to_ctl = ft.TextField(value=str(hi), width=70, keyboard_type=ft.KeyboardType.NUMBER)
+
+    def _range():
+        def _num(field, fallback):
+            try:
+                return int(float(field.value or fallback))
+            except (TypeError, ValueError):
+                return fallback
+
+        return _num(from_ctl, lo), _num(to_ctl, hi)
+
+    def _send():
+        start, end = _range()
+        chosen = [
+            e.session
+            for e in episodes
+            if start <= e.episode <= end and e.session not in done
+        ]
+        controller.close_dialog()
+        spawn(
+            controller.download_series(anime_session, chosen, ui["preset"]),
+            name="download-series",
+        )
+
+    def _preset(value):
+        ui["preset"] = value
+        controller.open_sheet(
+            _build_series_download_dialog(episodes, controller, anime_session, ui)
+        )
+
+    count = len([e for e in episodes if lo <= e.episode <= hi and e.session not in done])
+    sizes = [float(getattr(e, "size", "") or 0) for e in episodes if getattr(e, "size", "")]
+    summary = f"{count} episodes"
+    if sizes:
+        summary += f" · ~{sum(sizes) / 1024:.0f}MB"
+
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Download the series", weight=ft.FontWeight.W_700),
+        content=ft.Column(
+            [
+                ft.Text(summary, size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+                ft.Row([ft.Text("From"), from_ctl, ft.Text("to"), to_ctl], spacing=8),
+                ft.Text("Quality", size=13, weight=ft.FontWeight.W_700),
+                ft.Row(
+                    [
+                        ft.OutlinedButton(
+                            content=label,
+                            style=ft.ButtonStyle(
+                                bgcolor=ft.Colors.with_opacity(0.18, ft.Colors.PRIMARY)
+                                if ui["preset"] == value
+                                else None
+                            ),
+                            on_click=lambda e, v=value: _preset(v),
+                        )
+                        for value, label in (
+                            ("highest", "Highest"),
+                            ("lowest", "Lowest"),
+                            ("as-served", "As served"),
+                        )
+                    ],
+                    spacing=6,
+                ),
+                ft.Text(
+                    "Each episode is saved exactly as the provider serves it — "
+                    "nothing is converted.",
+                    size=11,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+            ],
+            tight=True,
+            spacing=10,
+        ),
+        actions=[
+            ft.TextButton(
+                content="Cancel", on_click=lambda e: controller.close_dialog()
+            ),
+            ft.FilledButton(content="Download", on_click=lambda e: _send()),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+
+def _known_downloads() -> dict:
+    from state.app_state import state
+
+    return state.downloads or {}

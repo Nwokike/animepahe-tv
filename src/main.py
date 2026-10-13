@@ -69,6 +69,24 @@ def _source_choices(sources) -> list[dict]:
     return choices
 
 
+# Quality presets for the download flow: the provider's own list stays the
+# explicit choice, and these three sit on top of it.
+QUALITY_PRESETS = ("highest", "lowest", "as-served")
+
+
+def _preset_choice(choices: list[dict], preset: str) -> dict:
+    """Which rendition a preset picks from an episode's choice list.
+
+    The list is already best-first (SUB then DUB, resolution desc), so
+    'highest' is its head and 'lowest' its tail. 'as-served' is the
+    provider's own default — what sources[0] was before any preset."""
+    if not choices:
+        return {}
+    if preset == "lowest":
+        return choices[-1]
+    return choices[0]
+
+
 def _with_job_state(progress, episode_session: str, state: str) -> dict:
     """The manager's job state travels in the same dict the throttled
     flush already merges, so one flush carries state + bytes."""
@@ -1488,6 +1506,57 @@ class AppController:
     # Downloads
     # ------------------------------------------------------------------
 
+    async def download_series(
+        self, anime_session: str, episode_sessions: list[str], preset: str = "highest"
+    ) -> int:
+        """"Download the series": every episode in the range, queued.
+
+        Each episode is its INDEPENDENT job — one failing (a walled link,
+        a dead host) does not stop the rest, exactly Media3's per-request
+        model. The queue's cap absorbs them, so a 170-episode series is a
+        queue and not a burst. Returns how many were queued."""
+        queued = 0
+        for episode_session in episode_sessions:
+            if episode_session in self.downloads.active_jobs:
+                continue
+            rows = await self.store.get_downloads()
+            if (rows.get(episode_session) or {}).get("state") == "complete":
+                continue
+            # The whole episode is guarded: a dead host, a walled link or
+            # an I/O failure must cost THIS episode only.
+            state.starting_downloads.add(episode_session)
+            state.busy_version += 1
+            try:
+                sources = await self.router.sources(anime_session, episode_session)
+                if not sources:
+                    continue
+                choice = _preset_choice(_source_choices(sources), preset)
+                if not choice:
+                    continue
+                await self._begin_download(
+                    choice,
+                    anime_session,
+                    episode_session,
+                    next(
+                        (e for e in state.episodes if e.session == episode_session),
+                        None,
+                    ),
+                    await self._resolve_anime(anime_session),
+                )
+                queued += 1
+            except Exception as ex:
+                logger.warning("series download skipped %s: %s", episode_session, ex)
+            finally:
+                self._finish_download_start(episode_session)
+        state.downloads_version += 1
+        logger.info(
+            "series download: %d of %d queued (%s)",
+            queued,
+            len(episode_sessions),
+            preset,
+        )
+        return queued
+
     async def download_episode(self, anime_session: str, episode_session: str):
         rows = await self.store.get_downloads()
         row = rows.get(episode_session)
@@ -2012,6 +2081,12 @@ async def main(page: ft.Page):
     )
     methods.play_episode = lambda anime_session, episode_session: spawn(
         controller.play_episode(anime_session, episode_session), name="play-episode"
+    )
+    methods.download_series = (
+        lambda anime_session, episode_sessions, preset="highest": spawn(
+            controller.download_series(anime_session, episode_sessions, preset),
+            name="download-series",
+        )
     )
     methods.report_broken_stream = (
         lambda anime_session, episode_session, issues, note="": spawn(

@@ -302,3 +302,145 @@ def test_a_stream_source_is_still_resolved_normally():
     asyncio.run(controller._begin_download(choice, "s1", "e1", None, {}))
     assert resolves == ["https://anikato/stream/abc"]
     assert captured["url"] == "https://cdn/stream.m3u8"
+
+
+def test_presets_pick_the_right_rendition():
+    from main import _preset_choice
+
+    choices = [
+        {"label": "1080p", "url": "hi"},
+        {"label": "720p", "url": "mid"},
+        {"label": "480p", "url": "lo"},
+    ]
+    assert _preset_choice(choices, "highest")["url"] == "hi"
+    assert _preset_choice(choices, "lowest")["url"] == "lo"
+    # as-served is the provider's own default — the list head
+    assert _preset_choice(choices, "as-served")["url"] == "hi"
+    assert _preset_choice([], "highest") == {}
+
+
+def test_the_batch_queues_each_episode_independently():
+    """One failing episode must not stop the rest — Media3's per-request
+    model. A 170-episode series is a queue, not a burst."""
+    import asyncio
+
+    import main as app_main
+    from core.state import Episode, state
+
+    class _Router:
+        def get(self, name):
+            return None
+
+        async def sources(self, anime_session, episode_session):
+            if "e3" in episode_session:
+                raise RuntimeError("dead host")
+            return [_src(1080, url=f"https://x/{episode_session}")]
+
+    class _Downloads:
+        def __init__(self):
+            self.active_jobs = []
+            self.started = []
+
+        async def detect_kind(self, url, headers):
+            return ("file", "")
+
+        async def start_direct(self, session, url, headers, metadata):
+            self.started.append(session)
+
+    class _Store:
+        def __init__(self):
+            self.rows = {}
+
+        async def get_downloads(self):
+            return dict(self.rows)
+
+        async def save_download(self, session, row):
+            self.rows[session] = row
+
+    controller = app_main.AppController.__new__(app_main.AppController)
+    controller.router = _Router()
+    controller.downloads = _Downloads()
+    controller.store = _Store()
+    controller._owner_of = lambda s: "s1"
+    controller._resolve_source = _passthrough
+    controller._resolve_anime = _anime
+
+    eps = [
+        Episode(id=i, anime_id=1, episode=i, title=f"E{i}", snapshot="", disc="",
+                audio="jpn", duration="", session=f"e{i}", filler=False)
+        for i in range(1, 6)
+    ]
+    state.episodes = eps
+    state.starting_downloads = set()
+    state.downloads = {}
+
+    queued = asyncio.run(controller.download_series("s1", [f"e{i}" for i in range(1, 6)]))
+    assert queued == 4  # e3 failed; the rest still queued
+    assert "e3" not in controller.downloads.started
+    assert len(controller.downloads.started) == 4
+    # nothing was left spinning
+    assert state.starting_downloads == set()
+
+
+def test_the_batch_skips_already_complete_and_active():
+    import asyncio
+
+    import main as app_main
+    from core.state import Episode, state
+
+    class _Router:
+        def get(self, name):
+            return None
+
+        async def sources(self, anime_session, episode_session):
+            return [_src(1080, url=f"https://x/{episode_session}")]
+
+    class _Downloads:
+        def __init__(self):
+            self.active_jobs = ["e2"]
+            self.started = []
+
+        async def detect_kind(self, url, headers):
+            return ("file", "")
+
+        async def start_direct(self, session, url, headers, metadata):
+            self.started.append(session)
+
+    class _Store:
+        def __init__(self):
+            self.rows = {"e2": {"state": "complete"}}
+
+        async def get_downloads(self):
+            return dict(self.rows)
+
+        async def save_download(self, session, row):
+            self.rows[session] = row
+
+    controller = app_main.AppController.__new__(app_main.AppController)
+    controller.router = _Router()
+    controller.downloads = _Downloads()
+    controller.store = _Store()
+    controller._owner_of = lambda s: "s1"
+    controller._resolve_source = _passthrough
+    controller._resolve_anime = _anime
+
+    eps = [
+        Episode(id=i, anime_id=1, episode=i, title=f"E{i}", snapshot="", disc="",
+                audio="jpn", duration="", session=f"e{i}", filler=False)
+        for i in range(1, 4)
+    ]
+    state.episodes = eps
+    state.starting_downloads = set()
+    state.downloads = {}
+
+    queued = asyncio.run(controller.download_series("s1", ["e1", "e2", "e3"]))
+    assert queued == 2  # e2 complete AND active; e3 queued
+    assert controller.downloads.started == ["e1", "e3"]
+
+
+async def _passthrough(url, session, provider_name=None):
+    return url
+
+
+async def _anime(session):
+    return {"title": "Frieren", "poster": "p"}
