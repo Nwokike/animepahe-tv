@@ -192,3 +192,113 @@ def test_single_rendition_start_clears_the_spinner_even_when_it_fails():
         pass
     # The important part: the spinner is cleared either way.
     assert "e1" not in state.starting_downloads
+
+
+def test_the_providers_own_download_route_is_not_reresolved():
+    """A provider-authored download URL (animepahe's pahe.win link) is a
+    file. Feeding it through the owner's kwik resolver can only fail — and
+    the fallback would then discard the site's own offering."""
+    import asyncio
+
+    import main as app_main
+
+    controller = app_main.AppController.__new__(app_main.AppController)
+    resolves: list[str] = []
+
+    async def _resolve(url, session, provider_name=None):
+        resolves.append(url)
+        return url
+
+    controller._resolve_source = _resolve
+    controller._owner_of = lambda session: "animepahe"
+    controller.router = type("R", (), {"get": lambda self, name: None})()
+
+    kind, filename = "file", ""
+    captured = {}
+
+    class _Downloads:
+        active_jobs = []
+
+        async def detect_kind(self, url, headers):
+            return (kind, filename)
+
+        async def start_direct(self, episode_session, url, headers, metadata):
+            captured.update({"url": url, "metadata": metadata})
+
+    class _Store:
+        async def get_downloads(self):
+            return {}
+
+        async def save_download(self, session, row):
+            pass
+
+    controller.downloads = _Downloads()
+    controller.store = _Store()
+
+    from core.state import state
+
+    state.starting_downloads = set()
+    state.downloads = {}
+    choice = {
+        "label": "1080p",
+        "url": "https://kwik.si/e/abc",
+        "headers": {},
+        "download_url": "https://pahe.win/xyz",
+        "direct": True,
+    }
+    asyncio.run(controller._begin_download(choice, "s1", "e1", None, {}))
+    # the pahe.win URL went straight through, and the kwik URL never did
+    assert resolves == []
+    assert captured["url"] == "https://pahe.win/xyz"
+
+
+def test_a_stream_source_is_still_resolved_normally():
+    import asyncio
+
+    import main as app_main
+
+    controller = app_main.AppController.__new__(app_main.AppController)
+    resolves: list[str] = []
+
+    async def _resolve(url, session, provider_name=None):
+        resolves.append(url)
+        return "https://cdn/stream.m3u8"
+
+    controller._resolve_source = _resolve
+    controller._owner_of = lambda session: "anikato"
+    controller.router = type("R", (), {"get": lambda self, name: None})()
+    captured = {}
+
+    class _Downloads:
+        active_jobs = []
+
+        async def detect_kind(self, url, headers):
+            return ("hls", "")
+
+        async def start(self, episode_session, url, headers, metadata):
+            captured.update({"url": url})
+
+    class _Store:
+        async def get_downloads(self):
+            return {}
+
+        async def save_download(self, session, row):
+            pass
+
+    controller.downloads = _Downloads()
+    controller.store = _Store()
+
+    from core.state import state
+
+    state.starting_downloads = set()
+    state.downloads = {}
+    choice = {
+        "label": "1080p",
+        "url": "https://anikato/stream/abc",
+        "headers": {},
+        "download_url": "",
+        "direct": False,
+    }
+    asyncio.run(controller._begin_download(choice, "s1", "e1", None, {}))
+    assert resolves == ["https://anikato/stream/abc"]
+    assert captured["url"] == "https://cdn/stream.m3u8"

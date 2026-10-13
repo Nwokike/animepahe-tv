@@ -393,13 +393,37 @@ class AnimePaheScraper:
         download_m = re.search(r'id="pickDownload"(.*?)</div>', resp.text, re.S)
         if download_m:
             menu = _parse_pick_download(download_m.group(1))
-            for i, entry in enumerate(menu):
-                if i < len(sources):
-                    sources[i].size = entry["size"] or sources[i].size
-                    sources[i].bd = entry["bd"]
-                    if entry["quality"]:
-                        sources[i].resolution = entry["quality"]
-                    sources[i].download_url = entry["url"]
+            # Match by QUALITY first: the menu's order (720p, 1080p in the
+            # map's captured example) is not the buttons' order, so a
+            # positional zip attaches the wrong size to the wrong
+            # rendition. Position is only the tiebreak for two renditions
+            # at the same quality (e.g. an AV1 and an H.264 copy).
+            claimed: set[int] = set()
+            for position, entry in enumerate(menu):
+                index = next(
+                    (
+                        i
+                        for i, src in enumerate(sources)
+                        if i not in claimed and src.resolution == entry["quality"]
+                    ),
+                    None,
+                )
+                if (
+                    index is None
+                    and position < len(sources)
+                    and position not in claimed
+                ):
+                    # Same quality not found (or the menu names a quality
+                    # the buttons don't): the same position is the fallback.
+                    index = position
+                if index is None:
+                    continue
+                claimed.add(index)
+                source = sources[index]
+                if entry["size"]:
+                    source.size = entry["size"]
+                source.bd = entry["bd"]
+                source.download_url = entry["url"]
         logger.info("SOURCES_DATA_SRC found %d kwik sources", len(sources))
         return sources
 

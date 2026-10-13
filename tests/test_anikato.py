@@ -890,3 +890,52 @@ def test_report_broken_stream_with_a_note_only_is_sent():
     )
     assert ok is True
     assert len(client.posts) == 1
+
+
+class _ZipClient:
+    """The play page: resolutionMenu buttons in one order, pickDownload
+    anchors in ANOTHER (the map's captured order is 720p then 1080p)."""
+
+    def __init__(self, html):
+        self._html = html
+        self.is_closed = False
+
+    async def get(self, url, headers=None, timeout=None):
+        class R:
+            status_code = 200
+            text = self._html
+
+        return R()
+
+    async def aclose(self):
+        self.is_closed = True
+
+
+def test_pick_download_matches_by_quality_not_by_position():
+    """The menu's order and the buttons' order differ. A positional zip
+    attaches 720p's size to the 1080p button — the map even captures the
+    menu as 720p-then-1080p."""
+    from services.animepahe import AnimePaheScraper
+
+    page = """
+    <div class="resolutionMenu">
+      <button data-src="https://kwik.si/e/hd1080" data-resolution="1080" data-audio="jpn" data-fansub="MiG_MuX"></button>
+      <button data-src="https://kwik.si/e/hd720" data-resolution="720" data-audio="jpn" data-fansub="MiG_MuX"></button>
+    </div>
+    <div id="pickDownload">
+      <a href="https://pahe.win/a720">MiG_MuX · 720p (176MB) [BD]</a>
+      <a href="https://pahe.win/a1080">MiG_MuX · 1080p (293MB) [BD]</a>
+    </div>
+    """
+    import asyncio
+
+    scraper = AnimePaheScraper()
+    scraper.ddos = _ZipClient(page)
+    sources = asyncio.run(scraper.sources("session", "ep1"))
+    by_resolution = {s.resolution: s for s in sources}
+    # each rendition carries its OWN size and its OWN pahe.win link
+    assert by_resolution[1080].size == "293MB"
+    assert by_resolution[1080].download_url == "https://pahe.win/a1080"
+    assert by_resolution[720].size == "176MB"
+    assert by_resolution[720].download_url == "https://pahe.win/a720"
+    assert all(s.bd for s in sources)

@@ -1353,6 +1353,11 @@ class AppController:
                     "skip": src.skip,
                     # the site's own download route, when it serves one
                     "download_url": getattr(src, "download_url", "") or "",
+                    # ...and that route needs NO unpacking: the provider
+                    # authored it as a file, so resolving it through the
+                    # owner's kwik path would fail and fall back to the
+                    # stream URL — the site's own offering never used.
+                    "direct": bool(getattr(src, "download_url", "")),
                 }
             )
 
@@ -1526,12 +1531,14 @@ class AppController:
         """Resolve one chosen rendition and start the job."""
         source_headers = dict(choice.get("headers") or {})
         # The provider's own download route when the source serves one
-        # (animepahe's pahe.win link): that IS the file the site offers, so
-        # it goes first and the stream URL is the fallback.
+        # (animepahe's pahe.win link) — the site authored it as a file, so
+        # it is used as-is and the stream URL is only the fallback.
         download_url = choice.get("download_url") or choice["url"]
-        resolved = await self._resolve_source(download_url, anime_session)
-        if not resolved:
-            if download_url != choice["url"]:
+        if choice.get("direct"):
+            resolved = download_url
+        else:
+            resolved = await self._resolve_source(download_url, anime_session)
+            if not resolved and download_url != choice["url"]:
                 resolved = await self._resolve_source(choice["url"], anime_session)
         if not resolved:
             self._show_error_snackbar("Couldn't resolve the stream for download.")
