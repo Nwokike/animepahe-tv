@@ -7,6 +7,7 @@ place services are constructed.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 
@@ -1298,40 +1299,65 @@ class AppController:
 
     def _cache_poster_local(self, poster_url: str, anime_session: str) -> str | None:
         """BigPicture needs a LOCAL file — mirror the poster once into the
-        app storage dir. None when it can't be fetched (the notification
-        then ships without the art)."""
+        CACHE tier. None when it can't be fetched (the notification then
+        ships without the art).
+
+        The cache tier, not data: a poster is regenerable (the next pass
+        re-fetches it), and the OS may purge the cache dir under storage
+        pressure — losing one costs one re-fetch. The path is absolute
+        (the old relative one landed wherever the process cwd happened
+        to be: under `flet run` that is storage/data, so the posters
+        nested inside it, and on a device it was simply unpredictable).
+        """
         if not poster_url or not poster_url.startswith("http"):
             return None
-        import os
-
         from core.tasks import spawn
+
+        cache_dir = self._poster_cache_dir()
+        path = os.path.join(
+            cache_dir, f"notify-{notifications_stable(anime_session)}.img"
+        )
 
         async def _fetch():
             try:
                 client = self.kwik._get_client()
                 resp = await client.get(poster_url, timeout=15)
                 if resp.status_code == 200 and resp.content:
-                    cache_dir = os.path.join("storage", "posters")
-                    os.makedirs(cache_dir, exist_ok=True)
-                    path = os.path.join(
-                        cache_dir,
-                        f"notify-{notifications_stable(anime_session)}.img",
-                    )
                     with open(path, "wb") as f:
                         f.write(resp.content)
+                    self._trim_poster_cache()
             except Exception as ex:
                 logger.debug("poster cache failed: %s", ex)
 
-        from core import notifications as _n
-
-        notifications_stable = _n.stable_id
         spawn(_fetch(), name="cache-notify-poster")
-        # First run: no local file yet (the next notification has it).
-        cache_dir = os.path.join("storage", "posters")
-        path = os.path.join(
-            cache_dir, f"notify-{notifications_stable(anime_session)}.img"
-        )
         return path if os.path.exists(path) else None
+
+    def _poster_cache_dir(self) -> str:
+        """The regenerable tier, so a purge costs a re-fetch."""
+        base = os.getenv("FLET_APP_STORAGE_CACHE")
+        root = os.path.join(base, "animepahe", "posters") if base else os.path.join(
+            "storage", "cache", "animepahe", "posters"
+        )
+        os.makedirs(root, exist_ok=True)
+        return root
+
+    def _trim_poster_cache(self, keep: int = 50) -> None:
+        """Bounded, oldest-first: the one directory the app grows without
+        a cap. Fifty posters is a few MB and covers any realistic follow
+        list; the rest re-fetch on their next notification."""
+        try:
+            entries = sorted(
+                (
+                    os.path.join(self._poster_cache_dir(), name)
+                    for name in os.listdir(self._poster_cache_dir())
+                ),
+                key=os.path.getmtime,
+            )
+            for stale in entries[:-keep] if len(entries) > keep else []:
+                with contextlib.suppress(OSError):
+                    os.unlink(stale)
+        except OSError as ex:
+            logger.debug("poster cache trim failed: %s", ex)
 
     async def start_episode_checker(self) -> None:
         """App start + every 6 hours: the new-episode pass for follows."""
