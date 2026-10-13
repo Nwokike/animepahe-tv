@@ -59,6 +59,26 @@ class Provider(Protocol):
         that is a RESULT, not a failure, and does not fail over."""
         ...
 
+    # ------------------------------------------------------------------
+    # Discovery (OPTIONAL — duck-typed, exactly like schedule_tabs /
+    # random_slug). A provider whose source has no browse surface simply
+    # does not define these, and the router never asks it for them.
+    # ------------------------------------------------------------------
+
+    async def filters(self) -> list[dict]:
+        """The filter vocabulary THIS provider's source offers, as
+        ``[{"key", "label", "kind": "choice"|"number", "options":
+        [{"value", "label"}]}]``. Values come from the provider's own
+        site at runtime — nothing is hardcoded in the UI. A provider
+        without a browse route omits this entirely."""
+        ...
+
+    async def browse(self, filters: dict, page: int) -> tuple[list[Anime], bool]:
+        """Filtered catalog: the selections dict maps filter keys to the
+        chosen values (radio semantics per key). Empty means nothing
+        matched — a RESULT, not a failure."""
+        ...
+
     async def close(self) -> None:
         ...
 

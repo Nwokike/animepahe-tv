@@ -92,7 +92,8 @@ def test_every_controller_method_slot_has_a_wiring_or_is_documented():
     wired = _methods_wired_in_main()
     shell_assigned = {"go_home", "open_search", "open_downloads", "open_settings",
                       "open_anime", "back", "close_player", "play_adjacent",
-                      "choose_quality", "open_sheet", "close_dialog"}
+                      "choose_quality", "open_sheet", "close_dialog",
+                      "open_discover"}
     uncovered = slots - wired - shell_assigned
     assert not uncovered, f"ControllerMethods slots never wired: {sorted(uncovered)}"
 

@@ -19,6 +19,7 @@ class ControllerMethods:
     # Navigation
     go_home: object = lambda: None
     open_search: object = lambda: None
+    open_discover: object = lambda: None
     open_downloads: object = lambda: None
     open_settings: object = lambda: None
     open_anime: object = lambda session: None
@@ -32,6 +33,8 @@ class ControllerMethods:
     load_latest: object = lambda: None
     load_episodes: object = lambda session: None
     load_anime: object = lambda session: None
+    load_discover_filters: object = lambda: None
+    load_discover: object = lambda selections=None, page=1: None
     play_episode: object = lambda anime_session, episode_session: None
     download_episode: object = lambda anime_session, episode_session: None
     choose_download_quality: object = lambda index: None

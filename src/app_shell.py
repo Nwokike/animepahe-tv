@@ -22,11 +22,12 @@ from screens.anime_detail_screen import AnimeDetailScreen
 from screens.downloads_screen import DownloadsScreen
 from screens.home_screen import HomeScreen
 from screens.search_screen import SearchScreen
+from screens.discover_screen import DiscoverScreen
 from screens.settings_screen import SettingsScreen
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
-_TABS = ("Home", "Browse", "Downloads", "Settings")
+_TABS = ("Home", "Discover", "Downloads", "Settings")
 _TAB_ICONS = (
     ft.Icons.HOME_ROUNDED,
     ft.Icons.EXPLORE_ROUNDED,
@@ -79,7 +80,16 @@ def AppShell() -> ft.Control:
     # The controller drives navigation by mutating these closures in place
     # (identity must survive — see controller_ctx.py).
     controller.go_home = lambda: set_active_tab("Home")
-    controller.open_search = lambda: set_active_tab("Browse")
+    def _open_search():
+        # The Discover tab hosts both surfaces; the Home header's search
+        # action opens the search one.
+        set_active_tab("Discover")
+        state.discover_showing_search = True
+
+    controller.open_search = _open_search
+    controller.open_discover = lambda: setattr(
+        state, "discover_showing_search", False
+    )
     controller.open_downloads = lambda: set_active_tab("Downloads")
     controller.open_settings = lambda: set_active_tab("Settings")
     controller.open_anime = _open_anime
@@ -187,8 +197,11 @@ def AppShell() -> ft.Control:
     else:
         if active_tab == "Home":
             body = HomeScreen()
-        elif active_tab == "Browse":
-            body = SearchScreen()
+        elif active_tab == "Discover":
+            # One tab, two surfaces: the filtered catalog and search.
+            body = (
+                SearchScreen() if state.discover_showing_search else DiscoverScreen()
+            )
         elif active_tab == "Downloads":
             body = DownloadsScreen()
         else:

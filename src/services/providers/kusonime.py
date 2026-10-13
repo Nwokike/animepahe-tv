@@ -221,6 +221,75 @@ class KusonimeProvider:
 
     _slugs: dict[str, str] = {}
 
+    # ------------------------------------------------------------------
+    # Discovery — the WP category taxonomy (8 categories + franchise tags,
+    # both discovered at runtime)
+    # ------------------------------------------------------------------
+
+    async def filters(self) -> list[dict]:
+        key = "filters"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        options: list[dict] = []
+        try:
+            resp = await self._client.get(
+                f"{KUSONIME_API}/categories",
+                params={"per_page": 100, "_fields": "id,name,count"},
+            )
+            if resp.status_code == 200:
+                for row in resp.json():
+                    if not isinstance(row, dict) or not row.get("name"):
+                        continue
+                    options.append(
+                        {
+                            "value": str(row.get("id")),
+                            "label": f"{row['name']} ({row.get('count', 0)})",
+                        }
+                    )
+        except Exception as ex:
+            logger.debug("kusonime categories failed: %s", ex)
+        spec: list[dict] = []
+        if options:
+            spec.append(
+                {
+                    "key": "categories",
+                    "label": "Category",
+                    "kind": "choice",
+                    "options": options,
+                }
+            )
+        spec.append(
+            {
+                "key": "orderby",
+                "label": "Sort",
+                "kind": "choice",
+                "options": [
+                    {"value": "date", "label": "Newest"},
+                    {"value": "modified", "label": "Recently updated"},
+                    {"value": "title", "label": "Title"},
+                ],
+            }
+        )
+        self._cache_put(key, spec, CACHE_TTL_LATEST)
+        return spec
+
+    async def browse(self, filters: dict, page: int) -> tuple[list[Anime], bool]:
+        params = {
+            "per_page": "12",
+            "page": str(page),
+            "orderby": str(filters.get("orderby") or "date"),
+            "order": "desc",
+            "_fields": "id,title,featured_media,link",
+        }
+        if filters.get("categories"):
+            params["categories"] = ",".join(str(c) for c in filters["categories"])
+        resp = await self._client.get(f"{KUSONIME_API}/posts", params=params)
+        if resp.status_code != 200:
+            raise RuntimeError(f"kusonime HTTP {resp.status_code}")
+        posts = resp.json()
+        return (await self._posts_to_anime(posts), len(posts) == 12)
+
     async def latest_releases(self, page: int) -> tuple[list[Anime], bool]:
         key = f"latest_{page}"
         cached = self._cache_get(key)

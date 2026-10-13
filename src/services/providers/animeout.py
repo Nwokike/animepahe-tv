@@ -134,6 +134,80 @@ class AnimeOutProvider:
             )
         return results
 
+    # ------------------------------------------------------------------
+    # Discovery — the WP category taxonomy, discovered at runtime
+    # (the map documents 28 categories with counts; we read them, we do
+    # not embed a table)
+    # ------------------------------------------------------------------
+
+    async def filters(self) -> list[dict]:
+        key = "filters"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        options: list[dict] = []
+        try:
+            resp = await self._client.get(
+                f"{ANIMEOUT_API}/categories",
+                params={"per_page": 100, "_fields": "id,name,count"},
+            )
+            if resp.status_code == 200:
+                for row in resp.json():
+                    if not isinstance(row, dict) or not row.get("name"):
+                        continue
+                    options.append(
+                        {
+                            "value": str(row.get("id")),
+                            "label": f"{row['name']} ({row.get('count', 0)})",
+                        }
+                    )
+        except Exception as ex:
+            logger.debug("animeout categories failed: %s", ex)
+        spec: list[dict] = []
+        if options:
+            spec.append(
+                {
+                    "key": "categories",
+                    "label": "Category",
+                    "kind": "choice",
+                    "options": options,
+                }
+            )
+        spec.append(
+            {
+                "key": "orderby",
+                "label": "Sort",
+                "kind": "choice",
+                "options": [
+                    {"value": "date", "label": "Newest"},
+                    {"value": "modified", "label": "Recently updated"},
+                    {"value": "title", "label": "Title"},
+                ],
+            }
+        )
+        self._cache_put(key, spec, CACHE_TTL_LATEST)
+        return spec
+
+    async def browse(self, filters: dict, page: int) -> tuple[list[Anime], bool]:
+        params: dict = {
+            "per_page": 24,
+            "page": page,
+            "_fields": "id,title,featured_media",
+        }
+        categories = filters.get("categories")
+        if categories:
+            params["categories"] = ",".join(str(c) for c in categories)
+        elif filters.get("tags"):
+            params["tags"] = ",".join(str(t) for t in filters["tags"])
+        if filters.get("orderby"):
+            params["orderby"] = str(filters["orderby"])
+        resp = await self._client.get(f"{ANIMEOUT_API}/posts", params=params)
+        if resp.status_code != 200:
+            raise RuntimeError(f"animeout HTTP {resp.status_code}")
+        posts = resp.json()
+        result = (await self._posts_to_anime(posts), len(posts) >= 24)
+        return result
+
     async def latest_releases(self, page: int) -> tuple[list[Anime], bool]:
         key = f"latest_{page}"
         cached = self._cache_get(key)

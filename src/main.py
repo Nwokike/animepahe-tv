@@ -928,6 +928,40 @@ class AppController:
         state.sources_test_version += 1
         logger.info("source test: %s", [(r["name"], r["probe_ok"], r["search_count"]) for r in rows])
 
+    # ------------------------------------------------------------------
+    # Discover (provider-generated filters)
+    # ------------------------------------------------------------------
+
+    async def load_discover_filters(self):
+        """Ask the serving provider for its own filter vocabulary. The
+        list is generated from what the source offers — nothing about
+        genres or categories is hardcoded in the UI."""
+        name, spec = await self.router.discover_filters()
+        state.discover_source = name
+        state.discover_filters = spec
+        state.discover_selections = {}
+        state.discover_results = []
+        state.discover_has_more = False
+        state.discover_version += 1
+        if not spec:
+            logger.info("discover: no provider offers a browse surface")
+
+    async def load_discover(self, selections: dict | None = None, page: int = 1):
+        """Run the filtered browse. An empty result is a RESULT (nothing
+        matched), not an error."""
+        if selections is not None:
+            state.discover_selections = dict(selections)
+        state.discover_page = page
+        name, items, has_more = await self.router.browse(
+            state.discover_source or None,
+            state.discover_selections,
+            page,
+        )
+        state.discover_source = name or state.discover_source
+        state.discover_results = items
+        state.discover_has_more = has_more
+        state.discover_version += 1
+
     async def load_schedule(self, time: str | None = None):
         """Airing schedule: 7 day tabs, then the selected day's entries.
         Only providers that expose a schedule answer (anikato); the router
@@ -1739,6 +1773,12 @@ async def main(page: ft.Page):
     methods = ControllerMethods()
     methods.load_latest = lambda page_num=1: spawn(
         controller.load_latest(page_num), name="load-latest"
+    )
+    methods.load_discover_filters = lambda: spawn(
+        controller.load_discover_filters(), name="load-discover-filters"
+    )
+    methods.load_discover = lambda selections=None, page=1: spawn(
+        controller.load_discover(selections, page), name="load-discover"
     )
     methods.retry_cloudflare = lambda: spawn(
         controller.retry_cloudflare(), name="retry-cf"

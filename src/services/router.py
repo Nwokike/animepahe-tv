@@ -336,6 +336,69 @@ class ProviderRouter:
         return results
 
     # ------------------------------------------------------------------
+    # Discovery — the provider whose source has a browse surface
+    # ------------------------------------------------------------------
+
+    def discover_provider(self, name: str | None = None) -> "Provider | None":
+        """The provider that serves Discover: the named one when it can
+        browse, otherwise the first in editorial order that can.
+
+        A provider without a browse route (animepahe's catalog is the
+        airing page) simply has no filters()/browse() — it is skipped,
+        never asked."""
+        if name:
+            provider = self.get(name)
+            if provider is not None and hasattr(provider, "browse"):
+                return provider
+            return None
+        for provider in self._providers:
+            if hasattr(provider, "browse"):
+                return provider
+        return None
+
+    async def discover_filters(self, name: str | None = None) -> tuple[str, list[dict]]:
+        """(provider name, its filter vocabulary). Empty when no provider
+        can browse."""
+        provider = self.discover_provider(name)
+        if provider is None:
+            return ("", [])
+        try:
+            spec = await provider.filters()
+        except Exception as ex:
+            logger.info("discover filters failed on %s: %s", provider.name, ex)
+            return ("", [])
+        return (provider.name, spec)
+
+    async def browse(
+        self, name: str, filters: dict, page: int
+    ) -> tuple[str, list, bool]:
+        """Filtered catalog from the named provider. Same breaker-aware
+        shape as the rest of the router: an empty answer is a RESULT."""
+        provider = self.discover_provider(name)
+        if provider is None:
+            return ("", [], False)
+        breaker = self._breakers[provider.name]
+        if not breaker.allow():
+            return ("", [], False)
+        started = self._clock()
+        try:
+            result = await provider.browse(filters, page)
+        except Exception as ex:
+            breaker.record_failure()
+            self._record_health(
+                provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex)
+            )
+            logger.info("browse failed on %s: %s", provider.name, ex)
+            return ("", [], False)
+        breaker.record_success()
+        self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+        items, has_more = result
+        if _is_empty(items):
+            return (provider.name, [], False)
+        self.last_winner = provider.name
+        return (provider.name, items, has_more)
+
+    # ------------------------------------------------------------------
     # Startup probe race — non-blocking, budget-capped
     # ------------------------------------------------------------------
 

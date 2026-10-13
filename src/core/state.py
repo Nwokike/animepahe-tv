@@ -123,6 +123,20 @@ class AppState:
     schedule_time: str = ""
     schedule_version: int = 0
 
+    # Discover: provider-generated filters + the filtered grid. The filter
+    # vocabulary comes from the provider (never hardcoded in the UI), so
+    # discover_source names which provider served it.
+    discover_filters: list = []
+    discover_selections: dict = {}
+    discover_results: list = []
+    discover_has_more: bool = False
+    discover_source: str = ""
+    discover_page: int = 1
+    discover_version: int = 0
+    # The Discover tab hosts both surfaces: the filtered grid, and search.
+    # This flag says which one is showing.
+    discover_showing_search: bool = False
+
     # Player (in-app playback)
     player_open: bool = False
     player_spec: dict | None = None

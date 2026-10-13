@@ -325,6 +325,116 @@ class AniKatoProvider:
         self._cache_put(key, result, CACHE_TTL_SEARCH)
         return result
 
+    # ------------------------------------------------------------------
+    # Discovery — the site's own /filter vocabulary, discovered at runtime
+    # (nothing hardcoded: the genre slugs and the type/status/sort option
+    # lists are read off the pages)
+    # ------------------------------------------------------------------
+
+    async def filters(self) -> list[dict]:
+        key = "filters"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        genres = await self._genre_filters()
+        types = await self._path_filters("/type", "type")
+        statuses = await self._path_filters("/status", "status")
+        spec: list[dict] = []
+        if genres:
+            spec.append(
+                {
+                    "key": "genre",
+                    "label": "Genre",
+                    "kind": "choice",
+                    "options": genres,
+                }
+            )
+        if types:
+            spec.append(
+                {"key": "type", "label": "Type", "kind": "choice", "options": types}
+            )
+        if statuses:
+            spec.append(
+                {
+                    "key": "status",
+                    "label": "Status",
+                    "kind": "choice",
+                    "options": statuses,
+                }
+            )
+        spec.append(
+            {
+                "key": "sort",
+                "label": "Sort",
+                "kind": "choice",
+                "options": [
+                    {"value": "default", "label": "Default"},
+                    {"value": "latest-updated", "label": "Latest updated"},
+                    {"value": "latest-added", "label": "Latest added"},
+                    {"value": "score", "label": "Score"},
+                    {"value": "name-az", "label": "Name A-Z"},
+                    {"value": "release-date", "label": "Release date"},
+                    {"value": "most-viewed", "label": "Most viewed"},
+                    {"value": "number_of_episodes", "label": "Episode count"},
+                ],
+            }
+        )
+        spec.append(
+            {"key": "ep_min", "label": "Min episodes", "kind": "number"}
+        )
+        self._cache_put(key, spec, CACHE_TTL_LATEST)
+        return spec
+
+    async def _genre_filters(self) -> list[dict]:
+        """The genre slugs live on the home nav as /genre/{slug} anchors."""
+        try:
+            html = await self._get_text(f"{BASE}/home")
+        except Exception as ex:
+            logger.debug("anikato genre discovery failed: %s", ex)
+            return []
+        seen: set[str] = set()
+        options: list[dict] = []
+        for slug, label in re.findall(
+            r'href="[^"]*/genre/([a-z0-9\-]+)"[^>]*>([^<]{2,40})<', html
+        ):
+            if slug in seen:
+                continue
+            seen.add(slug)
+            options.append({"value": slug, "label": _clean(label)})
+        return options
+
+    async def _path_filters(self, path: str, key: str) -> list[dict]:
+        """The /type/{t} and /status/{s} route families — their nav lists
+        the valid values."""
+        try:
+            html = await self._get_text(f"{BASE}/home")
+        except Exception as ex:
+            logger.debug("anikato %s discovery failed: %s", key, ex)
+            return []
+        options: list[dict] = []
+        for value, label in re.findall(
+            r'href="[^"]*' + re.escape(path) + r'/([a-z0-9\-]+)"[^>]*>([^<]{2,40})<',
+            html,
+        ):
+            options.append({"value": value, "label": _clean(label)})
+        return options
+
+    async def browse(self, filters: dict, page: int) -> tuple[list[Anime], bool]:
+        from urllib.parse import quote
+
+        params = [f"page={page}"]
+        for key in ("genre", "type", "status", "sort"):
+            value = filters.get(key)
+            if value:
+                params.append(f"{key}={quote(str(value))}")
+        for key in ("ep_min", "ep_max"):
+            value = filters.get(key)
+            if value:
+                params.append(f"{key}={quote(str(value))}")
+        html = await self._get_text(f"{BASE}/filter?" + "&".join(params))
+        items = _parse_items(html)
+        return (items, len(items) >= 20)
+
     async def anime(self, session: str) -> Anime | None:
         _, slug = split_session(session)
         if not slug:
