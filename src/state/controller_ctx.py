@@ -20,6 +20,8 @@ class ControllerMethods:
     go_home: object = lambda: None
     open_search: object = lambda: None
     open_discover: object = lambda: None
+    open_backend_picker: object = lambda: None
+    pin_backend: object = lambda name: None
     open_downloads: object = lambda: None
     open_settings: object = lambda: None
     open_anime: object = lambda session: None

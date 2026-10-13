@@ -100,6 +100,8 @@ def test_every_controller_method_slot_has_a_wiring_or_is_documented():
         "open_sheet",
         "close_dialog",
         "open_discover",
+        "open_backend_picker",
+        "pin_backend",
     }
     uncovered = slots - wired - shell_assigned
     assert not uncovered, f"ControllerMethods slots never wired: {sorted(uncovered)}"

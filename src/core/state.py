@@ -146,6 +146,8 @@ class AppState:
     # The Discover tab hosts both surfaces: the filtered grid, and search.
     # This flag says which one is showing.
     discover_showing_search: bool = False
+    # The header badge's provider picker (shell-owned dialog).
+    backend_picker_open: bool = False
 
     # Player (in-app playback)
     player_open: bool = False

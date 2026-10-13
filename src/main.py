@@ -1357,6 +1357,18 @@ class AppController:
         await self.store.save_backend(name)
         logger.info("content source pinned to: %s", self.router.pin or "auto")
 
+    async def open_backend_picker(self) -> None:
+        """The header badge's dialog: every provider with its live health,
+        one-tap pinning. Shell-owned (the portal), so the state flag the
+        portal watches lives here."""
+        state.backend_picker_open = True
+
+    async def pin_backend(self, name: str) -> None:
+        """One-tap pin from the picker; the picker closes and stays shut
+        until the badge is tapped again."""
+        await self.set_backend_pin(name)
+        state.backend_picker_open = False
+
     async def close_player(self):
         state.player_open = False
         state.episodes_version += 1

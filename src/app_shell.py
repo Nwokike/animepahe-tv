@@ -132,6 +132,10 @@ def AppShell() -> ft.Control:
         if portal_owner != "download":
             set_portal_owner("download")
             set_active_dialog(_build_download_quality_dialog(state, controller))
+    elif state.backend_picker_open:
+        if portal_owner != "backend":
+            set_portal_owner("backend")
+            set_active_dialog(_build_backend_picker(state, controller))
     elif sheet is not None:
         if portal_owner != "sheet":
             set_portal_owner("sheet")
@@ -164,6 +168,8 @@ def AppShell() -> ft.Control:
             state.download_choice_open = False
             state.download_choices = None
             state.pending_download = None
+        if state.backend_picker_open:
+            state.backend_picker_open = False
 
     controller.open_sheet = lambda d: set_sheet(d)
     controller.close_dialog = _close_dialog
@@ -626,6 +632,110 @@ def _build_download_quality_dialog(state, controller) -> ft.Control:
             ft.TextButton(
                 content="Cancel",
                 on_click=lambda e: controller.close_dialog(),
+            )
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+
+def _build_backend_picker(state, controller) -> ft.Control:
+    """Which provider is serving, every provider's live health, and
+    one-tap pinning — the header badge's destination. The health rows are
+    the router's own breaker state, so the picker explains a switch
+    instead of just announcing one."""
+    health = controller.sources_status() if hasattr(controller, "sources_status") else {}
+    providers = sorted({*health, state.current_source_name} - {""})
+    current = (state.current_source_name or "").strip()
+
+    def _row(name: str) -> ft.Control:
+        h = health.get(name) or {}
+        rec = str(h.get("state") or "")
+        colour = (
+            AppColors.ERROR
+            if rec == "open"
+            else AppColors.WARNING
+            if rec == "half_open"
+            else AppColors.SUCCESS
+        )
+        detail = "never probed"
+        if h.get("checked_at"):
+            latency = h.get("latency_ms")
+            detail = f"{latency:.0f}ms" if isinstance(latency, (int, float)) else "—"
+            if h.get("last_error"):
+                detail += f" · {str(h['last_error'])[:40]}"
+        selected = current == name
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Container(width=8, height=8, border_radius=4, bgcolor=colour),
+                    ft.Container(width=8),
+                    ft.Text(name.capitalize(), size=13, weight=ft.FontWeight.W_600),
+                    ft.Container(expand=True),
+                    ft.Text(detail, size=11, color=ft.Colors.ON_SURFACE_VARIANT),
+                    ft.Text(
+                        "serving now" if selected else "tap to pin",
+                        size=11,
+                        color=ft.Colors.PRIMARY if selected else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                ],
+                spacing=4,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=10, vertical=10),
+            border_radius=8,
+            border=ft.Border.all(
+                1.5 if selected else 1,
+                ft.Colors.PRIMARY if selected else ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE),
+            ),
+            ink=True,
+            on_click=lambda e, n=name: controller.pin_backend(n),
+        )
+
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Content source", weight=ft.FontWeight.W_700),
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Text("Automatic", size=13, weight=ft.FontWeight.W_600),
+                            ft.Container(expand=True),
+                            ft.Text(
+                                "any healthy source, in order",
+                                size=11,
+                                color=ft.Colors.ON_SURFACE_VARIANT,
+                            ),
+                            ft.Text(
+                                "active" if not current else "tap to choose",
+                                size=11,
+                                color=ft.Colors.PRIMARY if not current else ft.Colors.ON_SURFACE_VARIANT,
+                            ),
+                        ],
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=10),
+                    border_radius=8,
+                    border=ft.Border.all(
+                        1.5 if not current else 1,
+                        ft.Colors.PRIMARY if not current else ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE),
+                    ),
+                    ink=True,
+                    on_click=lambda e: controller.pin_backend("auto"),
+                ),
+                *[_row(name) for name in providers],
+                ft.Text(
+                    "A pinned source still fails over — the pin only changes who goes first.",
+                    size=11,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+            ],
+            tight=True,
+            spacing=8,
+        ),
+        actions=[
+            ft.TextButton(
+                content="Close", on_click=lambda e: controller.close_dialog()
             )
         ],
         actions_alignment=ft.MainAxisAlignment.END,

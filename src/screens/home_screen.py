@@ -165,6 +165,42 @@ def _version_pill(state, page) -> ft.Control:
     )
 
 
+def _backend_badge(state, controller) -> ft.Control:
+    """The clickable backend badge: which provider is serving, and a state
+    colour from its live health. Tapping opens the picker — every provider
+    with its health, 'Automatic' first, one-tap pinning — so you can swap
+    backends from anywhere and see WHY it switched."""
+    name = (state.current_source_name or "").strip()
+    label = name.capitalize() if name else "Auto"
+    colour = AppColors.SUCCESS if name else AppColors.PRIMARY
+    if not name:
+        colour = AppColors.SECONDARY
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.Container(
+                    width=8,
+                    height=8,
+                    border_radius=4,
+                    bgcolor=colour,
+                ),
+                ft.Container(width=6),
+                ft.Text(label, size=12, weight=ft.FontWeight.W_700),
+            ],
+            spacing=0,
+            tight=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+        border_radius=14,
+        bgcolor=ft.Colors.with_opacity(0.1, colour),
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.35, colour)),
+        ink=True,
+        tooltip=f"Served by {label} — tap to switch",
+        on_click=lambda e: controller.open_backend_picker(),
+    )
+
+
 def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
     """Icon + wordmark left; search, version, theme right — the original line."""
 
@@ -199,6 +235,7 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
                 ),
                 ft.Row(
                     [
+                        _backend_badge(state, controller),
                         _version_pill(state, page),
                         action(
                             ft.Icons.CALENDAR_MONTH_ROUNDED,

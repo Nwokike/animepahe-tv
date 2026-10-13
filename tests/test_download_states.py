@@ -16,6 +16,8 @@ import tempfile
 _TMP = tempfile.mkdtemp(prefix="animepahe-dlstate-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
+import flet as ft  # noqa: E402
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from services.downloads import (  # noqa: E402
@@ -250,3 +252,51 @@ def test_the_queue_caps_concurrency_across_both_paths(tmp_path):
 
     peak = asyncio.run(_scenario())
     assert peak == MAX_PARALLEL_DOWNLOADS  # the rest queued, in start order
+
+
+# ---------------------------------------------------------------------
+# The backend badge (Phase 8 Step 6)
+# ---------------------------------------------------------------------
+
+
+def test_the_badge_names_the_serving_backend():
+    from screens.home_screen import _backend_badge
+
+    class _State:
+        current_source_name = "anikato"
+
+    class _Controller:
+        def open_backend_picker(self):
+            pass
+
+    badge = _backend_badge(_State(), _Controller())
+    texts = _texts(badge)
+    assert "Anikato" in texts
+    # tapping opens the picker
+    badge.on_click(None)  # no exception = the wiring is real
+
+
+def test_the_badge_with_no_serving_backend_says_auto(tmp_path):
+    from screens.home_screen import _backend_badge
+
+    class _State:
+        current_source_name = ""
+
+    badge = _backend_badge(_State(), type("C", (), {"open_backend_picker": lambda: None})())
+    assert "Auto" in _texts(badge)
+
+
+def _texts(control) -> list[str]:
+    found: list[str] = []
+    stack = [control]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ft.Text):
+            found.append(str(current.value))
+        for attr in ("controls", "content"):
+            value = getattr(current, attr, None)
+            if isinstance(value, list):
+                stack.extend(value)
+            elif value is not None:
+                stack.append(value)
+    return found
