@@ -383,26 +383,23 @@ class AnimePaheScraper:
                     )
                 )
         # The download menu rides the same page: pickDownload anchors carry
-        # {Fansub} · {quality}p ({size}MB) [BD] with pahe.win links. Zipped
-        # positionally with the buttons (udb's approach) they attach real
-        # file sizes to each rendition.
+        # {Fansub} · {quality}p ({size}MB) [BD] with pahe.win links — the
+        # site's OWN download offering (documented in the backend map,
+        # Juro's regex). Parsed into a structured menu so the quality
+        # dialog can show the real fansub/size/BD, and the pahe.win URL
+        # rides the Source as the download route.
         # The anchors are direct children — the first </div> closes the
         # menu itself.
         download_m = re.search(r'id="pickDownload"(.*?)</div>', resp.text, re.S)
         if download_m:
-            anchors = re.findall(
-                r'href="(https://pahe\.win/[^"]+)"[^>]*>(.*?)</a>',
-                download_m.group(1),
-                re.S,
-            )
-            size_by_index = {}
-            for i, (href, label) in enumerate(anchors):
-                size_m = re.search(r"\(([\d.]+MB)\)", re.sub(r"<[^>]+>", "", label))
-                if size_m:
-                    size_by_index[i] = size_m.group(1)
-            for i, source in enumerate(sources):
-                if i in size_by_index:
-                    source.size = size_by_index[i]
+            menu = _parse_pick_download(download_m.group(1))
+            for i, entry in enumerate(menu):
+                if i < len(sources):
+                    sources[i].size = entry["size"] or sources[i].size
+                    sources[i].bd = entry["bd"]
+                    if entry["quality"]:
+                        sources[i].resolution = entry["quality"]
+                    sources[i].download_url = entry["url"]
         logger.info("SOURCES_DATA_SRC found %d kwik sources", len(sources))
         return sources
 
@@ -438,3 +435,49 @@ class AnimePaheScraper:
 
     async def close(self):
         await self.ddos.close()
+
+
+# The download menu's entry shape: {Fansub} · {quality}p ({size}MB) [BD]
+_PICK_LABEL = re.compile(
+    r"(?P<fansub>.+?)\s*·\s*(?P<quality>\d+)p\s*\((?P<size>.+?)MB\)\s*(?P<tail>.*)"
+)
+
+
+def _parse_pick_download(html: str) -> list[dict]:
+    """div#pickDownload's anchors into structured entries.
+
+    The site's own download offering, per the backend map: each anchor is
+    a pahe.win share link whose text names the fansub, the quality, the
+    file size and (optionally) the BD badge. Positional order matches the
+    resolutionMenu buttons, which is how the sizes attach to renditions."""
+    entries: list[dict] = []
+    for href, raw_label in re.findall(
+        r'href="(https://pahe\.win/[^"]+)"[^>]*>(.*?)</a>', html, re.S
+    ):
+        label = re.sub(r"<[^>]+>", "", raw_label or "")
+        label = re.sub(r"\s+", " ", label).strip()
+        match = _PICK_LABEL.search(label)
+        if not match:
+            # A differently-shaped label still yields its URL and size.
+            size_m = re.search(r"\(([\d.]+MB)\)", label)
+            entries.append(
+                {
+                    "url": href,
+                    "fansub": "",
+                    "quality": 0,
+                    "size": size_m.group(1) if size_m else "",
+                    "bd": "BD" in label.upper(),
+                }
+            )
+            continue
+        tail = match.group("tail") or ""
+        entries.append(
+            {
+                "url": href,
+                "fansub": (match.group("fansub") or "").strip(),
+                "quality": int(match.group("quality")),
+                "size": f"{match.group('size').strip()}MB",
+                "bd": "BD" in tail.upper(),
+            }
+        )
+    return entries

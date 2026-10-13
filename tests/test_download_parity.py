@@ -94,9 +94,47 @@ def _manager(tmp_path, routes):
 def test_detect_kind_reads_the_media_not_the_extension(tmp_path):
     mgr = _manager(tmp_path, [])
     mgr._fake_client._routes = [("x", lambda: _PeekResp(b"#EXTM3U\n"))]
-    assert asyncio.run(mgr.detect_kind("https://cdn/x.m3u8", {})) == "hls"
+    assert asyncio.run(mgr.detect_kind("https://cdn/x.m3u8", {})) == ("hls", "")
     mgr._fake_client._routes = [("x", lambda: _PeekResp(b"\x1aE\xdf\xa3\x93"))]
-    assert asyncio.run(mgr.detect_kind("https://drive/x", {})) == "file"
+    assert asyncio.run(mgr.detect_kind("https://drive/x", {})) == ("file", "")
+
+
+def test_detect_kind_returns_the_servers_own_filename(tmp_path):
+    """The peek response already carries Content-Disposition, so the saved
+    copy can keep the server's name at no extra request."""
+    mgr = _manager(tmp_path, [])
+    mgr._fake_client._routes = [
+        (
+            "download",
+            lambda: _PeekResp(
+                b"\x1aE\xdf\xa3\x93",
+                headers={
+                    "content-disposition": 'attachment; filename="[Kayoanime] Frieren - 01 [1080p].mkv"'
+                },
+            ),
+        )
+    ]
+    kind, filename = asyncio.run(
+        mgr.detect_kind("https://drive.usercontent.google.com/download?id=abc", {})
+    )
+    assert kind == "file"
+    assert filename == "[Kayoanime] Frieren - 01 [1080p].mkv"
+
+
+def test_filename_from_disposition_reads_the_rfc5987_form():
+    """Drive encodes non-ASCII names as filename*=UTF-8''..."""
+    from services.downloads import _filename_from_disposition
+
+    from urllib.parse import quote
+
+    name = "スタッフ.mkv"
+    assert (
+        _filename_from_disposition(f"attachment; filename*=UTF-8''{quote(name)}")
+        == name
+    )
+    assert _filename_from_disposition("attachment; filename=ep01.mkv") == "ep01.mkv"
+    for junk in (None, "", "attachment", "inline"):
+        assert _filename_from_disposition(junk) == ""
 
 
 def test_direct_download_resumes_with_range(tmp_path):
@@ -147,7 +185,10 @@ def test_direct_cancel_leaves_resumable_partial(tmp_path):
     cancel.set()  # cancelled before the first chunk lands
     ok = asyncio.run(
         mgr._download_file(
-            "https://drive/full", {}, str(part), str(job_dir / "file.mkv"),
+            "https://drive/full",
+            {},
+            str(part),
+            str(job_dir / "file.mkv"),
             cancel=cancel,
         )
     )
@@ -177,6 +218,7 @@ def test_start_direct_reuses_progress_and_store(tmp_path):
 # ---------------------------------------------------------------------
 # The provider's own filename, kept (Phase 7.5)
 # ---------------------------------------------------------------------
+
 
 def test_safe_filename_keeps_the_real_name_and_rejects_identifiers():
     from services.downloads import _safe_filename

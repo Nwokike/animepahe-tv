@@ -71,10 +71,13 @@ def _episode_card(
                                         weight=ft.FontWeight.W_700,
                                         color=AppColors.WARNING,
                                     ),
-                                    padding=ft.Padding.symmetric(horizontal=5, vertical=1),
+                                    padding=ft.Padding.symmetric(
+                                        horizontal=5, vertical=1
+                                    ),
                                     border_radius=4,
                                     border=ft.Border.all(
-                                        1, ft.Colors.with_opacity(0.4, AppColors.WARNING)
+                                        1,
+                                        ft.Colors.with_opacity(0.4, AppColors.WARNING),
                                     ),
                                     visible=bool(ep.filler),
                                 ),
@@ -87,6 +90,11 @@ def _episode_card(
                                 [ep.duration or "24m"]
                                 + (["SUB"] if getattr(ep, "subs", False) else [])
                                 + (["DUB"] if getattr(ep, "dub", False) else [])
+                                + (
+                                    [_fmt_air_date(getattr(ep, "aired_ts", 0))]
+                                    if getattr(ep, "aired_ts", 0)
+                                    else []
+                                )
                             ),
                             size=12,
                             color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
@@ -192,10 +200,13 @@ def AnimeDetailScreen() -> ft.Control:
             icon=ft.Icons.MOVIE_FILTER_ROUNDED,
         )
 
+    # The page's own cover when the source serves one, else the blurred
+    # poster (the shape this screen always had).
+    backdrop_src = anime.get("backdrop") or poster
     backdrop = ft.Stack(
         [
-            ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True, opacity=0.3)
-            if poster
+            ft.Image(src=backdrop_src, fit=ft.BoxFit.COVER, expand=True, opacity=0.3)
+            if backdrop_src
             else ft.Container(bgcolor=ft.Colors.SURFACE),
             ft.Container(
                 expand=True,
@@ -219,7 +230,9 @@ def AnimeDetailScreen() -> ft.Control:
         content=ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True)
         if poster
         else ft.Container(
-            content=ft.Icon(ft.Icons.MOVIE_ROUNDED, size=64, color=ft.Colors.ON_SURFACE_VARIANT),
+            content=ft.Icon(
+                ft.Icons.MOVIE_ROUNDED, size=64, color=ft.Colors.ON_SURFACE_VARIANT
+            ),
             alignment=ft.Alignment.CENTER,
             bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
         ),
@@ -363,9 +376,7 @@ def AnimeDetailScreen() -> ft.Control:
             if following
             else ft.Icons.FAVORITE_BORDER_ROUNDED,
             style=ft.ButtonStyle(
-                bgcolor=AppColors.PRIMARY
-                if following
-                else ft.Colors.TRANSPARENT,
+                bgcolor=AppColors.PRIMARY if following else ft.Colors.TRANSPARENT,
                 color=ft.Colors.WHITE if following else ft.Colors.ON_SURFACE,
                 shape=ft.RoundedRectangleBorder(radius=10),
                 side=ft.BorderSide(1 if not following else 0, AppColors.PRIMARY),
@@ -390,7 +401,9 @@ def AnimeDetailScreen() -> ft.Control:
             parts.append(f"★ {float(anime['score']):.1f}")
         # Studios as well as the aired range — both parsed, neither shown
         # before now.
-        studios = [str(s).strip() for s in (anime.get("studios") or []) if str(s).strip()]
+        studios = [
+            str(s).strip() for s in (anime.get("studios") or []) if str(s).strip()
+        ]
         if studios:
             parts.append("/".join(studios[:2]))
         if anime.get("aired"):
@@ -498,7 +511,8 @@ def AnimeDetailScreen() -> ft.Control:
                         ),
                         ft.Container(height=16),
                         _synopsis_block(anime),
-                        ft.Container(height=24),                        ft.Row(
+                        ft.Container(height=24),
+                        ft.Row(
                             [
                                 ft.Text(
                                     "Episodes",
@@ -541,3 +555,11 @@ def AnimeDetailScreen() -> ft.Control:
         ],
         expand=True,
     )
+
+
+def _fmt_air_date(ts: int) -> str:
+    """A unix air time as the card's short date (local). 0/absent never
+    reaches here."""
+    import datetime as _dt
+
+    return _dt.datetime.fromtimestamp(int(ts)).strftime("%b %d %Y")

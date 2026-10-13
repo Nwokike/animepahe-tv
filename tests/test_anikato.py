@@ -25,6 +25,7 @@ def _read(name: str) -> str:
 # Pure parsers
 # ---------------------------------------------------------------------
 
+
 def test_parse_items_maps_catalog_entries():
     from services.providers.anikato import _parse_items
 
@@ -64,10 +65,11 @@ def test_parse_episode_list_maps_220_entries():
     assert nums[0] == 1 and 220 in nums
     # every entry carries the server-list token
     assert all(ids for _, ids, *_ in entries)
-    # and the per-episode sub/dub flags the page serves (not invented:
-    # at least one of each shape exists in a 220-episode run)
-    assert any(subs for _n, _i, subs, _d in entries)
-    assert any(dub for _n, _i, _s, dub in entries)
+    # and the per-episode sub/dub flags and air timestamps the page serves
+    # (not invented: at least one of each shape exists in a 220-episode run)
+    assert any(subs for _n, _i, subs, _d, _ts in entries)
+    assert any(dub for _n, _i, _s, dub, _ts in entries)
+    assert any(ts for _n, _i, _s, _d, ts in entries)
 
 
 def test_parse_servers_maps_sub_and_dub_groups():
@@ -82,14 +84,23 @@ def test_parse_servers_maps_sub_and_dub_groups():
 def test_megaplay_params_extracts_realid_type_and_s():
     from services.providers.anikato import _megaplay_params
 
-    assert _megaplay_params("https://megaplay.buzz/stream/s-2/12352/sub?s=tcdn") == ("12352", "sub", "tcdn")
-    assert _megaplay_params("https://megaplay.buzz/videojs/stream/s-2/999/dub") == ("999", "dub", "")
+    assert _megaplay_params("https://megaplay.buzz/stream/s-2/12352/sub?s=tcdn") == (
+        "12352",
+        "sub",
+        "tcdn",
+    )
+    assert _megaplay_params("https://megaplay.buzz/videojs/stream/s-2/999/dub") == (
+        "999",
+        "dub",
+        "",
+    )
     assert _megaplay_params("https://megaplay.buzz/other") is None
 
 
 # ---------------------------------------------------------------------
 # The two fixed transforms
 # ---------------------------------------------------------------------
+
 
 def test_vrf_matches_the_site_scheme():
     from services.providers.anikato import _vrf
@@ -119,6 +130,7 @@ def test_aes_decrypt_opens_the_live_enc_token():
 # Subtitles + skip data (Phase 1)
 # ---------------------------------------------------------------------
 
+
 def test_decrypt_returns_tracks_and_windows():
     """The full getSources payload: manifest + 9 tracks + intro/outro."""
     from services.providers.anikato import _decrypt_manifest
@@ -128,9 +140,13 @@ def test_decrypt_returns_tracks_and_windows():
     gs = json.loads(_read("anikato_getsources.json"))
     # the provider normalizes tracks as {label, url, default}
     tracks = [
-        {"label": str(t.get("label") or ""), "url": str(t.get("file") or ""),
-         "default": bool(t.get("default"))}
-        for t in (gs.get("tracks") or []) if t.get("file")
+        {
+            "label": str(t.get("label") or ""),
+            "url": str(t.get("file") or ""),
+            "default": bool(t.get("default")),
+        }
+        for t in (gs.get("tracks") or [])
+        if t.get("file")
     ]
     assert manifest.endswith("master.m3u8")
     assert len(tracks) == 9
@@ -148,11 +164,18 @@ def test_source_skip_merge_prefers_getsources_keeps_episode_arrays():
     from core.state import Source
 
     s = Source(
-        url="https://x/master.m3u8", resolution=0, audio="jpn", fansub="AniKato",
+        url="https://x/master.m3u8",
+        resolution=0,
+        audio="jpn",
+        fansub="AniKato",
         headers={"Referer": "https://megaplay.buzz/"},
         subtitles=[{"label": "English", "url": "https://x/eng-2.vtt", "default": True}],
-        skip={"intro": {"start": 30, "end": 119}, "outro": {"start": 1315, "end": 1404},
-              "episode_intro": [0, 0], "episode_outro": [1280, 1369]},
+        skip={
+            "intro": {"start": 30, "end": 119},
+            "outro": {"start": 1315, "end": 1404},
+            "episode_intro": [0, 0],
+            "episode_outro": [1280, 1369],
+        },
     )
     assert s.skip["intro"]["start"] == 30
     assert s.skip["episode_outro"] == [1280, 1369]
@@ -200,7 +223,12 @@ def test_player_active_window_prefers_sources_falls_back():
     outside = player._active_window(200)
     assert outside is None
     # episode-array fallback when getSources served nothing
-    player.skip = {"intro": {}, "outro": {}, "episode_intro": [], "episode_outro": [1280, 1369]}
+    player.skip = {
+        "intro": {},
+        "outro": {},
+        "episode_intro": [],
+        "episode_outro": [1280, 1369],
+    }
     assert player._active_window(1300) == (1280.0, 1369.0)
 
 
@@ -278,6 +306,7 @@ def test_parse_schedule_tabs_and_day():
 # AnimePahe m=links (Phase 2) — the six-client-attested response shape
 # ---------------------------------------------------------------------
 
+
 def test_animepahe_sources_via_links_parses_renditions():
     import asyncio
 
@@ -286,9 +315,24 @@ def test_animepahe_sources_via_links_parses_renditions():
     LINKS_RESPONSE = {
         "status": 200,
         "data": {
-            "360": {"audio": "jpn", "kwik": "https://kwik.si/e/abc360", "hd": "0", "filesize": 87.5},
-            "720": {"audio": "jpn", "kwik": "https://kwik.si/e/abc720", "hd": "1", "filesize": 176.2},
-            "1080": {"audio": "jpn", "kwik": "https://kwik.si/e/abc1080", "hd": "1", "filesize": 293.0},
+            "360": {
+                "audio": "jpn",
+                "kwik": "https://kwik.si/e/abc360",
+                "hd": "0",
+                "filesize": 87.5,
+            },
+            "720": {
+                "audio": "jpn",
+                "kwik": "https://kwik.si/e/abc720",
+                "hd": "1",
+                "filesize": 176.2,
+            },
+            "1080": {
+                "audio": "jpn",
+                "kwik": "https://kwik.si/e/abc1080",
+                "hd": "1",
+                "filesize": 293.0,
+            },
         },
     }
 
@@ -332,7 +376,14 @@ def test_animepahe_links_failure_falls_back_to_scrape():
             raise RuntimeError("walled")
 
         async def sources(self, a, e):
-            return [Source(url="https://kwik.si/e/fallback", resolution=720, audio="jpn", fansub="Subs")]
+            return [
+                Source(
+                    url="https://kwik.si/e/fallback",
+                    resolution=720,
+                    audio="jpn",
+                    fansub="Subs",
+                )
+            ]
 
     provider = AnimePaheProvider(scraper=FakeScraper())
     provider._anime_ids["ep-sess"] = 958
@@ -353,7 +404,14 @@ def test_animepahe_links_without_anime_id_goes_straight_to_scrape():
             raise AssertionError("m=links must not fire without the id")
 
         async def sources(self, a, e):
-            return [Source(url="https://kwik.si/e/scraped", resolution=1080, audio="jpn", fansub="Subs")]
+            return [
+                Source(
+                    url="https://kwik.si/e/scraped",
+                    resolution=1080,
+                    audio="jpn",
+                    fansub="Subs",
+                )
+            ]
 
     provider = AnimePaheProvider(scraper=FakeScraper())
     sources = asyncio.run(provider.sources("pahe-anime", "unknown-ep"))
@@ -363,6 +421,7 @@ def test_animepahe_links_without_anime_id_goes_straight_to_scrape():
 # ---------------------------------------------------------------------
 # AnimePahe details page (Phase 2) — selector evidence from the map
 # ---------------------------------------------------------------------
+
 
 def test_animepahe_details_parses_the_page():
 
@@ -586,7 +645,6 @@ def test_focus_scope_is_a_plain_function():
         def run_task(self, fn):
             seen.append(fn)
 
-
     listener = focus_scope(ft.Container(), lambda: seen.append("back"))
     assert isinstance(listener, ft.KeyboardListener)
     assert listener.autofocus is True
@@ -595,7 +653,6 @@ def test_focus_scope_is_a_plain_function():
 def test_focus_manager_chains_instead_of_overwriting():
     """A second installer must not kill the first's handler."""
     import types
-
 
     from core.focus_manager import FocusManager
 
@@ -659,9 +716,9 @@ def test_episode_flags_are_captured_not_dropped():
     )
     entries = _parse_episode_list(html)
     assert entries == [
-        (1, "AAA", True, True),
-        (2, "BBB", False, False),
-        (3, "CCC", True, False),
+        (1, "AAA", True, True, 1729197616),
+        (2, "BBB", False, False, 0),
+        (3, "CCC", True, False, 0),
     ]
 
 
@@ -669,4 +726,73 @@ def test_episode_flags_absent_means_false_not_a_crash():
     from services.providers.anikato import _parse_episode_list
 
     entries = _parse_episode_list('<a data-num="5" data-ids="ZZZ"></a>')
-    assert entries == [(5, "ZZZ", False, False)]
+    assert entries == [(5, "ZZZ", False, False, 0)]
+
+
+def test_episode_air_timestamps_are_captured():
+    """The timestamp was dropped along with the flags — the card now shows
+    the air date."""
+    from services.providers.anikato import _parse_episode_list
+
+    html = (
+        '<a data-id="1" data-num="1" data-ids="AAA" data-timestamp="1729197616"'
+        ' data-sub="1" data-dub="0"></a>'
+        '<a data-num="2" data-ids="BBB" data-sub="0" data-dub="0"></a>'
+    )
+    entries = _parse_episode_list(html)
+    assert entries == [
+        (1, "AAA", True, False, 1729197616),
+        (2, "BBB", False, False, 0),
+    ]
+
+
+def test_pick_download_menu_is_the_sites_own_offering():
+    """div#pickDownload names the fansub, quality, size and BD badge per
+    rendition, with a pahe.win link — the site's download route, not a
+    guess at one."""
+    from services.animepahe import _parse_pick_download
+
+    html = (
+        '<div id="pickDownload">'
+        '<a href="https://pahe.win/abc123">MiG_MuX · 720p (176MB) [BD]</a>'
+        '<a href="https://pahe.win/def456">MiG_MuX · 1080p (293MB) [BD]</a>'
+        '<a href="https://pahe.win/ghi789">SubsPlease · 480p (52MB)</a>'
+        "</div>"
+    )
+    entries = _parse_pick_download(html)
+    assert [e["quality"] for e in entries] == [720, 1080, 480]
+    assert [e["size"] for e in entries] == ["176MB", "293MB", "52MB"]
+    assert [e["bd"] for e in entries] == [True, True, False]
+    assert entries[0]["url"] == "https://pahe.win/abc123"
+    assert all(e["fansub"] for e in entries)
+    assert entries[2]["fansub"] == "SubsPlease"
+
+
+def test_pick_download_unlabelled_entries_keep_their_url_and_size():
+    from services.animepahe import _parse_pick_download
+
+    html = '<div id="pickDownload"><a href="https://pahe.win/x1">Download</a></div>'
+    (entry,) = _parse_pick_download(html)
+    assert entry["url"] == "https://pahe.win/x1"
+    assert entry["size"] == ""
+    assert entry["quality"] == 0
+    assert entry["bd"] is False
+
+
+def test_details_page_carries_the_cover():
+    """The map's verified selector for the page's own backdrop; absent it
+    stays empty and the detail screen blurs the poster as before."""
+    from services.providers.animepahe_provider import _parse_details
+
+    html = (
+        '<div class="title-wrapper"><h1><span>T</span></h1></div>'
+        '<div class="header-wrapper" data-src="https://img.example/cover.jpg"></div>'
+    )
+    anime = _parse_details(html, "t")
+    assert anime is not None
+    assert anime.backdrop == "https://img.example/cover.jpg"
+
+    bare = _parse_details(
+        '<div class="title-wrapper"><h1><span>T</span></h1></div>', "t"
+    )
+    assert bare.backdrop == ""

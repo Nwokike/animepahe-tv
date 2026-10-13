@@ -33,9 +33,7 @@ def _filter_choices(spec: dict, selected, on_pick) -> ft.Control:
             on_submit=lambda e, k=key: on_pick(k, (e.control.value or "").strip()),
             on_blur=lambda e, k=key: on_pick(k, (e.control.value or "").strip()),
         )
-        return ft.Row(
-            [ft.Text(spec.get("label", ""), size=12), field], spacing=8
-        )
+        return ft.Row([ft.Text(spec.get("label", ""), size=12), field], spacing=8)
     chips = [
         ft.Container(
             content=ft.Text(label, size=12, weight=ft.FontWeight.W_500),
@@ -74,7 +72,9 @@ def DiscoverScreen() -> ft.Control:
         controller.load_discover(selections, 1)
 
     ft.use_effect(
-        lambda: controller.load_discover_filters() if not state.discover_filters else None,
+        lambda: (
+            controller.load_discover_filters() if not state.discover_filters else None
+        ),
         [],
     )
 
@@ -119,8 +119,12 @@ def DiscoverScreen() -> ft.Control:
         )
 
     chips = ft.Column(
-        [_filter_choices(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
-         for spec in filters],
+        [
+            _filter_choices(
+                spec, (state.discover_selections or {}).get(spec["key"]), _pick
+            )
+            for spec in filters
+        ],
         spacing=10,
         tight=True,
     )
@@ -142,7 +146,12 @@ def DiscoverScreen() -> ft.Control:
         run_spacing=12,
     )
 
-    body: list[ft.Control] = [header, ft.Container(height=12), chips, ft.Container(height=12)]
+    body: list[ft.Control] = [
+        header,
+        ft.Container(height=12),
+        chips,
+        ft.Container(height=12),
+    ]
     if results:
         body.append(grid)
         body.append(build_banner_ad(None, inline=True))

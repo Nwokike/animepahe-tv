@@ -32,9 +32,13 @@ from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
-def _release_card(release, on_select, now_playing: bool, col: dict | None = None) -> ft.Control:
+def _release_card(
+    release, on_select, now_playing: bool, col: dict | None = None
+) -> ft.Control:
     play_icon = ft.Icon(
-        ft.Icons.EQUALIZER_ROUNDED if now_playing else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+        ft.Icons.EQUALIZER_ROUNDED
+        if now_playing
+        else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
         size=40,
         color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
     )
@@ -108,60 +112,60 @@ def _release_card(release, on_select, now_playing: bool, col: dict | None = None
 
 def _version_pill(state, page) -> ft.Control:
     # Morphs into the "Update Available!" pill the original had, wired
-        # to the restored update dialog. Until then it's a quiet version tag.
-        update_data = state.update_data if state.update_available else None
+    # to the restored update dialog. Until then it's a quiet version tag.
+    update_data = state.update_data if state.update_available else None
 
-        if update_data:
-            from components.update_dialog import show_update_dialog
+    if update_data:
+        from components.update_dialog import show_update_dialog
 
-            return ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Text(
-                            "Update Available!",
-                            size=11,
-                            weight=ft.FontWeight.BOLD,
-                            color=AppColors.PRIMARY,
-                        ),
-                        ft.Container(
-                            width=6,
-                            height=6,
-                            border_radius=3,
-                            bgcolor=AppColors.PRIMARY,
-                        ),
-                    ],
-                    spacing=4,
-                    alignment=ft.MainAxisAlignment.CENTER,
-                ),
-                padding=ft.Padding.symmetric(horizontal=8, vertical=6),
-                border_radius=6,
-                bgcolor=ft.Colors.with_opacity(0.15, AppColors.PRIMARY),
-                border=ft.Border.all(1.5, AppColors.PRIMARY),
-                ink=True,
-                tooltip="A new version is available",
-                on_click=lambda e: show_update_dialog(page, update_data) if page else None,
-            )
         return ft.Container(
-            content=ft.Text(
-                f"v{APP_VERSION}",
-                size=11,
-                color=ft.Colors.ON_SURFACE_VARIANT,
+            content=ft.Row(
+                [
+                    ft.Text(
+                        "Update Available!",
+                        size=11,
+                        weight=ft.FontWeight.BOLD,
+                        color=AppColors.PRIMARY,
+                    ),
+                    ft.Container(
+                        width=6,
+                        height=6,
+                        border_radius=3,
+                        bgcolor=AppColors.PRIMARY,
+                    ),
+                ],
+                spacing=4,
+                alignment=ft.MainAxisAlignment.CENTER,
             ),
             padding=ft.Padding.symmetric(horizontal=8, vertical=6),
             border_radius=6,
-            border=ft.Border.all(
-                1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT)
-            ),
-            tooltip="Version",
+            bgcolor=ft.Colors.with_opacity(0.15, AppColors.PRIMARY),
+            border=ft.Border.all(1.5, AppColors.PRIMARY),
+            ink=True,
+            tooltip="A new version is available",
+            on_click=lambda e: show_update_dialog(page, update_data) if page else None,
         )
+    return ft.Container(
+        content=ft.Text(
+            f"v{APP_VERSION}",
+            size=11,
+            color=ft.Colors.ON_SURFACE_VARIANT,
+        ),
+        padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+        border_radius=6,
+        border=ft.Border.all(
+            1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT)
+        ),
+        tooltip="Version",
+    )
+
 
 def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
     """Icon + wordmark left; search, version, theme right — the original line."""
+
     def action(icon, tip, handler, icon_color=None) -> ft.Control:
         return ft.Container(
-            content=ft.Icon(
-                icon, color=icon_color or ft.Colors.ON_SURFACE, size=20
-            ),
+            content=ft.Icon(icon, color=icon_color or ft.Colors.ON_SURFACE, size=20),
             padding=10,
             border_radius=10,
             ink=True,
@@ -254,9 +258,7 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
         body = ft.Column(
             [
                 ft.Container(
-                    content=ft.Image(
-                        src=poster, fit=ft.BoxFit.COVER, expand=True
-                    )
+                    content=ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True)
                     if poster
                     else ft.Container(
                         content=ft.Icon(
@@ -322,7 +324,9 @@ def _cf_overlay_card(state, controller) -> ft.Control:
         content=ft.Column(
             [
                 ft.Container(
-                    content=ft.Icon(ft.Icons.SHIELD_ROUNDED, size=64, color=AppColors.PRIMARY),
+                    content=ft.Icon(
+                        ft.Icons.SHIELD_ROUNDED, size=64, color=AppColors.PRIMARY
+                    ),
                     alignment=ft.Alignment.CENTER,
                 ),
                 ft.Container(height=8),
@@ -507,7 +511,9 @@ def HomeScreen() -> ft.Control:
                     [
                         PromoHero(),
                         build_banner_ad(page, inline=True),
-                        _continue_watching_row(state.continue_watching, controller.open_anime)
+                        _continue_watching_row(
+                            state.continue_watching, controller.open_anime
+                        )
                         or ft.Container(width=0, height=0),
                         ft.Text(
                             "Recent Episodes",

@@ -85,15 +85,22 @@ def test_every_controller_method_slot_has_a_wiring_or_is_documented():
     """ControllerMethods slots are the public surface screens call; any slot
     the shell assigns is covered by the previous tests, so this just guards
     against a slot that nothing wires and nothing documents."""
-    slots = {
-        name
-        for name in ControllerMethods.__dataclass_fields__
-    }
+    slots = {name for name in ControllerMethods.__dataclass_fields__}
     wired = _methods_wired_in_main()
-    shell_assigned = {"go_home", "open_search", "open_downloads", "open_settings",
-                      "open_anime", "back", "close_player", "play_adjacent",
-                      "choose_quality", "open_sheet", "close_dialog",
-                      "open_discover"}
+    shell_assigned = {
+        "go_home",
+        "open_search",
+        "open_downloads",
+        "open_settings",
+        "open_anime",
+        "back",
+        "close_player",
+        "play_adjacent",
+        "choose_quality",
+        "open_sheet",
+        "close_dialog",
+        "open_discover",
+    }
     uncovered = slots - wired - shell_assigned
     assert not uncovered, f"ControllerMethods slots never wired: {sorted(uncovered)}"
 

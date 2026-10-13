@@ -58,6 +58,7 @@ def _title_relevance(query: str, title: str) -> int:
     """WP full-text matches inside CONTENT, so search noise is real
     ("one piece" → Barakamon). Score = how much of the query the title
     covers; ranking only — nothing is filtered out."""
+
     def norm(s: str) -> set[str]:
         return {w for w in re.split(r"[^a-z0-9]+", s.lower()) if len(w) > 1}
 
@@ -158,7 +159,9 @@ class KayoanimeProvider:
     # ------------------------------------------------------------------
 
     def _to_anime(self, post: dict) -> Anime:
-        title, year, media_type = _clean_title(post.get("title", {}).get("rendered", ""))
+        title, year, media_type = _clean_title(
+            post.get("title", {}).get("rendered", "")
+        )
         poster = self._poster(post)
         post_id = str(post.get("id") or "")
         return Anime(
@@ -254,7 +257,11 @@ class KayoanimeProvider:
             raise RuntimeError(f"kayoanime HTTP {resp.status_code}")
         posts = resp.json()
         result = ([self._to_anime(p) for p in posts], len(posts) >= 30)
-        self._cache_put(f"browse_{filters.get('categories')}_{filters.get('orderby')}_{page}", result, CACHE_TTL_LATEST)
+        self._cache_put(
+            f"browse_{filters.get('categories')}_{filters.get('orderby')}_{page}",
+            result,
+            CACHE_TTL_LATEST,
+        )
         return result
 
     async def latest_releases(self, page: int) -> tuple[list[Anime], bool]:
@@ -297,7 +304,9 @@ class KayoanimeProvider:
         if resp.status_code != 200:
             raise RuntimeError(f"kayoanime HTTP {resp.status_code}")
         posts = resp.json()
-        scored = [(_title_relevance(query, a.title), a) for a in map(self._to_anime, posts)]
+        scored = [
+            (_title_relevance(query, a.title), a) for a in map(self._to_anime, posts)
+        ]
         scored.sort(key=lambda sa: -sa[0])
         result = ([a for _, a in scored], len(posts) >= 20)
         self._cache_put(key, result, CACHE_TTL_SEARCH)
@@ -362,7 +371,11 @@ class KayoanimeProvider:
         )
         if resp.status_code != 200:
             return []
-        files = [f for f in resp.json().get("files", []) if f.get("mimeType") != "application/vnd.google-apps.folder"]
+        files = [
+            f
+            for f in resp.json().get("files", [])
+            if f.get("mimeType") != "application/vnd.google-apps.folder"
+        ]
         self._cache_put(key, files, CACHE_TTL_EPISODES)
         return files
 
@@ -370,7 +383,9 @@ class KayoanimeProvider:
         cached = self._folders.get(post_id)
         if cached is not None:
             return cached
-        resp = await self._client.get(f"{KAYOANIME_API}/posts/{post_id}", params={"context": "view"})
+        resp = await self._client.get(
+            f"{KAYOANIME_API}/posts/{post_id}", params={"context": "view"}
+        )
         if resp.status_code != 200:
             return []
         post = resp.json()
@@ -463,7 +478,9 @@ class KayoanimeProvider:
             logger.warning(
                 "kayoanime post %s: Group-gated folders: %s",
                 post_id,
-                ", ".join(f"{label or folder_id}" for folder_id, label in self._gated[post_id]),
+                ", ".join(
+                    f"{label or folder_id}" for folder_id, label in self._gated[post_id]
+                ),
             )
         return result
 
@@ -471,9 +488,7 @@ class KayoanimeProvider:
         """Folder labels this post's episode walk could not open. Empty
         unless episodes() ran and found some."""
         _, post_id = split_session(anime_session)
-        return [
-            label or folder_id for folder_id, label in self._gated.get(post_id, [])
-        ]
+        return [label or folder_id for folder_id, label in self._gated.get(post_id, [])]
 
     def file_name(self, anime_session: str, episode_session: str) -> str | None:
         """The Drive file's real name for an episode — carried into the
@@ -518,7 +533,9 @@ class KayoanimeProvider:
 
     async def episodes_for_title(self, title: str) -> list[Episode]:
         results, _ = await self.search(title, 1)
-        best = max(results, key=lambda a: _title_relevance(title, a.title), default=None)
+        best = max(
+            results, key=lambda a: _title_relevance(title, a.title), default=None
+        )
         if best is None or _title_relevance(title, best.title) == 0:
             return []
         episodes, _ = await self.episodes(best.session, 1)
@@ -526,7 +543,9 @@ class KayoanimeProvider:
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:
         results, _ = await self.search(title, 1)
-        best = max(results, key=lambda a: _title_relevance(title, a.title), default=None)
+        best = max(
+            results, key=lambda a: _title_relevance(title, a.title), default=None
+        )
         if best is None or _title_relevance(title, best.title) == 0:
             return []
         episodes, _ = await self.episodes(best.session, 1)

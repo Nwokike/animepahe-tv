@@ -121,9 +121,10 @@ def SettingsScreen() -> ft.Control:
         )
 
         def _refresh(e=None):
-            log_text.value = "\n".join(
-                in_memory_log_handler.get_logs()[-TERMINAL_DISPLAY_LINES:]
-            ) or "No activity recorded yet."
+            log_text.value = (
+                "\n".join(in_memory_log_handler.get_logs()[-TERMINAL_DISPLAY_LINES:])
+                or "No activity recorded yet."
+            )
             telemetry_text.value = get_telemetry_snapshot()
             page.update(log_text, telemetry_text)
 
@@ -131,9 +132,7 @@ def SettingsScreen() -> ft.Control:
             from core.notify import show_snack
             from core.shared_services import get_shared_services
 
-            page.run_task(
-                get_shared_services(page).set_clipboard, log_text.value
-            )
+            page.run_task(get_shared_services(page).set_clipboard, log_text.value)
             show_snack(page, "Logs copied")
 
         def _clear(e):
@@ -222,9 +221,7 @@ def SettingsScreen() -> ft.Control:
 
             show_snack(
                 page,
-                "External player enabled."
-                if enabled
-                else "In-app player enabled.",
+                "External player enabled." if enabled else "In-app player enabled.",
             )
 
         from core.tasks import spawn
@@ -240,7 +237,6 @@ def SettingsScreen() -> ft.Control:
             on_change=_on_external_player_change,
         ),
     )
-
 
     # ------------------------------------------------------------------
     # Theme: the house 3-way (Dark / Light / System), persisted. The
@@ -278,7 +274,9 @@ def SettingsScreen() -> ft.Control:
                         )
                     },
                 ),
-                on_click=lambda e, tk=token, md=mode_for_token(token): _pick_theme(tk, md),
+                on_click=lambda e, tk=token, md=mode_for_token(token): _pick_theme(
+                    tk, md
+                ),
             )
             for token, label, icon in _THEME_OPTIONS
         ],
@@ -315,7 +313,9 @@ def SettingsScreen() -> ft.Control:
 
         spawn(controller.set_backend_pin(name), name="save-backend-pin")
 
-    provider_names = (controller_ref.router.provider_names if controller_ref else []) or []
+    provider_names = (
+        controller_ref.router.provider_names if controller_ref else []
+    ) or []
     backend_dropdown = ft.Dropdown(
         value=backend,
         options=[ft.dropdown.Option("auto", "Automatic (recommended)")]
@@ -347,12 +347,16 @@ def SettingsScreen() -> ft.Control:
         latency = rec.get("latency_ms")
         latency_text = f"{latency:.0f} ms" if latency else "—"
         error = rec.get("last_error") or ""
-        subtitle = f"{state_name} · {latency_text}" + (f" · {error[:60]}" if error else "")
+        subtitle = f"{state_name} · {latency_text}" + (
+            f" · {error[:60]}" if error else ""
+        )
         tested = test_rows.get(name)
         if tested is not None:
             bits = ["probe OK" if tested.get("probe_ok") else "probe FAIL"]
             if tested.get("search_count") is not None:
-                bits.append(f"{tested['search_count']} results in {tested.get('search_ms')} ms")
+                bits.append(
+                    f"{tested['search_count']} results in {tested.get('search_ms')} ms"
+                )
             if tested.get("error"):
                 bits.append(tested["error"])
             subtitle = " · ".join(bits)
@@ -376,7 +380,9 @@ def SettingsScreen() -> ft.Control:
     source_section = [
         _section_header("CONTENT SOURCE"),
         _settings_card([backend_row]),
-        _settings_card([*status_rows, test_button]) if status_rows else ft.Container(height=0),
+        _settings_card([*status_rows, test_button])
+        if status_rows
+        else ft.Container(height=0),
     ]
 
     return ft.Column(
@@ -385,7 +391,6 @@ def SettingsScreen() -> ft.Control:
             _settings_card([theme_picker]),
             *source_section,
             _section_header("PLAYBACK"),
-
             _settings_card([external_player_row]),
             _section_header("DIAGNOSTICS"),
             _settings_card([terminal_row]),

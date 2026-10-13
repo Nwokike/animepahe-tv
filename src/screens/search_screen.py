@@ -34,6 +34,7 @@ def _build_clear_confirm_dialog(controller) -> ft.AlertDialog:
     """The confirm for the destructive clear: one tap wipes every recent
     pick, so it asks first. The controller's Undo snack stays as the
     second net (DDGS's history pattern)."""
+
     def _do_clear():
         controller.close_dialog()
         controller.clear_search_history()
@@ -229,7 +230,11 @@ def SearchScreen() -> ft.Control:
             ft.Container(
                 content=ft.Row(
                     [
-                        ft.Icon(ft.Icons.HISTORY_ROUNDED, size=18, color=ft.Colors.ON_SURFACE_VARIANT),
+                        ft.Icon(
+                            ft.Icons.HISTORY_ROUNDED,
+                            size=18,
+                            color=ft.Colors.ON_SURFACE_VARIANT,
+                        ),
                         ft.Container(width=8),
                         ft.Text(
                             _row_title_session(row)[0],
@@ -293,8 +298,15 @@ def SearchScreen() -> ft.Control:
             content=ft.Column(
                 [
                     ft.Icon(ft.Icons.CLOUD_OFF_ROUNDED, size=56, color=AppColors.ERROR),
-                    ft.Text("Search failed", size=16, weight=ft.FontWeight.W_600, color=ft.Colors.ON_SURFACE),
-                    ft.Text(state.search_error, size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+                    ft.Text(
+                        "Search failed",
+                        size=16,
+                        weight=ft.FontWeight.W_600,
+                        color=ft.Colors.ON_SURFACE,
+                    ),
+                    ft.Text(
+                        state.search_error, size=12, color=ft.Colors.ON_SURFACE_VARIANT
+                    ),
                     ft.OutlinedButton(content="Retry", on_click=_submit),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -406,8 +418,8 @@ def SearchScreen() -> ft.Control:
                             padding=4, radius=12, overlay_alpha=0.18
                         ),
                         animate_scale=card_focus_scale(1.03),
-                        on_click=lambda e, s=row["anime_session"]: controller.open_anime(
-                            s
+                        on_click=lambda e, s=row["anime_session"]: (
+                            controller.open_anime(s)
                         ),
                     )
                 )
@@ -421,7 +433,9 @@ def SearchScreen() -> ft.Control:
                         weight=ft.FontWeight.W_700,
                         color=ft.Colors.ON_SURFACE,
                     ),
-                    ft.Row(controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO),
+                    ft.Row(
+                        controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO
+                    ),
                 ],
                 spacing=8,
             )

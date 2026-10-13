@@ -37,7 +37,7 @@ KEY_URI_PATTERN = re.compile(r'URI=["\']([^"\']+)["\']')
 # #EXT-X-STREAM-INF:BANDWIDTH=123,RESOLUTION=1920x1080,CODECS="..."
 _ATTR_PATTERN = re.compile(r'([A-Z0-9\-]+)=("([^"]*)"|[^,]*)')
 
-MEDIA_URI_PATTERN = re.compile(r'''(URI=)["']([^"']+)["']''')
+MEDIA_URI_PATTERN = re.compile(r"""(URI=)["']([^"']+)["']""")
 
 
 class PlaylistFetchError(Exception):
@@ -278,7 +278,9 @@ class HLSProxy:
         upstream.update(headers or {})
         return upstream
 
-    async def fetch_master(self, target_url: str, headers: dict[str, str] | None = None):
+    async def fetch_master(
+        self, target_url: str, headers: dict[str, str] | None = None
+    ):
         """Fetch a playlist for inspection. Returns (content_type, text)."""
         # time.monotonic: get_event_loop() is deprecated outside a running
         # loop; only the elapsed delta matters here.

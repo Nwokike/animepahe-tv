@@ -100,7 +100,11 @@ def _is_empty(result) -> bool:
     """An answer counts as empty when its PAYLOAD is empty. Providers
     return (items, has_more) tuples or lists — tuples are always truthy,
     so inspect the first element."""
-    if isinstance(result, tuple) and len(result) >= 1 and isinstance(result[0], (list, tuple)):
+    if (
+        isinstance(result, tuple)
+        and len(result) >= 1
+        and isinstance(result[0], (list, tuple))
+    ):
         return not result[0]
     return not result
 
@@ -153,7 +157,9 @@ class ProviderRouter:
     def health(self) -> dict[str, ProviderHealth]:
         return dict(self._health)
 
-    def _record_health(self, provider: Provider, *, ok: bool, latency_ms: float, error: str = "") -> None:
+    def _record_health(
+        self, provider: Provider, *, ok: bool, latency_ms: float, error: str = ""
+    ) -> None:
         rec = self._health[provider.name]
         rec.state = self._breakers[provider.name].state
         rec.latency_ms = latency_ms if ok else rec.latency_ms
@@ -174,11 +180,16 @@ class ProviderRouter:
         except Exception:
             breaker.record_failure()
             self._record_health(
-                provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error="failed"
+                provider,
+                ok=False,
+                latency_ms=(self._clock() - started) * 1000.0,
+                error="failed",
             )
             raise
         breaker.record_success()
-        self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+        self._record_health(
+            provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
+        )
         return result
 
     async def _run(self, op: str, *args, force: bool = False, owner: str | None = None):
@@ -224,9 +235,13 @@ class ProviderRouter:
         rest = eligible[1:]
         if not rest:
             if results_errors:
-                raise RouterError(f"all providers failed for {op}") from results_errors[0]
+                raise RouterError(f"all providers failed for {op}") from results_errors[
+                    0
+                ]
             return results_answers[first.name]
-        outcomes: dict[str, object] = dict(results_answers) if not results_errors else {}
+        outcomes: dict[str, object] = (
+            dict(results_answers) if not results_errors else {}
+        )
         errors: list[Exception] = list(results_errors)
         winner: Provider | None = None
 
@@ -271,7 +286,9 @@ class ProviderRouter:
         return await self._run("episodes", session, page, owner=owner_of(session))
 
     async def sources(self, anime_session: str, episode_session: str) -> list:
-        return await self._run("sources", anime_session, episode_session, owner=owner_of(anime_session))
+        return await self._run(
+            "sources", anime_session, episode_session, owner=owner_of(anime_session)
+        )
 
     async def episodes_for_title_any(
         self, title: str, skip: str | None = None
@@ -291,12 +308,17 @@ class ProviderRouter:
             except Exception as ex:
                 breaker.record_failure()
                 self._record_health(
-                    provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex)
+                    provider,
+                    ok=False,
+                    latency_ms=(self._clock() - started) * 1000.0,
+                    error=str(ex),
                 )
                 logger.info("episodes_for_title failed on %s: %s", provider.name, ex)
                 continue
             breaker.record_success()
-            self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+            self._record_health(
+                provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
+            )
             if not _is_empty(result):
                 self.last_winner = provider.name
                 return (result, False)
@@ -323,12 +345,17 @@ class ProviderRouter:
                 if not force:
                     breaker.record_failure()
                 self._record_health(
-                    provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex)
+                    provider,
+                    ok=False,
+                    latency_ms=(self._clock() - started) * 1000.0,
+                    error=str(ex),
                 )
                 logger.info("sources_for_title failed on %s: %s", provider.name, ex)
                 continue
             breaker.record_success()
-            self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+            self._record_health(
+                provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
+            )
             if not _is_empty(result):
                 self.last_winner = provider.name
                 results = result
@@ -386,12 +413,17 @@ class ProviderRouter:
         except Exception as ex:
             breaker.record_failure()
             self._record_health(
-                provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex)
+                provider,
+                ok=False,
+                latency_ms=(self._clock() - started) * 1000.0,
+                error=str(ex),
             )
             logger.info("browse failed on %s: %s", provider.name, ex)
             return ("", [], False)
         breaker.record_success()
-        self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
+        self._record_health(
+            provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
+        )
         items, has_more = result
         if _is_empty(items):
             return (provider.name, [], False)
@@ -428,9 +460,16 @@ class ProviderRouter:
         try:
             ok = await asyncio.wait_for(provider.probe(), timeout=STARTUP_PROBE_TIMEOUT)
         except Exception as ex:
-            self._record_health(provider, ok=False, latency_ms=(self._clock() - started) * 1000.0, error=str(ex))
+            self._record_health(
+                provider,
+                ok=False,
+                latency_ms=(self._clock() - started) * 1000.0,
+                error=str(ex),
+            )
             return False
-        self._record_health(provider, ok=bool(ok), latency_ms=(self._clock() - started) * 1000.0)
+        self._record_health(
+            provider, ok=bool(ok), latency_ms=(self._clock() - started) * 1000.0
+        )
         return bool(ok)
 
     async def close(self) -> None:
@@ -441,4 +480,11 @@ class ProviderRouter:
                 pass
 
 
-__all__ = ["ProviderRouter", "RouterError", "ProviderHealth", "CLOSED", "OPEN", "HALF_OPEN"]
+__all__ = [
+    "ProviderRouter",
+    "RouterError",
+    "ProviderHealth",
+    "CLOSED",
+    "OPEN",
+    "HALF_OPEN",
+]

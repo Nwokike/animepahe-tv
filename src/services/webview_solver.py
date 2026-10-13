@@ -233,7 +233,11 @@ class WebViewSolver:
             current_url = e.data or "" if not isinstance(e.data, dict) else str(e.data)
             logger.info("WebView page started: %s", current_url)
             # When we land on animepahe, try native cookie reader if challenge token is not present
-            if _cookie_manager and "animepahe" in current_url and "__cf_chl" not in current_url:
+            if (
+                _cookie_manager
+                and "animepahe" in current_url
+                and "__cf_chl" not in current_url
+            ):
                 cookies = await _android_cookies(current_url)
                 if cookies:
                     await _try_resolve(cookies, current_url=current_url)

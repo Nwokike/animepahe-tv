@@ -95,9 +95,7 @@ def test_offline_is_not_a_cf_gate():
     offline_empty = not state.latest_releases and not state.is_online
     assert offline_empty is True
     # The controller's gate now requires is_online, so offline != blocked.
-    gated = bool(
-        not state.latest_releases and state.is_online
-    )
+    gated = bool(not state.latest_releases and state.is_online)
     assert gated is False
 
 

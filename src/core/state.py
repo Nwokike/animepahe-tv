@@ -22,6 +22,8 @@ class Anime:
     # is the one that serves all three); defaults keep the others valid.
     studios: list = field(default_factory=list)
     aired: str = ""
+    # The page's own cover, when the map gives a verified selector for it.
+    backdrop: str = ""
 
 
 @dataclass(unsafe_hash=True)
@@ -40,6 +42,9 @@ class Episode:
     # Defaults keep providers that don't publish them valid.
     subs: bool = False
     dub: bool = False
+    # Air time as unix seconds when the source publishes one (anikato's
+    # data-timestamp). 0 = unknown, never invented.
+    aired_ts: int = 0
 
 
 @dataclass(unsafe_hash=True)
@@ -59,6 +64,11 @@ class Source:
     skip: dict = field(default_factory=dict)
     # File size when the source serves it (e.g. "176MB") — display only.
     size: str = ""
+    # The provider's own download route when it serves one (animepahe's
+    # pahe.win menu) — the site's offering, not a second guess at it.
+    download_url: str = ""
+    # BD (Blu-ray disc) badge, documented on that same menu.
+    bd: bool = False
 
 
 @dataclass(unsafe_hash=True)

@@ -74,7 +74,9 @@ def extract_anime_cards(html: str) -> tuple[list[dict], bool]:
 
 def extract_data_src_elements(html: str) -> list[dict]:
     """Return the attribute dicts of every element carrying ``data-src``."""
-    parser = _ElementParser(lambda tag, attrs, classes, stack: bool(attrs.get("data-src")))
+    parser = _ElementParser(
+        lambda tag, attrs, classes, stack: bool(attrs.get("data-src"))
+    )
     parser.feed(html)
     parser.close()
     return parser.elements

@@ -124,9 +124,7 @@ class KwikResolver:
     async def _verify(self, url: str, referer: str) -> bool:
         try:
             client = self._get_client()
-            resp = await client.head(
-                url, headers=self._headers(url), timeout=5
-            )
+            resp = await client.head(url, headers=self._headers(url), timeout=5)
             ct = resp.headers.get("content-type", "")
             result = resp.status_code == 200 and "mpegurl" in ct
             logger.info(

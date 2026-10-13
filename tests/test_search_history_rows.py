@@ -44,6 +44,7 @@ def test_clear_recent_asks_first_and_never_leaves_the_dialog_open():
     controller.open_sheet(dialog)
     assert len(controller.opened) == 1
     assert isinstance(controller.opened[0], ft.AlertDialog)
+
     def _label(button) -> str:
         content = button.content
         return content.value if hasattr(content, "value") else str(content)

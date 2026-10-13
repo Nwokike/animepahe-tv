@@ -63,7 +63,9 @@ def build_banner_ad(page=None, inline: bool = False) -> ft.Control:
         try:
             return fya.BannerAd(
                 unit_id=AD_BANNER_UNIT_ID,
-                size_type=fya.BannerSizeType.INLINE if inline else fya.BannerSizeType.STICKY,
+                size_type=fya.BannerSizeType.INLINE
+                if inline
+                else fya.BannerSizeType.STICKY,
                 on_load=lambda e: None,
                 on_load_failed=lambda e: _reload(),
                 on_click=lambda e: None,

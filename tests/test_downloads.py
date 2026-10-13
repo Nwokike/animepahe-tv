@@ -77,9 +77,7 @@ def test_download_store_round_trip(tmp_path, monkeypatch):
             "ep1",
             {"title": "Frieren", "state": "complete", "playlist": "/x/index.m3u8"},
         )
-        await store.save_download(
-            "ep2", {"title": "Frieren", "state": "partial"}
-        )
+        await store.save_download("ep2", {"title": "Frieren", "state": "partial"})
         rows = await store.get_downloads()
         assert set(rows) == {"ep1", "ep2"}
         assert rows["ep1"]["state"] == "complete"

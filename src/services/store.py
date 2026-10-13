@@ -182,8 +182,12 @@ class JsonStore:
         if session:
             history = [r for r in history if r.get("session") != session]
         else:
-            history = [r for r in history if r.get("title", "").lower() != title.lower()]
-        history.insert(0, {"title": title[:200], "session": session[:120], "ts": time.time()})
+            history = [
+                r for r in history if r.get("title", "").lower() != title.lower()
+            ]
+        history.insert(
+            0, {"title": title[:200], "session": session[:120], "ts": time.time()}
+        )
         del history[SEARCH_HISTORY_LIMIT:]
         await self.put_section("search_history", history)
 

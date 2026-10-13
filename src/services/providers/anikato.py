@@ -64,6 +64,7 @@ def _rc4(key: str, data: bytes) -> bytes:
 # Pure parsers (fixture-tested, no I/O)
 # ----------------------------------------------------------------------
 
+
 def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", text or "")).strip()
 
@@ -87,7 +88,7 @@ def _parse_items(html: str) -> list[Anime]:
         id_m = re.search(r'class="ani poster tip" data-tip="(\d+)"', block)
         sub_m = re.search(r'ep-status sub"><span>\s*(\d+)', block)
         type_m = re.search(r'<div class="right">([^<]+)</div>', block)
-        score_m = re.search(r'm-item rated[^>]*>\s*<span>\s*([\d.]+)', block)
+        score_m = re.search(r"m-item rated[^>]*>\s*<span>\s*([\d.]+)", block)
         results.append(
             Anime(
                 id=int(id_m.group(1)) if id_m else 0,
@@ -125,7 +126,10 @@ def _parse_watch(html: str) -> dict:
         return _clean(m.group(1)) if m else ""
 
     season_m = re.search(r"Premiered:\s*<span>(.*?)</span>", meta_html, re.S | re.I)
-    genres = [_clean(g) for g in re.findall(r'href="[^"]*/genre/[^"]*"[^>]*>([^<]+)</a>', meta_html)]
+    genres = [
+        _clean(g)
+        for g in re.findall(r'href="[^"]*/genre/[^"]*"[^>]*>([^<]+)</a>', meta_html)
+    ]
     episodes_raw = _meta_after("Episodes")
     score_raw = _meta_after("MAL")
     return {
@@ -144,17 +148,18 @@ def _parse_watch(html: str) -> dict:
     }
 
 
-def _parse_episode_list(html: str) -> list[tuple[int, str, bool, bool]]:
+def _parse_episode_list(html: str) -> list[tuple[int, str, bool, bool, int]]:
     """Episode entries: data-num + data-ids (the server-list key), plus the
-    per-episode sub/dub flags the page also carries (they used to be
-    dropped, so the detail screen couldn't say whether an episode has a
-    dub). The site serves the flags as the strings "1"/"0".
+    per-episode sub/dub flags and the air timestamp the page also carries
+    (all three used to be dropped, so the detail screen couldn't say
+    whether an episode had a dub, or when it aired). The flags arrive as
+    the strings "1"/"0" and the timestamp as unix seconds.
 
     Read per TAG, not per attribute order: layouts differ (the flags ride
     an `<a>` inside the `<li>`, and attribute order varies), and a
-    positional regex is how the flags were silently lost in the first
+    positional regex is how the data was silently lost in the first
     place."""
-    entries: list[tuple[int, str, bool, bool]] = []
+    entries: list[tuple[int, str, bool, bool, int]] = []
     for tag in re.findall(r"<[a-zA-Z]+([^>]*\bdata-num=\"\d+\"[^>]*)>", html):
         num_m = re.search(r'data-num="(\d+)"', tag)
         ids_m = re.search(r'data-ids="([^"]+)"', tag)
@@ -162,12 +167,14 @@ def _parse_episode_list(html: str) -> list[tuple[int, str, bool, bool]]:
             continue
         sub_m = re.search(r'data-sub="([01])"', tag)
         dub_m = re.search(r'data-dub="([01])"', tag)
+        ts_m = re.search(r'data-timestamp="(\d+)"', tag)
         entries.append(
             (
                 int(num_m.group(1)),
                 ids_m.group(1),
                 bool(sub_m and sub_m.group(1) == "1"),
                 bool(dub_m and dub_m.group(1) == "1"),
+                int(ts_m.group(1)) if ts_m else 0,
             )
         )
     entries.sort(key=lambda e: e[0])
@@ -191,7 +198,11 @@ def _parse_servers(html: str) -> list[tuple[str, str]]:
 def _parse_schedule_tabs(html: str) -> list[dict]:
     """The 7 airing-day tabs: [{time, date, weekday}]."""
     return [
-        {"time": str(m.group(1)), "date": _clean(m.group(2)), "weekday": _clean(m.group(3))}
+        {
+            "time": str(m.group(1)),
+            "date": _clean(m.group(2)),
+            "weekday": _clean(m.group(3)),
+        }
         for m in re.finditer(
             r'data-time="(\d+)"[^>]*>\s*<div class="date">([^<]*)</div>\s*'
             r'<div class="wday">([^<]*)</div>',
@@ -206,7 +217,7 @@ def _parse_schedule_day(html: str) -> list[dict]:
     for m in re.finditer(
         r'href="[^"]*?/watch/([a-z0-9\-]+)/ep-(\d+)\?type=(sub|dub)"[^>]*>'
         r'.*?<div class="time[^"]*"[^>]*>([\d:]+)</div>.*?'
-        r'<span>\s*Episode\s*(\d+)</span>.*?'
+        r"<span>\s*Episode\s*(\d+)</span>.*?"
         r'd-title"[^>]*>([^<]+)<',
         html,
         re.S,
@@ -248,6 +259,7 @@ def _decrypt_manifest(enc: str) -> str:
 # ----------------------------------------------------------------------
 # The provider
 # ----------------------------------------------------------------------
+
 
 class AniKatoProvider:
     name = "anikato"
@@ -379,9 +391,7 @@ class AniKatoProvider:
                 ],
             }
         )
-        spec.append(
-            {"key": "ep_min", "label": "Min episodes", "kind": "number"}
-        )
+        spec.append({"key": "ep_min", "label": "Min episodes", "kind": "number"})
         self._cache_put(key, spec, CACHE_TTL_LATEST)
         return spec
 
@@ -522,12 +532,14 @@ class AniKatoProvider:
                 duration="",
                 session=f"{slug}|{num}",  # sources() resolves this server-side
                 filler=False,
-                # The per-episode flags the page carries — the card reads
-                # them (nothing invented: absent flags stay False).
+                # The per-episode flags and air time the page carries —
+                # the card reads them (nothing invented: absent stays
+                # False / 0).
                 subs=subs,
                 dub=dub,
+                aired_ts=aired_ts,
             )
-            for num, _ids, subs, dub in entries
+            for num, _ids, subs, dub, aired_ts in entries
         ]
         result = (results, False)
         self._cache_put(key, result, CACHE_TTL_EPISODES)
@@ -542,7 +554,9 @@ class AniKatoProvider:
         cached = self._cache_get(key)
         if cached is not None:
             return cached
-        html = await self._get_text(f"{BASE}/ajax/server/list?servers={ids_token}", xhr=True)
+        html = await self._get_text(
+            f"{BASE}/ajax/server/list?servers={ids_token}", xhr=True
+        )
         data = json.loads(html)
         if data.get("status") != 200:
             raise RuntimeError(f"anikato server list: {data.get('result')}")
@@ -570,7 +584,9 @@ class AniKatoProvider:
             return (*params, skip)
         return None
 
-    async def _manifest_for(self, realid: str, kind: str, s: str) -> tuple[str, list, dict]:
+    async def _manifest_for(
+        self, realid: str, kind: str, s: str
+    ) -> tuple[str, list, dict]:
         """getSources -> (manifest URL, subtitle tracks, intro/outro).
         Nothing is reordered or filtered — the payload travels as served."""
         key = f"manifest_{realid}_{kind}_{s}"
@@ -599,8 +615,11 @@ class AniKatoProvider:
         if not manifest:
             raise RuntimeError("megaplay getSources: manifest decrypt empty")
         tracks = [
-            {"label": str(t.get("label") or ""), "url": str(t.get("file") or ""),
-             "default": bool(t.get("default"))}
+            {
+                "label": str(t.get("label") or ""),
+                "url": str(t.get("file") or ""),
+                "default": bool(t.get("default")),
+            }
             for t in (payload.get("tracks") or [])
             if t.get("file")
         ]
@@ -631,9 +650,13 @@ class AniKatoProvider:
                 continue
             realid, megaplay_kind, s, ep_skip = resolved
             try:
-                manifest, tracks, windows = await self._manifest_for(realid, megaplay_kind, s)
+                manifest, tracks, windows = await self._manifest_for(
+                    realid, megaplay_kind, s
+                )
             except Exception as ex:
-                logger.info("anikato manifest failed (%s/%s): %s", realid, megaplay_kind, ex)
+                logger.info(
+                    "anikato manifest failed (%s/%s): %s", realid, megaplay_kind, ex
+                )
                 continue
             if not manifest:
                 continue

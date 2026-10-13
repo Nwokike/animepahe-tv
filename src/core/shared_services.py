@@ -34,9 +34,7 @@ class SharedServices:
 
         try:
             await asyncio.wait_for(
-                self.launcher.launch_url(
-                    url, mode=ft.LaunchMode.EXTERNAL_APPLICATION
-                ),
+                self.launcher.launch_url(url, mode=ft.LaunchMode.EXTERNAL_APPLICATION),
                 timeout=timeout,
             )
             return True

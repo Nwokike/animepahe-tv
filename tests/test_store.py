@@ -174,9 +174,7 @@ async def test_follows_round_trip_and_cap(store):
     assert "s229" in favorites  # newest kept
     assert "s0" not in favorites  # oldest pruned
     assert await store.is_following("s229") is True
-    assert (
-        await store.toggle_follow({"anime_session": "s229", "title": "T"}) is False
-    )
+    assert await store.toggle_follow({"anime_session": "s229", "title": "T"}) is False
     assert await store.is_following("s229") is False
 
 
@@ -268,7 +266,9 @@ async def test_clearance_round_trip(store):
     assert entry["user_agent"] == "UA/1.0"
     # Survives a reload (fresh instance, same file) — the boot fix.
     reloaded = JsonStore(filename=os.path.basename(store.path))
-    assert (await reloaded.get_clearance())["cookies"] == "cf_clearance=abc; __cf_bm=xyz"
+    assert (await reloaded.get_clearance())[
+        "cookies"
+    ] == "cf_clearance=abc; __cf_bm=xyz"
     await store.clear_clearance()
     assert await store.get_clearance() is None
 

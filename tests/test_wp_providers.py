@@ -55,7 +55,9 @@ class FakeClient:
 ANIMEOUT_SEARCH = [
     {
         "id": 1033730,
-        "title": {"rendered": "Sousou no Frieren 2nd Season(2026)(TV Series)(Complete)(Episode 10)"},
+        "title": {
+            "rendered": "Sousou no Frieren 2nd Season(2026)(TV Series)(Complete)(Episode 10)"
+        },
         "featured_media": 1033729,
     },
     {
@@ -65,7 +67,10 @@ ANIMEOUT_SEARCH = [
     },
 ]
 ANIMEOUT_MEDIA = [
-    {"id": 1033729, "source_url": "https://animeout.xyz/wp-content/uploads/frieren-s2.jpg"},
+    {
+        "id": 1033729,
+        "source_url": "https://animeout.xyz/wp-content/uploads/frieren-s2.jpg",
+    },
 ]
 ANIMEOUT_CONTENT = """
 <p>Episodes:</p>
@@ -75,7 +80,7 @@ ANIMEOUT_CONTENT = """
 """
 ANIMEOUT_LANDING = (
     '<a href="https://ddl.animeout.com/public.php?url=nimbus.animeout.com/series/'
-    '00RAPIDBOT/Sousou no Frieren/[AnimeOut] Sousou no Frieren S2 - 01 1080pp [4277EF46]'
+    "00RAPIDBOT/Sousou no Frieren/[AnimeOut] Sousou no Frieren S2 - 01 1080pp [4277EF46]"
     '[1080pp][SubsPlease][x265][RapidBot].mkv">Download</a>'
 )
 ANIMEOUT_PUBLIC_PAGE = """
@@ -90,7 +95,9 @@ function start() {
 KUSONIME_SEARCH = [
     {
         "id": 5789,
-        "title": {"rendered": "Sousou no Frieren Season 2 BD Batch Subtitle Indonesia | Kusonime"},
+        "title": {
+            "rendered": "Sousou no Frieren Season 2 BD Batch Subtitle Indonesia | Kusonime"
+        },
         "featured_media": 5790,
         "link": "https://kusonime.com/frieren-batch-subtitle-indonesia/",
     }
@@ -120,11 +127,18 @@ def _run(coro):
 # AnimeOut — the WordPress way
 # ---------------------------------------------------------------------
 
+
 def test_animeout_search_maps_titles_years_and_ranking():
-    from services.providers.animeout import AnimeOutProvider, _clean_title, _title_relevance
+    from services.providers.animeout import (
+        AnimeOutProvider,
+        _clean_title,
+        _title_relevance,
+    )
 
     # the pure mapping first
-    title, year, media_type = _clean_title("Sousou no Frieren 2nd Season(2026)(TV Series)(Complete)(Episode 10)")
+    title, year, media_type = _clean_title(
+        "Sousou no Frieren 2nd Season(2026)(TV Series)(Complete)(Episode 10)"
+    )
     assert title.startswith("Sousou no Frieren")
     assert year == 2026
     assert media_type == "TV"
@@ -230,7 +244,9 @@ def test_animeout_walled_file_host_reports_no_stream_not_a_crash():
         }
     )
     provider = AnimeOutProvider(client=client)
-    sources = _run(provider.sources("animeout:1033730", "http://nimbus.animeout.com/x - 01.mkv"))
+    sources = _run(
+        provider.sources("animeout:1033730", "http://nimbus.animeout.com/x - 01.mkv")
+    )
     # The wall is external (CF on public.animeout.xyz today) — the chain
     # resolves, the host reports nothing, and nothing raises.
     assert sources == []
@@ -240,25 +256,42 @@ def test_animeout_walled_file_host_reports_no_stream_not_a_crash():
 # Kusonime — page links + direct host API
 # ---------------------------------------------------------------------
 
+
 def test_kusonime_episodes_and_sources_from_block_headers():
     from services.providers.kusonime import KusonimeProvider
 
     client = FakeClient(
         {
             "/wp-json/wp/v2/posts/5789": FakeResponse(
-                200, json_data={"id": 5789, "link": "https://kusonime.com/frieren-batch-subtitle-indonesia/"}
+                200,
+                json_data={
+                    "id": 5789,
+                    "link": "https://kusonime.com/frieren-batch-subtitle-indonesia/",
+                },
             ),
             # the host-side truth: pixeldrain /info gives the real names
             "/api/file/abc123/info": FakeResponse(
-                200, json_data={"name": "[Kusonime] Frieren BD 01-16 360p.rar", "size": 500 * 1024 * 1024}
+                200,
+                json_data={
+                    "name": "[Kusonime] Frieren BD 01-16 360p.rar",
+                    "size": 500 * 1024 * 1024,
+                },
             ),
             "/api/file/def456/info": FakeResponse(
-                200, json_data={"name": "[Kusonime] Frieren BD 01-16 720p.rar", "size": 900 * 1024 * 1024}
+                200,
+                json_data={
+                    "name": "[Kusonime] Frieren BD 01-16 720p.rar",
+                    "size": 900 * 1024 * 1024,
+                },
             ),
         }
     )
     page_client = FakeClient(
-        {"kusonime.com/frieren": FakeResponse(200, text=KUSONIME_PAGE + "Episode 01-12")}
+        {
+            "kusonime.com/frieren": FakeResponse(
+                200, text=KUSONIME_PAGE + "Episode 01-12"
+            )
+        }
     )
     provider = KusonimeProvider(client=client, page_client=page_client)
     episodes, _ = _run(provider.episodes("kusonime:5789", 1))
@@ -308,9 +341,6 @@ def test_kusonime_block_quality_and_evidence_ranges():
     assert _is_video("[Kusonime] JJK [360p].mp4")
     assert not _is_video("[Kusonime] x 01-16 720p.rar")
     assert _pixeldrain_id("https://pixeldrain.com/u/abc123") == "abc123"
-
-
-
 
 
 def test_animeout_sources_serves_every_quality_of_the_episode():

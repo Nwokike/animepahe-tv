@@ -80,6 +80,7 @@ def AppShell() -> ft.Control:
     # The controller drives navigation by mutating these closures in place
     # (identity must survive — see controller_ctx.py).
     controller.go_home = lambda: set_active_tab("Home")
+
     def _open_search():
         # The Discover tab hosts both surfaces; the Home header's search
         # action opens the search one.
@@ -87,9 +88,7 @@ def AppShell() -> ft.Control:
         state.discover_showing_search = True
 
     controller.open_search = _open_search
-    controller.open_discover = lambda: setattr(
-        state, "discover_showing_search", False
-    )
+    controller.open_discover = lambda: setattr(state, "discover_showing_search", False)
     controller.open_downloads = lambda: set_active_tab("Downloads")
     controller.open_settings = lambda: set_active_tab("Settings")
     controller.open_anime = _open_anime
@@ -146,6 +145,7 @@ def AppShell() -> ft.Control:
         ft.use_dialog(active_dialog)
     except RuntimeError:
         pass
+
     def _close_dialog():
         """Close whichever dialog is open.
 
@@ -199,9 +199,7 @@ def AppShell() -> ft.Control:
             body = HomeScreen()
         elif active_tab == "Discover":
             # One tab, two surfaces: the filtered catalog and search.
-            body = (
-                SearchScreen() if state.discover_showing_search else DiscoverScreen()
-            )
+            body = SearchScreen() if state.discover_showing_search else DiscoverScreen()
         elif active_tab == "Downloads":
             body = DownloadsScreen()
         else:
@@ -212,7 +210,7 @@ def AppShell() -> ft.Control:
     rail_destinations = [
         ft.NavigationRailDestination(icon=icon, label=label)
         for icon, label in zip(_TAB_ICONS, _TABS, strict=True)
-    ]    # The bar takes NavigationBarDestination objects — feeding it rail
+    ]  # The bar takes NavigationBarDestination objects — feeding it rail
     # destinations serializes the wrong wire type and the bottom bar
     # renders empty on phones.
     bar_destinations = [
@@ -418,7 +416,8 @@ def _use_player_overlay(state, controller) -> None:
             variants=spec.get("variants") or [],
             on_close=lambda: _close_player(),
             on_next=lambda: _play_adjacent(1, controller),
-            on_previous=lambda: _play_adjacent(-1, controller),            source_url=spec.get("source_url"),
+            on_previous=lambda: _play_adjacent(-1, controller),
+            source_url=spec.get("source_url"),
             source_referer=spec.get("source_referer"),
             source_headers=spec.get("source_headers"),
             proxied=spec.get("proxied", False),

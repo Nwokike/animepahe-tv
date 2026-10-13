@@ -25,9 +25,17 @@ class FakeProvider:
         self._latency = latency
         self.calls: list[tuple] = []
         self.fail_latest = 0
-        self.latest_data = ([Anime(1, "T", "TV", 1, "Airing", "fall", 2024, 8.0, "p", f"{name}:a1")], True)
-        self.search_data = ([Anime(2, "S", "TV", 1, "Airing", "fall", 2024, 8.0, "p", f"{name}:a2")], True)
-        self.episodes_data = [Episode(1, 1, 1, "Ep 1", "snap", "", "jpn", "24m", "e1", False)]
+        self.latest_data = (
+            [Anime(1, "T", "TV", 1, "Airing", "fall", 2024, 8.0, "p", f"{name}:a1")],
+            True,
+        )
+        self.search_data = (
+            [Anime(2, "S", "TV", 1, "Airing", "fall", 2024, 8.0, "p", f"{name}:a2")],
+            True,
+        )
+        self.episodes_data = [
+            Episode(1, 1, 1, "Ep 1", "snap", "", "jpn", "24m", "e1", False)
+        ]
         self.sources_data = [Source("https://x/e.mkv", 1080, "jpn", "SubsPlease")]
 
     async def probe(self):
@@ -95,6 +103,7 @@ def _router(*providers, clock=None):
 # ---------------------------------------------------------------------
 # The failover table
 # ---------------------------------------------------------------------
+
 
 def test_primary_down_secondary_serves():
     p1, p2 = FakeProvider("p1"), FakeProvider("p2")
@@ -171,6 +180,7 @@ def test_race_only_bounds_the_failure_tail():
 # Breaker states
 # ---------------------------------------------------------------------
 
+
 def test_three_consecutive_failures_open_the_circuit():
     from core.config import BREAKER_FAIL_THRESHOLD
 
@@ -235,7 +245,12 @@ def test_force_bypasses_open_circuit_for_explicit_user_retry():
             pass
     assert r.health()["p1"].state == "open"
     calls = len(p1.calls)
-    asyncio.run(r.sources("p1:a1", "e1", ))  # force? no — owner path
+    asyncio.run(
+        r.sources(
+            "p1:a1",
+            "e1",
+        )
+    )  # force? no — owner path
     # the pin path: force the open provider explicitly
     asyncio.run(r._run("sources", "p1:a1", "e1", force=True))
     assert len(p1.calls) > calls
@@ -244,6 +259,7 @@ def test_force_bypasses_open_circuit_for_explicit_user_retry():
 # ---------------------------------------------------------------------
 # Owner-first routing (session prefixes)
 # ---------------------------------------------------------------------
+
 
 def test_session_owner_is_tried_first():
     p1, p2 = FakeProvider("p1"), FakeProvider("p2")
@@ -271,6 +287,7 @@ def test_health_records_latency_and_errors():
 # ---------------------------------------------------------------------
 # Startup race + pin
 # ---------------------------------------------------------------------
+
 
 def test_startup_probe_is_parallel_and_deadline_scoped():
     fast = FakeProvider("fast", probe_ok=True, latency=0.0)
@@ -302,6 +319,7 @@ def test_empty_router_is_inert_not_fatal():
 # ---------------------------------------------------------------------
 # sources_for_title_any — the playback half of failover by title
 # ---------------------------------------------------------------------
+
 
 def test_sources_for_title_any_skips_the_owner_and_names_the_winner():
     owner, other = FakeProvider("owner"), FakeProvider("other")

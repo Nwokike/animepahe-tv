@@ -27,10 +27,10 @@ SUPPORT_URL = "https://github.com/Nwokike/animepahe-tv/issues"
 
 # Provider router tuning (values from the resilience research; see
 # docs/decisions.md). Providers are never locked: failover is per request.
-BREAKER_FAIL_THRESHOLD = 3       # consecutive failures -> OPEN
-BREAKER_OPEN_SECONDS = 30.0      # first cooldown; only failed trials double it
+BREAKER_FAIL_THRESHOLD = 3  # consecutive failures -> OPEN
+BREAKER_OPEN_SECONDS = 30.0  # first cooldown; only failed trials double it
 BREAKER_OPEN_MAX_SECONDS = 300.0
-STARTUP_PROBE_BUDGET = 12.0      # wall-clock cap for the parallel probe race
+STARTUP_PROBE_BUDGET = 12.0  # wall-clock cap for the parallel probe race
 
 # Provider cache TTLs (seconds), per collection.
 CACHE_TTL_LATEST = 300

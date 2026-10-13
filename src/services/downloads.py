@@ -49,6 +49,7 @@ _STATE_COMPLETE = "complete"
 # Pure playlist rewriting (unit-tested)
 # ---------------------------------------------------------------------------
 
+
 def rewrite_playlist(text: str, segment_dir_name: str = "segs") -> tuple[str, int]:
     """Rewrite a media playlist for local playback.
 
@@ -118,6 +119,27 @@ def parse_key_uri(text: str) -> str | None:
 _ILLEGAL_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+def _filename_from_disposition(value) -> str:
+    """The filename a Content-Disposition header carries.
+
+    Handles ``filename="..."``, ``filename*=UTF-8''...`` (RFC 5987, which
+    is what Drive uses for names with non-ASCII characters) and the bare
+    ``filename=...`` form. Empty when the header says nothing usable."""
+    if not value:
+        return ""
+    header = str(value)
+    match = re.search(r"filename\*\s*=\s*[^']*'[^']*'([^;]+)", header, re.I)
+    if not match:
+        match = re.search(r'filename\s*=\s*"([^"]+)"', header, re.I) or re.search(
+            r"filename\s*=\s*([^;]+)", header, re.I
+        )
+    if not match:
+        return ""
+    from urllib.parse import unquote
+
+    return unquote(match.group(1)).strip().strip('"')
+
+
 def _safe_component(name, fallback: str = "unknown") -> str:
     """One path component every platform this app ships on accepts.
 
@@ -172,8 +194,10 @@ class DownloadManager:
     @staticmethod
     def _default_dir() -> str:
         base = os.getenv("FLET_APP_STORAGE_DATA")
-        root = os.path.join(base, "animepahe", "downloads") if base else os.path.join(
-            "storage", "data", "animepahe", "downloads"
+        root = (
+            os.path.join(base, "animepahe", "downloads")
+            if base
+            else os.path.join("storage", "data", "animepahe", "downloads")
         )
         os.makedirs(root, exist_ok=True)
         return root
@@ -235,20 +259,32 @@ class DownloadManager:
         task.add_done_callback(lambda t: self._on_done(episode_session))
 
     async def detect_kind(self, url: str, headers: dict) -> str:
-        """What the resolved URL actually is: an HLS playlist or a file.
+        """What the resolved URL actually is, and what the server calls it.
 
-        The peek is the URL's own first bytes — never the provider's
-        name and never the extension. 'hls' -> segment download; 'file'
-        -> one range-resumed file. Everything else is a file: if it
-        doesn't declare EXT-X-M3U, there is nothing to segment."""
+        Returns ``(kind, filename)``. The kind is the URL's own first
+        bytes — never the provider's name and never the extension: 'hls'
+        -> segment download; 'file' -> one range-resumed file. Everything
+        else is a file: if it doesn't declare EXT-X-M3U, there is nothing
+        to segment.
+
+        The filename comes from the SAME response (its
+        Content-Disposition), so the saved copy keeps what the server
+        named it — a Drive id link, a pixeldrain id link, a CDN path — at
+        no extra request."""
         client = self._get_client()
+        filename = ""
         try:
-            resp = await client.get(url, headers=headers, stream=True, timeout=PLAYLIST_TIMEOUT)
+            resp = await client.get(
+                url, headers=headers, stream=True, timeout=PLAYLIST_TIMEOUT
+            )
+            filename = _filename_from_disposition(
+                resp.headers.get("content-disposition")
+            )
             if url.split("?")[0].endswith(".m3u8") or resp.headers.get(
                 "content-type", ""
             ).startswith("application/vnd.apple.mpegurl"):
                 await resp.aclose()
-                return "hls"
+                return ("hls", "")
             try:
                 first = await resp.anext()
             except StopAsyncIteration:
@@ -256,10 +292,10 @@ class DownloadManager:
             finally:
                 await resp.aclose()
             if b"#EXTM3U" in (first or b"")[:1024]:
-                return "hls"
+                return ("hls", "")
         except Exception as ex:
             logger.warning("download shape peek failed for %s: %s", url, ex)
-        return "file"
+        return ("file", filename)
 
     async def start_direct(
         self,
@@ -355,7 +391,9 @@ class DownloadManager:
         on_progress = getattr(self, "on_progress", None)
 
         def _chunk(n: int):
-            progress["bytes"] = have + n if not progress["done"] else progress["bytes"] + n
+            progress["bytes"] = (
+                have + n if not progress["done"] else progress["bytes"] + n
+            )
             progress["done"] = 1
             if on_progress is not None:
                 try:
@@ -366,7 +404,12 @@ class DownloadManager:
         try:
             async with self._file_limiter:
                 ok = await self._download_file(
-                    url, headers, part_path, final_path, on_progress=_chunk, cancel=cancel
+                    url,
+                    headers,
+                    part_path,
+                    final_path,
+                    on_progress=_chunk,
+                    cancel=cancel,
                 )
         except asyncio.CancelledError:
             raise
@@ -420,7 +463,9 @@ class DownloadManager:
             )
             await self._store.save_download(episode_session, row)
         self._progress.pop(episode_session, None)
-        logger.info("download complete (direct): %s (%d bytes)", episode_session, size_bytes)
+        logger.info(
+            "download complete (direct): %s (%d bytes)", episode_session, size_bytes
+        )
 
     def cancel(self, episode_session: str):
         cancel = self._cancel.get(episode_session)
@@ -479,11 +524,7 @@ class DownloadManager:
             progress = self._progress[episode_session]
             progress["total"] = total
 
-            done = sum(
-                1
-                for u in uris
-                if self._segment_complete(segs_dir, u)
-            )
+            done = sum(1 for u in uris if self._segment_complete(segs_dir, u))
             progress["done"] = done
 
             queue = [
@@ -494,7 +535,13 @@ class DownloadManager:
             workers = [
                 asyncio.create_task(
                     self._worker(
-                        queue, base_url, headers, segs_dir, progress, episode_session, cancel
+                        queue,
+                        base_url,
+                        headers,
+                        segs_dir,
+                        progress,
+                        episode_session,
+                        cancel,
                     )
                 )
                 for _ in range(min(PARALLEL_SEGMENTS, max(1, len(queue))))
@@ -692,7 +739,8 @@ class DownloadManager:
             return {}
 
     @staticmethod
-    def _write_manifest(path: str, manifest: dict) -> None:        DownloadManager._atomic_write_text(
+    def _write_manifest(path: str, manifest: dict) -> None:
+        DownloadManager._atomic_write_text(
             path, json.dumps(manifest, indent=2, default=str)
         )
 

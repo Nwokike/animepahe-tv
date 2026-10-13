@@ -171,7 +171,11 @@ class KusonimeProvider:
 
     async def probe(self) -> bool:
         try:
-            resp = await self._client.get(f"{KUSONIME_API}/posts", params={"per_page": "1", "_fields": "id"}, timeout=10.0)
+            resp = await self._client.get(
+                f"{KUSONIME_API}/posts",
+                params={"per_page": "1", "_fields": "id"},
+                timeout=10.0,
+            )
             return resp.status_code == 200
         except Exception as ex:
             logger.debug("kusonime probe failed: %s", ex)
@@ -188,14 +192,20 @@ class KusonimeProvider:
             try:
                 resp = await self._client.get(
                     f"{KUSONIME_API}/media",
-                    params={"include": ",".join(str(i) for i in media_ids), "per_page": 20, "_fields": "id,source_url"},
+                    params={
+                        "include": ",".join(str(i) for i in media_ids),
+                        "per_page": 20,
+                        "_fields": "id,source_url",
+                    },
                 )
                 poster_map = {m["id"]: m.get("source_url", "") for m in resp.json()}
             except Exception:
                 poster_map = {}
         results = []
         for post in posts:
-            title, year, media_type = _clean_title(post.get("title", {}).get("rendered", ""))
+            title, year, media_type = _clean_title(
+                post.get("title", {}).get("rendered", "")
+            )
             if not title:
                 continue
             slug = _post_slug(post)
@@ -297,7 +307,13 @@ class KusonimeProvider:
             return cached
         resp = await self._client.get(
             f"{KUSONIME_API}/posts",
-            params={"per_page": "12", "page": str(page), "orderby": "date", "order": "desc", "_fields": "id,title,featured_media,link"},
+            params={
+                "per_page": "12",
+                "page": str(page),
+                "orderby": "date",
+                "order": "desc",
+                "_fields": "id,title,featured_media,link",
+            },
         )
         if resp.status_code != 200:
             raise RuntimeError(f"kusonime HTTP {resp.status_code}")
@@ -313,13 +329,23 @@ class KusonimeProvider:
             return cached
         resp = await self._client.get(
             f"{KUSONIME_API}/posts",
-            params={"search": query, "per_page": "12", "page": str(page), "_fields": "id,title,featured_media,link"},
+            params={
+                "search": query,
+                "per_page": "12",
+                "page": str(page),
+                "_fields": "id,title,featured_media,link",
+            },
         )
         if resp.status_code != 200:
             raise RuntimeError(f"kusonime HTTP {resp.status_code}")
         posts = resp.json()
         scored = [
-            (_title_relevance(query, _clean_title(p.get("title", {}).get("rendered", ""))[0]), p)
+            (
+                _title_relevance(
+                    query, _clean_title(p.get("title", {}).get("rendered", ""))[0]
+                ),
+                p,
+            )
             for p in posts
         ]
         scored.sort(key=lambda sp: -sp[0])
@@ -361,7 +387,9 @@ class KusonimeProvider:
         if cached is not None:
             return cached
         try:
-            resp = await self._client.get(f"https://pixeldrain.com/api/file/{file_id}/info")
+            resp = await self._client.get(
+                f"https://pixeldrain.com/api/file/{file_id}/info"
+            )
             if resp.status_code != 200:
                 return {}
             info = resp.json()
@@ -376,7 +404,9 @@ class KusonimeProvider:
         links per block. Returns [{quality, href, host_kind}] for the
         hosts we can resolve (pixeldrain, Drive). The pixeldrain id is
         the dedup key (the map caught the same id under two blocks)."""
-        dl = re.search(r'id="dl"[^>]*>(.*?)(?:id="dl-notif"|<footer|</body)', html, re.S)
+        dl = re.search(
+            r'id="dl"[^>]*>(.*?)(?:id="dl-notif"|<footer|</body)', html, re.S
+        )
         section = dl.group(1) if dl else html
         files: list[dict] = []
         seen_pd: set[str] = set()
@@ -390,13 +420,22 @@ class KusonimeProvider:
                         continue
                     seen_pd.add(pd_id)
                     files.append(
-                        {"url": href, "quality": quality, "kind": "pixeldrain",
-                         "pixeldrain_id": pd_id, "filename": ""}
+                        {
+                            "url": href,
+                            "quality": quality,
+                            "kind": "pixeldrain",
+                            "pixeldrain_id": pd_id,
+                            "filename": "",
+                        }
                     )
                 elif any(h in href for h in _SUPPORTED_DRIVE):
                     files.append(
-                        {"url": href, "quality": _quality_from_slug(href) or quality,
-                         "kind": "drive", "filename": ""}
+                        {
+                            "url": href,
+                            "quality": _quality_from_slug(href) or quality,
+                            "kind": "drive",
+                            "filename": "",
+                        }
                     )
         return files
 
@@ -508,9 +547,11 @@ class KusonimeProvider:
         files = await self._batch_files(native)
         matches = []
         for f in files:
-            drive = _drive_direct(f["url"]) if any(
-                h in f["url"] for h in _SUPPORTED_DRIVE
-            ) else ""
+            drive = (
+                _drive_direct(f["url"])
+                if any(h in f["url"] for h in _SUPPORTED_DRIVE)
+                else ""
+            )
             # A Drive file streams like a movie file (it IS one) — the
             # page shape just never says "video" the way a .rar does.
             if is_movie and (f.get("video") or drive):

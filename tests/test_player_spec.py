@@ -49,7 +49,11 @@ def test_quality_choice_flags_toggle():
     state.quality_choices = [
         {"label": "Auto (1080p)", "kind": "variant", "index": 0},
         {"label": "1080p", "kind": "variant", "index": 1},
-        {"label": "720p - jpn (SubsPlease)", "kind": "source", "url": "https://kwik.si/e/x"},
+        {
+            "label": "720p - jpn (SubsPlease)",
+            "kind": "source",
+            "url": "https://kwik.si/e/x",
+        },
     ]
     state.quality_dialog_open = True
     assert state.quality_dialog_open is True

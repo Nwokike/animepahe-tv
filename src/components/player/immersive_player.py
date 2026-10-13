@@ -42,6 +42,7 @@ KWIK_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+
 # Playback speeds for the chip, index 2 is normal.
 def _mpv_props(referer: str) -> dict:
     """mpv tuning for network media. The source's own referer rides
@@ -59,6 +60,7 @@ def _mpv_props(referer: str) -> dict:
         # spinner for a minute. 10s makes failure deterministic.
         "network-timeout": 10,
     }
+
 
 SPEEDS = (0.25, 0.5, 1.0, 1.25, 1.5, 2.0)
 
@@ -104,7 +106,11 @@ def _stream_variants(m3u8_text: str) -> list[dict]:
             uri = line if line.startswith("http") else base
             entry = dict(pending)
             entry["uri"] = uri
-            label = f"{entry.get('height', 0)}p" if entry.get("height") else f"{entry.get('bandwidth', 0) // 1000}kbps"
+            label = (
+                f"{entry.get('height', 0)}p"
+                if entry.get("height")
+                else f"{entry.get('bandwidth', 0) // 1000}kbps"
+            )
             entry["label"] = label
             variants.append(entry)
             pending = {}
@@ -191,9 +197,7 @@ class ImmersivePlayer(ft.Stack):
 
     def _build(self):
         self.loading_ring = ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4)
-        self.status_text = ft.Text(
-            "Loading stream...", size=14, color=ft.Colors.WHITE
-        )
+        self.status_text = ft.Text("Loading stream...", size=14, color=ft.Colors.WHITE)
         self.retry_btn = ft.OutlinedButton(
             content="Retry",
             icon=ft.Icons.REFRESH_ROUNDED,
@@ -252,9 +256,7 @@ class ImmersivePlayer(ft.Stack):
             ),
             configuration=fv.VideoConfiguration(
                 enable_hardware_acceleration=True,
-                mpv_properties=_mpv_props(
-                    self.source_referer or "https://kwik.cx/"
-                ),
+                mpv_properties=_mpv_props(self.source_referer or "https://kwik.cx/"),
             ),
             on_load=self._on_first_ready,
             on_duration_change=self._on_duration_change,
@@ -406,7 +408,9 @@ class ImmersivePlayer(ft.Stack):
                 on_click=lambda e: self._on_back(),
                 tooltip="Back",
             ),
-            ft.Text(self.title, size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+            ft.Text(
+                self.title, size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS
+            ),
         ]
 
         return fv.AdaptiveVideoControls(
@@ -637,7 +641,9 @@ class ImmersivePlayer(ft.Stack):
     async def apply_audio(self, name: str | None) -> None:
         """Pin an audio rendition (None = manifest default)."""
         self._current_audio = name
-        await self._swap_media("Default audio" if name is None else "Switching audio...")
+        await self._swap_media(
+            "Default audio" if name is None else "Switching audio..."
+        )
 
     async def _swap_media(self, message: str):
         """Restart the playlist on the currently pinned resource, restoring
@@ -979,9 +985,7 @@ class ImmersivePlayer(ft.Stack):
                     on_click=lambda e: _pick_variant(None),
                 ),
             )
-            sections.append(
-                ft.Text("Quality", size=13, weight=ft.FontWeight.W_700)
-            )
+            sections.append(ft.Text("Quality", size=13, weight=ft.FontWeight.W_700))
             sections.append(ft.Column(rows, tight=True, spacing=6))
         if len(tracks) >= 2:
             rows = [
@@ -1000,12 +1004,11 @@ class ImmersivePlayer(ft.Stack):
                 ),
             )
             sections.append(ft.Container(height=8))
-            sections.append(
-                ft.Text("Audio", size=13, weight=ft.FontWeight.W_700)
-            )
+            sections.append(ft.Text("Audio", size=13, weight=ft.FontWeight.W_700))
             sections.append(ft.Column(rows, tight=True, spacing=6))
 
         if self.subtitles:
+
             def _pick_subtitle(index):
                 _close()
                 self.apply_subtitle(index)
@@ -1070,9 +1073,7 @@ class ImmersivePlayer(ft.Stack):
                 modal=True,
                 title=ft.Text("Stream Settings", weight=ft.FontWeight.BOLD),
                 content=ft.Column(sections, tight=True, spacing=8),
-                actions=[
-                    ft.TextButton(content="Close", on_click=lambda e: _close())
-                ],
+                actions=[ft.TextButton(content="Close", on_click=lambda e: _close())],
                 actions_alignment=ft.MainAxisAlignment.END,
             ),
         )
@@ -1333,9 +1334,7 @@ class ImmersivePlayer(ft.Stack):
             return
         if self._is_final_error:
             return
-        self._show_final_error(
-            "Unable to load stream. Check your connection or retry."
-        )
+        self._show_final_error("Unable to load stream. Check your connection or retry.")
 
     def _on_complete(self, e=None):
         """Auto-advance only at a real ending.

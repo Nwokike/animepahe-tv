@@ -14,6 +14,7 @@ import flet as ft
 
 from app_shell import AppShell
 from core.constants import APP_NAME
+
 # Logging first: the console + ring-buffer handlers attach at import time,
 # so every service constructed below logs where it can be seen.
 from core.logger_handler import in_memory_log_handler  # noqa: F401
@@ -87,6 +88,7 @@ def _anime_dict(anime) -> dict:
         "anilist_id": getattr(anime, "anilist_id", 0) or 0,
         "studios": list(getattr(anime, "studios", None) or []),
         "aired": getattr(anime, "aired", "") or "",
+        "backdrop": getattr(anime, "backdrop", "") or "",
     }
 
 
@@ -445,9 +447,11 @@ class AppController:
 
             try:
                 episodes, has_more = await self.router.episodes(anime_session, page_num)
-                state.current_source_name = self.router.last_winner or "" 
+                state.current_source_name = self.router.last_winner or ""
                 if gen != self._episodes_gen:
-                    logger.info("load_episodes discarding stale page for %s", anime_session)
+                    logger.info(
+                        "load_episodes discarding stale page for %s", anime_session
+                    )
                     return
                 logger.info(
                     "load_episodes session=%s page=%d got %d",
@@ -594,7 +598,9 @@ class AppController:
         try:
             sources = await self.router.sources(anime_session, episode_session)
         except Exception as ex:
-            logger.error("sources(%s/%s) failed: %s", anime_session, episode_session, ex)
+            logger.error(
+                "sources(%s/%s) failed: %s", anime_session, episode_session, ex
+            )
             self._show_error_snackbar("Couldn't load the stream sources.")
             sources = []
         if gen != self._play_gen:
@@ -608,7 +614,9 @@ class AppController:
             title = str((state.selected_anime or {}).get("title") or "").strip()
             ep_num = ep.episode if ep else 0
             if title and ep_num:
-                logger.info("no sources on the owner — asking by title: %r ep %s", title, ep_num)
+                logger.info(
+                    "no sources on the owner — asking by title: %r ep %s", title, ep_num
+                )
                 sources = await self.router.sources_for_title_any(
                     title, ep_num, skip=self._owner_of(anime_session), force=True
                 )
@@ -707,12 +715,17 @@ class AppController:
                 return None
         return url or None
 
-    async def _fetch_variants(self, m3u8: str, headers: dict | None = None) -> list[dict]:
+    async def _fetch_variants(
+        self, m3u8: str, headers: dict | None = None
+    ) -> list[dict]:
         """Master-playlist variants through the proxy (correct headers),
         falling back to a direct fetch when the proxy isn't running."""
         from components.player.immersive_player import KWIK_USER_AGENT
 
-        headers = headers or {"User-Agent": KWIK_USER_AGENT, "Referer": "https://kwik.cx/"}
+        headers = headers or {
+            "User-Agent": KWIK_USER_AGENT,
+            "Referer": "https://kwik.cx/",
+        }
         if self.hls_proxy is not None:
             return await self.hls_proxy.fetch_variants(m3u8, headers=headers)
         from components.player.immersive_player import (
@@ -752,16 +765,18 @@ class AppController:
         if pending_external:
             # The old-app path: resolve the chosen source and hand it to KTV.
             source = next(
-                (s for s in getattr(self, "_external_sources", []) if s.url == choice["url"]),
+                (
+                    s
+                    for s in getattr(self, "_external_sources", [])
+                    if s.url == choice["url"]
+                ),
                 None,
             )
             if source is None:
                 # Rebuild the Source from the choice (the list isn't kept).
                 from core.state import Source
 
-                source = Source(
-                    url=choice["url"], resolution=0, audio="jpn", fansub=""
-                )
+                source = Source(url=choice["url"], resolution=0, audio="jpn", fansub="")
             await self._resolve_and_launch_external(
                 source, pending["anime_session"], pending["episode_session"]
             )
@@ -832,10 +847,14 @@ class AppController:
         anime = await self._resolve_anime(anime_session)
         # Clear any previous open-failure so it can't blink over the new one.
         state.player_error = None
-        headers = dict(source_headers) if source_headers else {
-            "User-Agent": KWIK_USER_AGENT,
-            "Referer": "https://kwik.cx/",
-        }
+        headers = (
+            dict(source_headers)
+            if source_headers
+            else {
+                "User-Agent": KWIK_USER_AGENT,
+                "Referer": "https://kwik.cx/",
+            }
+        )
         referer = headers.get("Referer", "https://kwik.cx/")
         play_url = resource
         # Only HLS routes through the proxy; progressive files (a .mkv
@@ -926,7 +945,10 @@ class AppController:
             rows.append(row)
         state.source_test_results = rows
         state.sources_test_version += 1
-        logger.info("source test: %s", [(r["name"], r["probe_ok"], r["search_count"]) for r in rows])
+        logger.info(
+            "source test: %s",
+            [(r["name"], r["probe_ok"], r["search_count"]) for r in rows],
+        )
 
     # ------------------------------------------------------------------
     # Discover (provider-generated filters)
@@ -976,7 +998,9 @@ class AppController:
             if time is None and tabs:
                 time = tabs[0]["time"]
             state.schedule_time = time or ""
-            state.schedule_entries = await provider.schedule_entries(time) if time else []
+            state.schedule_entries = (
+                await provider.schedule_entries(time) if time else []
+            )
         except Exception as ex:
             logger.warning("schedule load failed: %s", ex)
             state.schedule_tabs = []
@@ -1062,7 +1086,9 @@ class AppController:
                 on_click=lambda e, s=entry.get("slug", ""): _open_entry(s),
             )
             for entry in state.schedule_entries
-        ] or [ft.Text("No airings this day.", size=13, color=ft.Colors.ON_SURFACE_VARIANT)]
+        ] or [
+            ft.Text("No airings this day.", size=13, color=ft.Colors.ON_SURFACE_VARIANT)
+        ]
 
         show_app_dialog(
             self.page,
@@ -1070,11 +1096,23 @@ class AppController:
                 modal=True,
                 title=ft.Text("Airing Schedule", weight=ft.FontWeight.BOLD),
                 content=ft.Column(
-                    [day_chips, ft.Container(height=10), ft.Column(entry_rows, tight=True, spacing=2, scroll=ft.ScrollMode.AUTO, height=380)],
+                    [
+                        day_chips,
+                        ft.Container(height=10),
+                        ft.Column(
+                            entry_rows,
+                            tight=True,
+                            spacing=2,
+                            scroll=ft.ScrollMode.AUTO,
+                            height=380,
+                        ),
+                    ],
                     tight=True,
                     spacing=8,
                 ),
-                actions=[ft.TextButton(content="Close", on_click=lambda e: _close_schedule())],
+                actions=[
+                    ft.TextButton(content="Close", on_click=lambda e: _close_schedule())
+                ],
                 actions_alignment=ft.MainAxisAlignment.END,
             ),
         )
@@ -1204,7 +1242,9 @@ class AppController:
         spawn(_fetch(), name="cache-notify-poster")
         # First run: no local file yet (the next notification has it).
         cache_dir = os.path.join("storage", "posters")
-        path = os.path.join(cache_dir, f"notify-{notifications_stable(anime_session)}.img")
+        path = os.path.join(
+            cache_dir, f"notify-{notifications_stable(anime_session)}.img"
+        )
         return path if os.path.exists(path) else None
 
     async def start_episode_checker(self) -> None:
@@ -1280,6 +1320,8 @@ class AppController:
                 label += f" ({src.fansub})"
             if getattr(src, "size", ""):
                 label += f" [{src.size}]"
+            if getattr(src, "bd", False):
+                label += " [BD]"
             choices.append(
                 {
                     "label": label,
@@ -1288,6 +1330,8 @@ class AppController:
                     "headers": src.headers,
                     "subtitles": src.subtitles,
                     "skip": src.skip,
+                    # the site's own download route, when it serves one
+                    "download_url": getattr(src, "download_url", "") or "",
                 }
             )
 
@@ -1322,9 +1366,7 @@ class AppController:
             return
         self._resolved_m3u8 = m3u8
         anime = await self._resolve_anime(anime_session)
-        ep = next(
-            (e for e in state.episodes if e.session == episode_session), None
-        )
+        ep = next((e for e in state.episodes if e.session == episode_session), None)
         from services.external_player import episode_title, launch_external
 
         await launch_external(
@@ -1346,9 +1388,7 @@ class AppController:
         the caller passes m3u8=None and we hand over the play-page URL.
         """
         anime = await self._resolve_anime(anime_session)
-        ep = next(
-            (e for e in state.episodes if e.session == episode_session), None
-        )
+        ep = next((e for e in state.episodes if e.session == episode_session), None)
         title = (anime or {}).get("title", "Anime")
         ep_num = ep.episode if ep else None
 
@@ -1364,9 +1404,7 @@ class AppController:
             )
             return
 
-        resolution = (
-            state.selected_source.resolution if state.selected_source else None
-        )
+        resolution = state.selected_source.resolution if state.selected_source else None
         await launch_external(
             self.page,
             self._resolved_m3u8,
@@ -1466,7 +1504,14 @@ class AppController:
     ):
         """Resolve one chosen rendition and start the job."""
         source_headers = dict(choice.get("headers") or {})
-        resolved = await self._resolve_source(choice["url"], anime_session)
+        # The provider's own download route when the source serves one
+        # (animepahe's pahe.win link): that IS the file the site offers, so
+        # it goes first and the stream URL is the fallback.
+        download_url = choice.get("download_url") or choice["url"]
+        resolved = await self._resolve_source(download_url, anime_session)
+        if not resolved:
+            if download_url != choice["url"]:
+                resolved = await self._resolve_source(choice["url"], anime_session)
         if not resolved:
             self._show_error_snackbar("Couldn't resolve the stream for download.")
             return
@@ -1483,8 +1528,7 @@ class AppController:
 
         metadata = {
             "anime_session": anime_session,
-            "anime_id": (ep.anime_id if ep else 0)
-            or (anime or {}).get("anime_id", 0),
+            "anime_id": (ep.anime_id if ep else 0) or (anime or {}).get("anime_id", 0),
             "title": (anime or {}).get("title", ""),
             "poster": (anime or {}).get("poster", ""),
             "episode_num": ep.episode if ep else 0,
@@ -1499,8 +1543,14 @@ class AppController:
 
         # One resolution, two shapes — decided by what the media IS, never
         # by which source it came from: a file is fetched directly, an
-        # m3u8 by its segments, at whatever quality it serves.
-        kind = await self.downloads.detect_kind(resolved, source_headers)
+        # m3u8 by its segments, at whatever quality it serves. The same
+        # peek carries the server's own filename, so the saved copy keeps
+        # it when the provider didn't supply one.
+        kind, server_name = await self.downloads.detect_kind(resolved, source_headers)
+        if kind == "file" and server_name and not metadata["filename"]:
+            metadata["filename"] = server_name
+            row["filename"] = server_name
+            await self.store.save_download(episode_session, row)
         if kind == "file":
             await self.downloads.start_direct(
                 episode_session, resolved, source_headers, metadata
@@ -1530,9 +1580,7 @@ class AppController:
         row = rows.get(episode_session) or {}
         # The manager owns the layout (and its platform-safe name mapping);
         # computing the path here would drift from where the file lives.
-        self.downloads.remove_job(
-            row.get("anime_session", "unknown"), episode_session
-        )
+        self.downloads.remove_job(row.get("anime_session", "unknown"), episode_session)
         await self.store.remove_download(episode_session)
         rows.pop(episode_session, None)
         state.downloads = rows
@@ -1753,7 +1801,9 @@ class AppController:
 
         from core.notify import show_snack
 
-        show_snack(self.page, "Recent searches cleared", action_label="Undo", on_action=_undo)
+        show_snack(
+            self.page, "Recent searches cleared", action_label="Undo", on_action=_undo
+        )
 
 
 async def main(page: ft.Page):
@@ -1789,9 +1839,7 @@ async def main(page: ft.Page):
     methods.open_schedule = lambda: spawn(
         controller.open_schedule(), name="open-schedule"
     )
-    methods.open_random = lambda: spawn(
-        controller.open_random(), name="open-random"
-    )
+    methods.open_random = lambda: spawn(controller.open_random(), name="open-random")
     methods.load_anime = lambda session: spawn(
         controller.load_anime(session), name="load-anime"
     )

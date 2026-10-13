@@ -11,7 +11,12 @@ clears — the code is durable and lights up the moment it does.
 import logging
 import re
 
-from core.config import ANIMEOUT_API, CACHE_TTL_EPISODES, CACHE_TTL_LATEST, CACHE_TTL_SEARCH
+from core.config import (
+    ANIMEOUT_API,
+    CACHE_TTL_EPISODES,
+    CACHE_TTL_LATEST,
+    CACHE_TTL_SEARCH,
+)
 from core.state import Anime, Episode, Source
 import primp
 from services.providers.base import make_session, split_session
@@ -65,7 +70,9 @@ class AnimeOutProvider:
 
     def __init__(self, client=None, solver=None):
         self._client = client or primp.AsyncClient(
-            impersonate="chrome", timeout=20.0, follow_redirects=True,
+            impersonate="chrome",
+            timeout=20.0,
+            follow_redirects=True,
             headers={"Referer": "https://animeout.xyz/"},
         )
         self._solver = solver
@@ -90,7 +97,9 @@ class AnimeOutProvider:
     async def probe(self) -> bool:
         try:
             resp = await self._client.get(
-                f"{ANIMEOUT_API}/posts", params={"per_page": 1, "_fields": "id"}, timeout=10.0
+                f"{ANIMEOUT_API}/posts",
+                params={"per_page": 1, "_fields": "id"},
+                timeout=10.0,
             )
             return resp.status_code == 200
         except Exception as ex:
@@ -108,14 +117,20 @@ class AnimeOutProvider:
             try:
                 resp = await self._client.get(
                     f"{ANIMEOUT_API}/media",
-                    params={"include": ",".join(str(i) for i in media_ids), "per_page": 20, "_fields": "id,source_url"},
+                    params={
+                        "include": ",".join(str(i) for i in media_ids),
+                        "per_page": 20,
+                        "_fields": "id,source_url",
+                    },
                 )
                 poster_map = {m["id"]: m.get("source_url", "") for m in resp.json()}
             except Exception:
                 poster_map = {}
         results = []
         for post in posts:
-            title, year, media_type = _clean_title(post.get("title", {}).get("rendered", ""))
+            title, year, media_type = _clean_title(
+                post.get("title", {}).get("rendered", "")
+            )
             if not title:
                 continue
             results.append(
@@ -215,7 +230,13 @@ class AnimeOutProvider:
             return cached
         resp = await self._client.get(
             f"{ANIMEOUT_API}/posts",
-            params={"per_page": 12, "page": page, "orderby": "date", "order": "desc", "_fields": "id,title,featured_media"},
+            params={
+                "per_page": 12,
+                "page": page,
+                "orderby": "date",
+                "order": "desc",
+                "_fields": "id,title,featured_media",
+            },
         )
         if resp.status_code != 200:
             raise RuntimeError(f"animeout HTTP {resp.status_code}")
@@ -231,13 +252,23 @@ class AnimeOutProvider:
             return cached
         resp = await self._client.get(
             f"{ANIMEOUT_API}/posts",
-            params={"search": query, "per_page": 12, "page": page, "_fields": "id,title,featured_media"},
+            params={
+                "search": query,
+                "per_page": 12,
+                "page": page,
+                "_fields": "id,title,featured_media",
+            },
         )
         if resp.status_code != 200:
             raise RuntimeError(f"animeout HTTP {resp.status_code}")
         posts = resp.json()
         scored = [
-            (_title_relevance(query, _clean_title(p.get("title", {}).get("rendered", ""))[0]), p)
+            (
+                _title_relevance(
+                    query, _clean_title(p.get("title", {}).get("rendered", ""))[0]
+                ),
+                p,
+            )
             for p in posts
         ]
         scored.sort(key=lambda sp: -sp[0])
@@ -250,7 +281,9 @@ class AnimeOutProvider:
         _, native = split_session(session)
         if not native.isdigit():
             return None
-        resp = await self._client.get(f"{ANIMEOUT_API}/posts/{native}", params={"_fields": "id,title"})
+        resp = await self._client.get(
+            f"{ANIMEOUT_API}/posts/{native}", params={"_fields": "id,title"}
+        )
         if resp.status_code != 200:
             return None
         post = resp.json()
@@ -459,7 +492,11 @@ def _parse_filename(url: str) -> tuple[int, str, str]:
         g = group.strip()
         if not g or not re.search(r"[A-Za-z]{2,}", g):
             continue
-        if re.fullmatch(r"\d{3,4}p{1,2}", g, re.I) or g.lower() in _CODECS or re.fullmatch(r"[0-9A-F]{6,}", g):
+        if (
+            re.fullmatch(r"\d{3,4}p{1,2}", g, re.I)
+            or g.lower() in _CODECS
+            or re.fullmatch(r"[0-9A-F]{6,}", g)
+        ):
             continue
         names.append(g)
     if len(names) > 1:
@@ -490,7 +527,9 @@ async def _resolve_direct_url(episode_url: str, client=None) -> str:
         landing = await client.get(episode_url)
         if landing.status_code != 200:
             return ""
-        public = re.search(r'href="(https://ddl\.animeout\.com/public\.php\?url=[^"]+)"', landing.text)
+        public = re.search(
+            r'href="(https://ddl\.animeout\.com/public\.php\?url=[^"]+)"', landing.text
+        )
         if not public:
             return ""
         page = await client.get(public.group(1).replace("&amp;", "&"))

@@ -19,7 +19,6 @@ import pytest  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 
-
 class _Resp:
     def __init__(self, status_code=200, json_data=None, text=""):
         self.status_code = status_code
@@ -62,7 +61,9 @@ WP_CATEGORIES = [
         ("services.providers.kusonime", "KusonimeProvider", "kusonime"),
     ],
 )
-async def test_wp_providers_discover_their_own_categories(module_name, class_name, api_base):
+async def test_wp_providers_discover_their_own_categories(
+    module_name, class_name, api_base
+):
     """The category list (with counts) is READ from the site, so a new
     bucket appears without a code change."""
     import importlib
@@ -139,13 +140,14 @@ async def test_anikato_browse_maps_the_filter_params():
 
     client = _Client({"/filter": _Resp(text="")})
     provider = AniKatoProvider(client=client)
-    await provider.browse({"genre": "action", "type": "tv", "sort": "score", "ep_min": "12"}, 3)
+    await provider.browse(
+        {"genre": "action", "type": "tv", "sort": "score", "ep_min": "12"}, 3
+    )
 
     (url, _params) = client.calls[-1]
     # only the selections that have a value ride — no empty params
     assert url == (
-        "https://anikototv.to/filter?"
-        "page=3&genre=action&type=tv&sort=score&ep_min=12"
+        "https://anikototv.to/filter?page=3&genre=action&type=tv&sort=score&ep_min=12"
     )
 
 

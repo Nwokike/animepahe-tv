@@ -90,7 +90,9 @@ async def test_ensure_channel_is_quiet_when_the_service_refuses(fake):
 
 
 @pytest.mark.asyncio
-async def test_show_new_episode_carries_the_payload_channel_and_big_picture(fake, tmp_path):
+async def test_show_new_episode_carries_the_payload_channel_and_big_picture(
+    fake, tmp_path
+):
     poster = tmp_path / "poster.img"
     poster.write_bytes(b"img")
 
@@ -146,7 +148,11 @@ async def test_show_progress_is_one_notification_advanced_by_id(fake):
 
     # The same id again advances the same row.
     await notifications.show_progress(
-        notification_id=42, title="Downloading", body="Episode 3", progress=90, max_progress=100
+        notification_id=42,
+        title="Downloading",
+        body="Episode 3",
+        progress=90,
+        max_progress=100,
     )
     assert [c["progress"] for c in fake.shown] == [30, 90]
 
@@ -185,8 +191,16 @@ def test_on_tap_dispatches_the_payload_and_ignores_foreign_ones(monkeypatch):
 
 
 def test_handle_payload_decodes_ours_and_rejects_everything_else():
-    assert notifications.handle_payload("animepahe://anime/kayoanime:12") == "kayoanime:12"
-    for junk in (None, "", "animepahe://anime/", "other://anime/x", "animepahe://episode/1"):
+    assert (
+        notifications.handle_payload("animepahe://anime/kayoanime:12") == "kayoanime:12"
+    )
+    for junk in (
+        None,
+        "",
+        "animepahe://anime/",
+        "other://anime/x",
+        "animepahe://episode/1",
+    ):
         assert notifications.handle_payload(junk) is None
 
 

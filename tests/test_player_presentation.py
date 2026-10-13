@@ -116,7 +116,9 @@ async def test_settings_round_trip_and_cold_read(tmp_path):
 
     # Corrupt file: defaults, never a crash.
     path.write_text("{not json", encoding="utf-8")
-    assert JsonStore(filename=str(path)).get_setting("video_fit", "contain") == "contain"
+    assert (
+        JsonStore(filename=str(path)).get_setting("video_fit", "contain") == "contain"
+    )
 
 
 @pytest.mark.asyncio
@@ -240,7 +242,10 @@ async def test_speed_cycle_confirm(no_spawn):
 @pytest.mark.asyncio
 async def test_skip_confirm_says_intro_or_outro(no_spawn):
     player = _player()
-    player.skip = {"intro": {"start": 30, "end": 119}, "outro": {"start": 1280, "end": 1369}}
+    player.skip = {
+        "intro": {"start": 30, "end": 119},
+        "outro": {"start": 1280, "end": 1369},
+    }
 
     player._last_position = 60.0
     await player._on_skip_chip()

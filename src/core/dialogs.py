@@ -33,9 +33,7 @@ def close_app_dialog(page: ft.Page) -> bool:
         return False
     setattr(page, "_app_dialog", None)
     try:
-        top = next(
-            (d for d in reversed(page._dialogs.controls) if d.open), None
-        )
+        top = next((d for d in reversed(page._dialogs.controls) if d.open), None)
         if top is dialog:
             page.pop_dialog()
         else:

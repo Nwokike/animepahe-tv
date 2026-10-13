@@ -155,7 +155,7 @@ def test_single_rendition_start_clears_the_spinner_even_when_it_fails():
             self.active_jobs = []
 
         async def detect_kind(self, url, headers):
-            return "file"
+            return ("file", "")
 
         async def start_direct(self, *a, **kw):
             raise OSError("disk full")

@@ -53,7 +53,9 @@ async def test_clearances_are_host_keyed(store):
     await store.save_clearance("cf=animeout", "UA/2.0", "public.animeout.xyz")
     # each host reads its own, and the default host is unchanged
     assert (await store.get_clearance())["cookies"] == "cf=animepahe"
-    assert (await store.get_clearance("public.animeout.xyz"))["cookies"] == "cf=animeout"
+    assert (await store.get_clearance("public.animeout.xyz"))[
+        "cookies"
+    ] == "cf=animeout"
 
 
 @pytest.mark.asyncio
@@ -63,9 +65,7 @@ async def test_the_pre_host_flat_record_still_migrates(store):
     import json
 
     with open(store.path, "w", encoding="utf-8") as f:
-        json.dump(
-            {"clearance": {"cookies": "cf=legacy", "user_agent": "UA/9"}}, f
-        )
+        json.dump({"clearance": {"cookies": "cf=legacy", "user_agent": "UA/9"}}, f)
     assert (await store.get_clearance())["cookies"] == "cf=legacy"
     assert await store.get_clearance("public.animeout.xyz") is None
     # writing a second host migrates the flat record instead of dropping it
@@ -221,7 +221,10 @@ async def test_sources_carry_the_clearance_headers_once_solved():
     original = ao._resolve_direct_url
     ao._resolve_direct_url = _fake_resolve
     try:
-        sources = await provider.sources("animeout:99", "http://nimbus/x - 04 1080pp [AB][1080pp][SubsProvide][x265][Bot].mkv")
+        sources = await provider.sources(
+            "animeout:99",
+            "http://nimbus/x - 04 1080pp [AB][1080pp][SubsProvide][x265][Bot].mkv",
+        )
     finally:
         ao._resolve_direct_url = original
 

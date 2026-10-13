@@ -80,15 +80,17 @@ class AnimePaheProvider:
                 self._anime_ids[ep.session] = ep.anime_id
         return episodes, has_more
 
-    async def _sources_via_links(self, anime_session: str, episode_session: str) -> list[Source]:
-        """m=links: one JSON call -> per-rendition {audio, kwik, filesize?,
-        hd}. Needs the numeric anime_id from m=release (carried on the
-        episodes we already loaded).
+    async def _sources_via_links(
+        self, anime_session: str, episode_session: str
+    ) -> list[Source]:
+        """m=links: one JSON call -> per-rendition {audio, kwik,
+        kwik_pahewin, filesize?, hd}. Needs the numeric anime_id from
+        m=release (carried on the episodes we already loaded).
 
-        `hd` marks the HD renditions; `kwik_pahewin` (the pahe.win menu
-        URL) is NOT read here — that menu is served by the play-page
-        scrape's pickDownload parsing on the fallback path, so the two
-        routes stay distinct instead of one pretending to serve both."""
+        `kwik_pahewin` is the pahe.win share link for that rendition — the
+        site's own download offering, read verbatim onto the Source as
+        ``download_url`` so the download path uses what the source gave
+        rather than inventing a route."""
         anime_id = self._anime_ids.get(episode_session)
         if not anime_id:
             return []
@@ -107,9 +109,7 @@ class AnimePaheProvider:
         # or a flat list. Handle both — quality comes from the key when
         # the source gives one, otherwise it stays 0 (never invented).
         results: list[Source] = []
-        for key, entry in (
-            data.items() if isinstance(data, dict) else enumerate(data)
-        ):
+        for key, entry in data.items() if isinstance(data, dict) else enumerate(data):
             if not isinstance(entry, dict) or not entry.get("kwik"):
                 continue
             try:
@@ -130,6 +130,9 @@ class AnimePaheProvider:
                     audio=str(entry.get("audio") or "jpn"),
                     fansub=fansub,
                     size=f"{entry['filesize']}MB" if entry.get("filesize") else "",
+                    # the site's own download link for this rendition,
+                    # read verbatim (it is what the pick menu serves)
+                    download_url=str(entry.get("kwik_pahewin") or ""),
                 )
             )
         logger.info("m=links returned %d renditions", len(results))
@@ -190,15 +193,20 @@ def _parse_details(html: str, session: str) -> Anime | None:
         return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
 
     title = text(
-        r'title-wrapper[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>'
-    ) or text(r'header[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>')
+        r"title-wrapper[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>"
+    ) or text(r"header[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>")
     if not title:
         return None
     poster = text(r'anime-poster[^>]*>\s*<a href="([^"]+)"') or text(
         r'header[^>]*>\s*<img[^>]*data-src="([^"]+)"'
     )
+    # The page's own cover: body > section > article > div.header-wrapper
+    # [data-src] (the map's verified selector). Absent = "" and the detail
+    # screen blurs the poster, as before.
+    cover_m = re.search(r'<div class="header-wrapper"[^>]*\bdata-src="([^"]+)"', html)
+    backdrop = cover_m.group(1).strip() if cover_m else ""
     synopsis_raw = text(r'class="anime-synopsis[^"]*"[^>]*>(.*?)</div>') or text(
-        r'anime-summary[^>]*>\s*<div[^>]*>(.*?)</div>'
+        r"anime-summary[^>]*>\s*<div[^>]*>(.*?)</div>"
     )
     synopsis = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", synopsis_raw)).strip()
     # anime-info holds only <p> rows (no nested divs) — the first
@@ -215,12 +223,18 @@ def _parse_details(html: str, session: str) -> Anime | None:
     # Scope to the genre block first, then each anchor (the anchor wraps
     # an <li>; strip tags for the clean name — the title attribute
     # carries "X movies").
-    genre_block = re.search(r'anime-genre(.*?)</ul>', html, re.S)
-    genres = [
-        re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", g)).strip()
-        for g in re.findall(r"<a[^>]*>(.*?)</a>", genre_block.group(1), re.S)
-    ] if genre_block else []
-    external = re.findall(r'href="(https://(?:anilist\.co|myanimelist\.net)/anime/(\d+))"', html)
+    genre_block = re.search(r"anime-genre(.*?)</ul>", html, re.S)
+    genres = (
+        [
+            re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", g)).strip()
+            for g in re.findall(r"<a[^>]*>(.*?)</a>", genre_block.group(1), re.S)
+        ]
+        if genre_block
+        else []
+    )
+    external = re.findall(
+        r'href="(https://(?:anilist\.co|myanimelist\.net)/anime/(\d+))"', html
+    )
     ani_id = next((int(i) for url, i in external if "anilist" in url), 0)
     mal_id = next((int(i) for url, i in external if "myanimelist" in url), 0)
     id_m = re.search(r"release&id=(\d+)&l=", html)
@@ -240,6 +254,7 @@ def _parse_details(html: str, session: str) -> Anime | None:
         score=0.0,  # the page carries no score — MAL/AniList do
         poster=poster[:500],
         session=session,
+        backdrop=backdrop[:500],
         synopsis=synopsis[:1200],
         genres=genres,
         mal_id=mal_id,

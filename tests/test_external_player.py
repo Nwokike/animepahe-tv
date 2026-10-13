@@ -20,7 +20,7 @@ def test_deep_link_carries_base64_m3u8():
     url = "https://kwik.si/e/abc/master.m3u8"
     link = build_deep_link(url, "Frieren - Episode 3")
     assert link.startswith("ktv://play?url=")
-    encoded, _, encoded_title = link[len("ktv://play?url="):].partition("&title=")
+    encoded, _, encoded_title = link[len("ktv://play?url=") :].partition("&title=")
     # base64url, padding stripped — decode with padding restored.
     padded = encoded + "=" * (-len(encoded) % 4)
     assert base64.urlsafe_b64decode(padded).decode() == url

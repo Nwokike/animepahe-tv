@@ -145,7 +145,12 @@ def DownloadsScreen() -> ft.Control:
     for session, row in downloads.items():
         key = row.get("anime_session") or session
         group = groups.setdefault(
-            key, {"title": row.get("title", "Unknown"), "poster": row.get("poster"), "rows": []}
+            key,
+            {
+                "title": row.get("title", "Unknown"),
+                "poster": row.get("poster"),
+                "rows": [],
+            },
         )
         group["rows"].append((session, row))
 
@@ -154,7 +159,9 @@ def DownloadsScreen() -> ft.Control:
         rows = sorted(
             group["rows"], key=lambda r: r[1].get("episode_num", 0), reverse=True
         )
-        total_size = sum(r[1].get("size_bytes", 0) for r in rows if r[1].get("state") == "complete")
+        total_size = sum(
+            r[1].get("size_bytes", 0) for r in rows if r[1].get("state") == "complete"
+        )
         header = ft.Row(
             [
                 ft.Container(
@@ -163,7 +170,9 @@ def DownloadsScreen() -> ft.Control:
                     )
                     if group["poster"]
                     else ft.Icon(
-                        ft.Icons.MOVIE_ROUNDED, size=20, color=ft.Colors.ON_SURFACE_VARIANT
+                        ft.Icons.MOVIE_ROUNDED,
+                        size=20,
+                        color=ft.Colors.ON_SURFACE_VARIANT,
                     ),
                     width=40,
                     height=40,
@@ -207,7 +216,9 @@ def DownloadsScreen() -> ft.Control:
                 padding=ft.Padding.all(12),
                 border_radius=12,
                 bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
-                border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)),
+                border=ft.Border.all(
+                    1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)
+                ),
             )
         )
 

@@ -47,9 +47,7 @@ def test_page_pill_has_the_original_craft():
 def test_page_pill_disabled_recolours_the_label():
     pill = page_pill("Next", ft.Icons.ADD, lambda e: None, enabled=False)
     assert pill.disabled is True
-    colors = {
-        c.color for c in pill.content.controls if isinstance(c, ft.Text)
-    }
+    colors = {c.color for c in pill.content.controls if isinstance(c, ft.Text)}
     assert colors == {ft.Colors.ON_SURFACE_VARIANT}
     border = pill.style.side[ft.ControlState.DISABLED]
     assert border.width == 1.5
