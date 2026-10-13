@@ -75,7 +75,12 @@ def _release_card(
                             overflow=ft.TextOverflow.ELLIPSIS,
                         ),
                         ft.Text(
-                            f"Episode {release.episode}",
+                            # A per-anime release (anikato's new-release
+                            # grid) has no episode number — say "New
+                            # release" rather than "Episode 0".
+                            f"Episode {release.episode}"
+                            if release.episode
+                            else "New release",
                             color=AppColors.PRIMARY,
                             weight=ft.FontWeight.BOLD,
                             size=12,

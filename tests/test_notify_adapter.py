@@ -46,6 +46,15 @@ class _FakeService:
         self.shown.append(kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _clean_session(monkeypatch):
+    """The dev-mode detection is session state: reset it per test so a test
+    that fails on purpose can't poison the ones after it."""
+    monkeypatch.setattr(notifications, "_unavailable", False)
+    yield
+    monkeypatch.setattr(notifications, "_unavailable", False)
+
+
 @pytest.fixture
 def fake(monkeypatch):
     service = _FakeService()

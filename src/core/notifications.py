@@ -7,7 +7,7 @@ no-op instead of an exception. Nothing in the app may import
 flet_notifications directly.
 
 Every call below is written against the INSTALLED flet-notifications
-0.1.3 surface (verified in .venv):
+0.1.3 surface (verified in .venv, and its README):
 - ``flet_notifications.LocalNotifications`` is an ``ft.Service`` — one
   instance, self-registered with the page, never added to controls
 - ``await service.request_permissions() -> bool`` is the permission flow
@@ -19,6 +19,12 @@ Every call below is written against the INSTALLED flet-notifications
   REQUIRED ``AndroidIcon`` with exactly one source set
 - ``service.on_tap`` receives the event; ``e.payload`` is the string the
   show() call passed, which is how the deep link comes back
+- the package supports Web (Chrome/Edge, gesture-gated permissions), so
+  there is NO platform gate here. What there is instead: plain
+  ``flet run`` ships no Dart half, so the service is unknown in dev and
+  every invoke times out. The FIRST failure is remembered for the session
+  and every later call is a cheap no-op — one slow probe at most, never
+  a stall.
 - re-showing the same id UPDATES the notification — that is how a live
   progress bar advances (``show_progress``/``max_progress``/``progress``)
 
@@ -42,6 +48,9 @@ _PAYLOAD_SCHEME = "animepahe://anime/"
 
 _available: bool | None = None
 _service: object | None = None
+# True once a call has proven the service can't answer (dev-mode flet run
+# has no Dart half). Remembered for the session.
+_unavailable = False
 _tap_handler = None
 
 
@@ -49,7 +58,10 @@ def _detect() -> bool:
     """Is the extension importable AND on a platform it supports?
 
     The package raises off-platform, so the import and a platform probe
-    both have to pass before anything is called."""
+    both have to pass before anything is called. Web is included in "not
+    supported": there is no native listener there, so a call would wait
+    its full invoke timeout (10s) and fail — which is why the permission
+    ask is skipped rather than attempted."""
     global _available, _service
     if _available is not None:
         return _available
@@ -65,15 +77,26 @@ def _detect() -> bool:
     return _available
 
 
+def _ready() -> bool:
+    """Importable, and not already known-broken this session. Cheap: a
+    cached import plus a bool read."""
+    return _detect() and not _unavailable
+
+
 async def request_permissions() -> bool:
     """Ask the OS for notification permission. False (quietly) when the
     extension is unavailable — never raises."""
-    if not _detect():
+    if not _ready():
         return False
+    global _unavailable
     try:
         return bool(await _service.request_permissions())
     except Exception as ex:
-        logger.info("permission request failed: %s", ex)
+        # Plain `flet run` ships no Dart half: the service is unknown, and
+        # every invoke waits its full timeout. Remember it once — this is
+        # the one slow probe the session pays.
+        _unavailable = True
+        logger.info("notifications unavailable this run (%s)", ex)
         return False
 
 
@@ -82,7 +105,7 @@ def on_tap(handler) -> None:
     payload string a show() passed; the app routes that to the anime."""
     global _tap_handler
     _tap_handler = handler
-    if not _detect():
+    if not _ready():
         return
 
     def _dispatch(e):
@@ -128,7 +151,7 @@ def stable_id(anime_session: str) -> int:
 async def ensure_channel() -> bool:
     """The new_episodes channel at HIGH, created once. False (quietly)
     when the extension is unavailable."""
-    if not _detect():
+    if not _ready():
         return False
     try:
         from flet_notifications.channels import NotificationChannel
@@ -155,8 +178,9 @@ async def show_new_episode(
     poster_path: str | None = None,
 ) -> bool:
     """Show one new-episode notification. No-op off-platform."""
-    if not _detect():
+    if not _ready():
         return False
+    global _unavailable
     try:
         from flet_notifications.styles import AndroidIcon, BigPictureStyle
 
@@ -196,7 +220,7 @@ async def show_progress(
     """One live-progress notification, advanced by re-showing the same
     id. The download path uses this; kept here so no other module
     imports the package."""
-    if not _detect():
+    if not _ready():
         return False
     try:
         await _service.show(

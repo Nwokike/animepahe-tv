@@ -116,7 +116,10 @@ class AppController:
     async def init(self):
         self.page.title = APP_NAME
 
-        self.page.fonts = {"Outfit": "assets/outfit.css"}
+        # assets_dir is already src/assets, so font files are addressed
+        # relative to it ("outfit.css", not "assets/outfit.css" — the
+        # latter asked the server for /assets/outfit.css and 404'd).
+        self.page.fonts = {"Outfit": "outfit.css"}
         self.page.theme = AppTheme.get_light_theme()
         self.page.dark_theme = AppTheme.get_dark_theme()
         self.page.theme.font_family = "Outfit"
@@ -136,7 +139,7 @@ class AppController:
         # keeps AnimePahe (whose catalog is Cloudflare-walled) as the
         # safety net — its breaker trips on walled calls while its files
         # still get attempted. Per-request failover, never locked.
-        from services.providers.base import owner_of
+        from services.providers.base import DEFAULT_OWNER, owner_of
         from services.providers.anikato import AniKatoProvider
         from services.providers.animeout import AnimeOutProvider
         from services.animeout_solver import AnimeOutSolver
@@ -157,6 +160,7 @@ class AppController:
             ]
         )
         self._owner_of = owner_of
+        self._default_owner = DEFAULT_OWNER
         # Restore the user's content-source preference (auto or pinned).
         self.router.set_pin(await self.store.get_backend())
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
@@ -223,8 +227,12 @@ class AppController:
         await self.start_episode_checker()
 
     async def _setup_notifications(self) -> None:
-        """Channel + permission + tap routing, once at startup."""
+        """Channel + permission + tap routing, once at startup — SPAWNED,
+        never awaited: on a platform without the native listener (web) the
+        package's invoke waits its full timeout before failing, and
+        blocking startup on that would delay first paint by seconds."""
         from core import notifications
+        from core.tasks import spawn
 
         def _on_tap(payload: str):
             session = notifications.handle_payload(payload)
@@ -232,9 +240,14 @@ class AppController:
                 logger.info("notification deep-link: %s", session)
                 self._open_from_notification(session)
 
-        notifications.on_tap(_on_tap)
-        await notifications.request_permissions()
-        await notifications.ensure_channel()
+        async def _setup():
+            notifications.on_tap(_on_tap)
+            if not await notifications.request_permissions():
+                logger.info("notifications unavailable on this platform")
+                return
+            await notifications.ensure_channel()
+
+        spawn(_setup(), name="notification-setup")
 
     def _open_from_notification(self, anime_session: str) -> None:
         """A tapped new-episode alert opens that anime's detail."""
@@ -504,6 +517,22 @@ class AppController:
         state.episodes_version += 1
         logger.info("poster healed for %s", anime_session)
 
+    def _ddos(self):
+        """The Cloudflare solver, when this build has one."""
+        return getattr(self.scraper, "ddos", None) if self.scraper else None
+
+    def _may_solve(self, anime_session: str | None) -> bool:
+        """A verification window opens only for a deliberate action on
+        animepahe's own content — the provider is last precisely because
+        its catalog is Cloudflare-walled. Background work (probes, the
+        episode checker) must never trigger one."""
+        solver = self._ddos()
+        if solver is None:
+            return False
+        if anime_session and self._owner_of(anime_session) != self._default_owner:
+            return False
+        return True
+
     async def play_episode(self, anime_session: str, episode_session: str):
         # Resolve the stream, then open the in-app player. The ktv:// deep
         # link stays as the fallback for when resolution fails.
@@ -513,7 +542,14 @@ class AppController:
             logger.info("play_episode already resolving, ignoring tap")
             return
         async with self._play_lock:
-            await self._play_episode(anime_session, episode_session)
+            solver = self._ddos()
+            if self._may_solve(anime_session) and solver is not None:
+                solver.solve_allowed = True
+            try:
+                await self._play_episode(anime_session, episode_session)
+            finally:
+                if solver is not None:
+                    solver.solve_allowed = False
 
     async def _play_episode(self, anime_session: str, episode_session: str):
         state.current_anime_session = anime_session

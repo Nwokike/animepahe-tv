@@ -54,18 +54,34 @@ class AnimePaheProvider:
         return self.scraper.ddos
 
     async def probe(self) -> bool:
-        """AnimePahe's api is Cloudflare-walled; a plain GET answering
-        200 means the wall is open (clearance cached) — 403 means the
-        gate will need solving. Either way the provider is REACHABLE;
-        only transport death marks it down."""
+        """Liveness only — and liveness NEVER solves a challenge.
+
+        The api is Cloudflare-walled. A plain GET that bypasses the solver
+        answers 200 (open), 403 (walled), 429 (rate-limited) or 503 — all
+        REACHABLE, all healthy. Only a transport failure (DNS, refused,
+        timeout) marks the provider down. Solving belongs to a deliberate
+        user action: the startup probe must never open a verification
+        window for a provider that is last in line for exactly that
+        reason."""
+        import primp
+
+        client = primp.AsyncClient(impersonate="chrome", timeout=8.0)
         try:
-            await self.scraper._fetch_api({"m": "airing", "page": "1"})
+            resp = await client.get(
+                f"{ANIMEPAHE_BASE}/api",
+                params={"m": "airing", "page": "1"},
+                headers={"Accept": "application/json"},
+            )
+            # Any answer at all means the host is alive: 200 (open), 403
+            # (the wall we deliberately did not solve), 429 (rate limit).
+            # Only a transport failure answers nothing.
+            _ = resp
             return True
         except Exception as ex:
-            status = getattr(getattr(ex, "response", None), "status_code", None)
-            if status in (401, 403, 503):
-                return True  # walled, not dead
+            logger.info("animepahe probe: %s", ex)
             return False
+        finally:
+            await client.aclose()
 
     async def latest_releases(self, page: int) -> tuple[list[LatestRelease], bool]:
         return await self.scraper.latest_releases(page)

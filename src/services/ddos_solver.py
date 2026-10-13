@@ -53,6 +53,10 @@ class DDoSSolver:
     def __init__(self, timeout: int = 15):
         self._client: primp.AsyncClient | None = None
         self._solved = False
+        # A verification window is a deliberate, user-visible act: it opens
+        # only when the user asked for animepahe's own content. Background
+        # work (probes, the episode checker, prefetch) can never trigger it.
+        self.solve_allowed = False
         self._timeout = timeout
         self._base_url = "https://animepahe.com"
         self._cookies_str = ""
@@ -105,6 +109,12 @@ class DDoSSolver:
         if self._solved:
             logger.debug("DDoS already solved")
             return True
+        if not self.solve_allowed:
+            # The wall is real, but no user action asked for this content —
+            # the caller treats it as "not available right now" instead of
+            # opening a verification window.
+            logger.info("DDoS solve suppressed: no user action requested it")
+            return False
         logger.info("DDoS attempting to solve challenge")
 
         # 1. Resolve redirect BASE domain

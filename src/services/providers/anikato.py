@@ -24,7 +24,7 @@ import time
 import primp
 
 from core.config import CACHE_TTL_EPISODES, CACHE_TTL_LATEST, CACHE_TTL_SEARCH
-from core.state import Anime, Episode, Source
+from core.state import Anime, Episode, LatestRelease, Source
 from services.aes import aes_cbc_decrypt
 from services.providers.base import make_session, split_session
 
@@ -330,14 +330,30 @@ class AniKatoProvider:
     # Catalog
     # ------------------------------------------------------------------
 
-    async def latest_releases(self, page: int) -> tuple[list[Anime], bool]:
+    async def latest_releases(self, page: int) -> tuple[list[LatestRelease], bool]:
+        """The new-release grid is per-ANIME (its link is the watch page),
+        so the release is the anime itself: episode 0 and an empty episode
+        session — never invented. The protocol's type, so the home screen
+        can read anime_session/session/episode on every provider."""
         key = f"latest_{page}"
         cached = self._cache_get(key)
         if cached is not None:
             return cached
         html = await self._get_text(f"{BASE}/new-release?page={page}")
         items = _parse_items(html)
-        result = (items, len(items) >= 20)
+        releases = [
+            LatestRelease(
+                anime_id=a.id,
+                anime_title=a.title,
+                anime_session=a.session,
+                episode=0,
+                snapshot=a.poster,
+                session="",
+                created_at="",
+            )
+            for a in items
+        ]
+        result = (releases, len(items) >= 20)
         self._cache_put(key, result, CACHE_TTL_LATEST)
         return result
 
