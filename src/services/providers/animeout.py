@@ -57,17 +57,18 @@ def _title_relevance(query: str, title: str) -> int:
 
 class AnimeOutProvider:
     name = "animeout"
-    # files: False is the honest value — the file host is Cloudflare-walled
-    # today, so this provider serves catalog + episodes but not files. The
-    # router treats a False capability as "don't ask this provider for a
-    # file", which is exactly the wall.
-    capabilities = {"files": False, "episodes": True, "episode_stills": False}
+    # files: True — the provider's route DOES serve files. The file host is
+    # a Cloudflare JS challenge, and the clearance decides availability at
+    # runtime (no clearance -> sources() returns [] and the router moves on,
+    # exactly as a provider with no answer). See AnimeOutSolver.
+    capabilities = {"files": True, "episodes": True, "episode_stills": False}
 
-    def __init__(self, client=None):
+    def __init__(self, client=None, solver=None):
         self._client = client or primp.AsyncClient(
             impersonate="chrome", timeout=20.0, follow_redirects=True,
             headers={"Referer": "https://animeout.xyz/"},
         )
+        self._solver = solver
         self._mem: dict = {}
         self._ttl: dict = {}
 
@@ -243,10 +244,16 @@ class AnimeOutProvider:
             for href in variants.get(number, []):
                 if href not in links:
                     links.append(href)
+        clearance = await self._solver.clearance() if self._solver else None
+        if clearance is None and self._solver is not None:
+            # The wall is active and the solver has nothing (the user
+            # declined, or the desktop helper failed): no stream, no raise.
+            logger.info("animeout: no clearance, reporting no stream")
+            return []
         sources: list[Source] = []
         for href in links:
             url = await _resolve_direct_url(href, client=self._client)
-            if _FILE_HOST in url:
+            if _FILE_HOST in url and clearance is None:
                 # The file host is Cloudflare-challenged today; treat as
                 # no-stream rather than hammering it on every tap.
                 return []
@@ -254,7 +261,15 @@ class AnimeOutProvider:
                 continue
             resolution, audio, fansub = _parse_filename(url)
             sources.append(
-                Source(url=url, resolution=resolution, audio=audio, fansub=fansub)
+                Source(
+                    url=url,
+                    resolution=resolution,
+                    audio=audio,
+                    fansub=fansub,
+                    headers=self._solver.file_headers(clearance)
+                    if self._solver
+                    else {},
+                )
             )
         return sources
 

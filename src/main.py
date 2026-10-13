@@ -137,6 +137,7 @@ class AppController:
         from services.providers.base import owner_of
         from services.providers.anikato import AniKatoProvider
         from services.providers.animeout import AnimeOutProvider
+        from services.animeout_solver import AnimeOutSolver
         from services.providers.animepahe_provider import AnimePaheProvider
         from services.providers.kayoanime import KayoanimeProvider
         from services.providers.kusonime import KusonimeProvider
@@ -145,7 +146,9 @@ class AppController:
         self.router = ProviderRouter(
             [
                 AniKatoProvider(),
-                AnimeOutProvider(),
+                AnimeOutProvider(
+                    solver=AnimeOutSolver(store=self.store),
+                ),
                 KusonimeProvider(),
                 KayoanimeProvider(),
                 AnimePaheProvider(self.scraper),

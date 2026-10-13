@@ -297,22 +297,59 @@ class JsonStore:
     # a returning user's boot skip the Turnstile webview entirely)
     # ------------------------------------------------------------------
 
-    async def get_clearance(self) -> dict | None:
-        entry = await self.section("clearance", None)
-        if not isinstance(entry, dict) or not entry.get("cookies"):
-            return None
-        return entry
+    # ------------------------------------------------------------------
+    # Cloudflare clearance (durable — survives reboots; this is what makes
+    # a returning user's boot skip the Turnstile webview entirely).
+    # Host-keyed: each walled host keeps its own clearance, so solving
+    # one never invalidates another's.
+    # ------------------------------------------------------------------
 
-    async def save_clearance(self, cookies: str, user_agent: str) -> None:
+    _DEFAULT_CLEARANCE_HOST = "animepahe"
+
+    async def get_clearance(self, host: str | None = None) -> dict | None:
+        host = host or self._DEFAULT_CLEARANCE_HOST
+        entry = await self.section("clearance", None)
+        if not isinstance(entry, dict):
+            return None
+        # Pre-host shape: a single flat record, which was animepahe's.
+        if "cookies" in entry or "user_agent" in entry:
+            return entry if host == self._DEFAULT_CLEARANCE_HOST else None
+        keyed = entry.get(host)
+        return keyed if isinstance(keyed, dict) and keyed.get("cookies") else None
+
+    async def save_clearance(
+        self, cookies: str, user_agent: str, host: str | None = None
+    ) -> None:
         if not cookies:
             return
-        await self.put_section(
-            "clearance",
-            {"cookies": cookies, "user_agent": user_agent, "timestamp": time.time()},
-        )
+        host = host or self._DEFAULT_CLEARANCE_HOST
+        existing = await self.section("clearance", None)
+        keyed: dict = {}
+        if isinstance(existing, dict) and "cookies" not in existing:
+            keyed = dict(existing)
+        elif isinstance(existing, dict):
+            # Migrate the flat record into the keyed shape under its host.
+            keyed = {self._DEFAULT_CLEARANCE_HOST: dict(existing)}
+        keyed[host] = {
+            "cookies": cookies,
+            "user_agent": user_agent,
+            "timestamp": time.time(),
+        }
+        await self.put_section("clearance", keyed)
 
-    async def clear_clearance(self) -> None:
-        await self.put_section("clearance", None)
+    async def clear_clearance(self, host: str | None = None) -> None:
+        """Drop one host's clearance (or all of them when unset)."""
+        host = host or self._DEFAULT_CLEARANCE_HOST
+        existing = await self.section("clearance", None)
+        if not isinstance(existing, dict):
+            return
+        if "cookies" in existing or "user_agent" in existing:
+            # The pre-host flat record is animepahe's.
+            if host == self._DEFAULT_CLEARANCE_HOST:
+                await self.put_section("clearance", None)
+            return
+        existing.pop(host, None)
+        await self.put_section("clearance", existing or None)
 
     # ------------------------------------------------------------------
     # Theme mode (durable — the 3-way cycle must survive a restart)

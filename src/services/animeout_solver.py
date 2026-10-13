@@ -1,0 +1,116 @@
+"""Cloudflare clearance for AnimeOut's file host.
+
+The wall is a real JS challenge (httpx and primp both get a 403 — see
+``docs/decisions.md``), so it needs the same machinery that clears
+AnimePahe's: ``WebViewSolver.solve_challenge`` takes any URL and returns
+``(cookies, user_agent)``.
+
+The shape follows ``DDoSSolver`` exactly, because that one is proven in
+production: solve once, persist the clearance per host, and re-probe it
+before use so a returning user never sees a verification window again.
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+BASE_URL = "https://public.animeout.xyz/"
+_HOST = "public.animeout.xyz"
+
+
+class AnimeOutSolver:
+    """Owns the file host's clearance. Never raises: a failed solve means
+    "no clearance", and the caller treats that as a no-stream."""
+
+    def __init__(self, store=None):
+        self._store = store
+        self._clearance: dict | None = None
+
+    @property
+    def has_clearance(self) -> bool:
+        """Sync view of the in-memory state — the capability flag reads
+        this (it flips True after the first solve)."""
+        return bool(self._clearance)
+
+    async def clearance(self) -> dict | None:
+        """A usable clearance or None. Order: in-memory, persisted
+        (re-probed), then solve."""
+        if self._clearance:
+            return self._clearance
+        if self._store is not None:
+            try:
+                stored = await self._store.get_clearance(_HOST)
+            except Exception as ex:
+                logger.debug("animeout clearance read failed: %s", ex)
+                stored = None
+            if stored and await self._probe(stored):
+                self._clearance = stored
+                logger.info("animeout reused the persisted clearance")
+                return stored
+        return await self.solve()
+
+    async def solve(self) -> dict | None:
+        """Run the challenge once. The window is the cost; the persisted
+        cookie is what keeps it to once per expiry."""
+        from state.app_state import state
+
+        page = getattr(state, "page", None)
+        if page is None:
+            logger.info("animeout: no page to solve with")
+            return None
+        try:
+            from services.webview_solver import WebViewSolver
+
+            cookies, user_agent = await WebViewSolver.solve_challenge(page, BASE_URL)
+        except Exception as ex:
+            logger.info("animeout solve failed: %s", ex)
+            return None
+        if not cookies:
+            return None
+        clearance = {"cookies": cookies, "user_agent": user_agent}
+        self._clearance = clearance
+        if self._store is not None:
+            try:
+                await self._store.save_clearance(cookies, user_agent, _HOST)
+                logger.info("animeout clearance persisted")
+            except Exception as ex:
+                logger.debug("animeout clearance save failed: %s", ex)
+        return clearance
+
+    async def _probe(self, clearance: dict) -> bool:
+        """Is this clearance still good? One cheap GET decides — the same
+        re-probe DDoSSolver does, so a stale cookie costs one request."""
+        try:
+            import primp
+
+            client = primp.AsyncClient(impersonate="chrome", timeout=20.0)
+            try:
+                resp = await client.get(
+                    BASE_URL,
+                    headers={
+                        "User-Agent": clearance.get("user_agent") or "",
+                        "Cookie": clearance.get("cookies") or "",
+                    },
+                )
+            finally:
+                await client.aclose()
+        except Exception as ex:
+            logger.debug("animeout clearance probe failed: %s", ex)
+            return False
+        from services.ddos_solver import _looks_like_cf_challenge
+
+        return not _looks_like_cf_challenge(resp.text or "", resp.status_code)
+
+    def file_headers(self, clearance: dict | None) -> dict:
+        """Headers for the walled host: the site's own referer plus the
+        clearance when there is one. An empty dict means no clearance, and
+        the caller must treat the file as unavailable."""
+        headers = {"Referer": "https://animeout.xyz/"}
+        if clearance:
+            cookies = clearance.get("cookies")
+            if cookies:
+                headers["Cookie"] = cookies
+            ua = clearance.get("user_agent")
+            if ua:
+                headers["User-Agent"] = ua
+        return headers
