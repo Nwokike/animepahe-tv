@@ -651,20 +651,17 @@ def AnimeDetailScreen() -> ft.Control:
                                     icon=ft.Icons.DOWNLOAD_FOR_OFFLINE_ROUNDED,
                                     on_click=lambda e: _open_series_download(),
                                 ),
-                                # Which provider served these episodes, and
-                                # one-tap failover when this source misses.
+                                # Which provider served these episodes —
+                                # display only. Switching backends happens
+                                # in the header (title pill / badge picker);
+                                # the detail screen carries no switcher
+                                # (owner's order, 2026-10-15).
                                 ft.Text(
                                     f"Source: {state.current_source_name.capitalize()}"
                                     if state.current_source_name
                                     else "",
                                     size=12,
                                     color=ft.Colors.ON_SURFACE_VARIANT,
-                                ),
-                                ft.TextButton(
-                                    content="Try another source",
-                                    on_click=lambda e: controller.try_another_source(
-                                        anime_session
-                                    ),
                                 ),
                             ],
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,

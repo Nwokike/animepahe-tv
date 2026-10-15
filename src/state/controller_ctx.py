@@ -73,7 +73,6 @@ class ControllerMethods:
 
     # Backend management
     test_all_sources: Callable[[], Any] = lambda: None
-    try_another_source: Callable[[str], Any] = lambda session: None
     sources_status: Callable[[], dict] = lambda: {}
     set_backend_pin: Callable[[str], Any] = lambda name: None
 
