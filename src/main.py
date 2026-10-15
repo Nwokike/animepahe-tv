@@ -391,7 +391,7 @@ class AppController:
             return
         # Root: the OS finishes/backgrounds the app, as on the original.
 
-    def _shell_action(self, name: str):
+    def _shell_action(self, name: str, *args):
         """Call a navigation closure on the shell-owned methods instance.
 
         The shell fills these in on every render (and they're no-ops until
@@ -399,7 +399,7 @@ class AppController:
         """
         action = getattr(self.shell, name, None)
         if action is not None:
-            action()
+            action(*args)
 
     # ------------------------------------------------------------------
     # Data actions — called by screens through ControllerMethods
@@ -698,28 +698,20 @@ class AppController:
             return
         serving_provider = None
         if not sources:
-            # The owner has nothing for this episode — every OTHER provider
-            # is a complete app, so ask them by title before giving up.
-            # force=True: the user asked to watch, a tripped breaker must
-            # not block playback recovery.
-            title = str((state.selected_anime or {}).get("title") or "").strip()
-            ep_num = ep.episode if ep else 0
-            if title and ep_num:
-                logger.info(
-                    "no sources on the owner — asking by title: %r ep %s", title, ep_num
-                )
-                sources = await self.router.sources_for_title_any(
-                    title, ep_num, skip=self._owner_of(anime_session), force=True
-                )
-                if sources:
-                    serving_provider = self.router.last_winner
-                    state.current_source_name = serving_provider or ""
-                    logger.info("sources served by %s", serving_provider)
-        if gen != self._play_gen:
-            return
-        if not sources:
-            logger.warning("no sources anywhere — external player fallback")
-            await self._open_external_player(anime_session, episode_session)
+            # A backend with no stream for this episode is a RESULT, not a
+            # handoff. The old automatic title-hop asked every other
+            # backend right here — it produced the bogus ktv:// launch and
+            # the CF-churn cascade (live log 2026-10-15). Cross-backend
+            # play is the owner's explicit act now: the detail screen's
+            # "Try another source" re-enters on that backend properly.
+            logger.info(
+                "no sources on %s for %s",
+                self._owner_of(anime_session),
+                episode_session,
+            )
+            self._show_error_snackbar(
+                "This source has no playable stream for this episode."
+            )
             return
         # SUB (JPN) group first, DUB (ENG) after — each best-first.
         # Dubs exist as separate renditions; today they render mixed.
@@ -1266,8 +1258,11 @@ class AppController:
         }
 
     async def try_another_source(self, anime_session: str):
-        """Detail: the current source's episodes failed or are missing —
-        ask every OTHER provider by title (each is self-contained)."""
+        """Detail: the owner missed — ask every OTHER provider BY TITLE
+        (user-initiated), then RE-ENTER on the match's own session so the
+        app truly becomes that backend's app: its episodes, its sources,
+        its art. Never splices another backend's episodes under the old
+        session — that pairing used to leak into playback and downloads."""
         anime = state.selected_anime or {}
         title = str(anime.get("title") or "").strip()
         if not title:
@@ -1285,12 +1280,33 @@ class AppController:
         finally:
             state.is_loading = False
             state.episodes_version += 1
-        if episodes:
-            state.episodes = episodes
-            state.episodes_has_more = False
-            state.current_source_name = self.router.last_winner or ""
-        else:
+        if not episodes:
             self._show_error_snackbar("No other source has this title.")
+            return
+        # The host that answered; find its OWN anime session for the title
+        # and open that — a real re-entry, not a splice.
+        name = self.router.last_winner or ""
+        provider = self.router.get(name) if name else None
+        match = None
+        if provider is not None:
+            try:
+                results, _ = await provider.search(title, 1)
+            except Exception as ex:
+                logger.warning("try_another_source search on %s failed: %s", name, ex)
+                results = []
+            match = next(
+                (
+                    a
+                    for a in results
+                    if a.session and a.title.lower() == title.lower()
+                ),
+                next((a for a in results if a.session), None),
+            )
+        if match is None:
+            self._show_error_snackbar("No other source has this title.")
+            return
+        logger.info("try_another_source: re-entering on %s (%s)", name, match.session)
+        self._shell_action("open_anime", match.session)
 
     async def check_new_episodes(self, *, force: bool = False) -> int:
         """Diff every follow's stored episode count against the router's
