@@ -9,16 +9,48 @@ import webview
 FALLBACK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
 
 captured_ua = FALLBACK_UA
+page_loaded_once = False
+
+# A page whose title matches these is plainly a web server's own page
+# (the owner saw pywebview sit on an nginx page for the full wait) — not
+# a Cloudflare challenge, and polling it for cf_clearance is pointless.
+_NOT_A_CHALLENGE_MARKERS = (
+    "welcome to nginx",
+    "index of /",
+    "apache2",
+    "it works!",
+    "502 bad gateway",
+    "503 service",
+    "504 gateway",
+    "404 not found",
+)
 
 
 def on_loaded():
-    global captured_ua
+    global captured_ua, page_loaded_once
+    page_loaded_once = True
     try:
         ua = window.evaluate_js("navigator.userAgent")
         if ua:
             captured_ua = ua
     except Exception:
         pass
+
+
+def served_a_plain_page(window) -> str | None:
+    """The page title when it is a web-server page rather than a challenge.
+
+    Only called after the first navigation completed: evaluate_js waits on
+    the bridge-injection gate, which is only set post-load.
+    """
+    try:
+        title = str(window.evaluate_js("document.title") or "").strip()
+    except Exception:
+        return None
+    lowered = title.lower()
+    if any(marker in lowered for marker in _NOT_A_CHALLENGE_MARKERS):
+        return title
+    return None
 
 
 def is_challenge_complete(window, cookie_keys: set[str]) -> bool:
@@ -72,6 +104,18 @@ def check_cookies(window):
             print("[DEBUG] Window closed by the user", file=sys.stderr)
             _fail("closed")
         time.sleep(1.0)
+        if page_loaded_once:
+            plain = served_a_plain_page(window)
+            if plain:
+                print(
+                    f"[DEBUG] Loaded page is not a challenge: {plain!r}",
+                    file=sys.stderr,
+                )
+                try:
+                    window.destroy()
+                except Exception:
+                    pass
+                _fail(f"not-a-challenge ({plain[:60]})")
         try:
             cookies = window.get_cookies()
             print(f"[DEBUG] Cookie jar has {len(cookies)} entries", file=sys.stderr)

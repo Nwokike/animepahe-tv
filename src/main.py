@@ -21,7 +21,7 @@ from core.constants import APP_NAME
 from core.logger_handler import in_memory_log_handler  # noqa: F401
 from core.notify import show_snack
 from core.storage import app_cache_dir
-from core.tasks import spawn
+from core.tasks import session_alive, spawn, ui_set
 from core.theme import AppColors, AppTheme, mode_for_token, token_for_mode
 from services.animepahe import AnimePaheScraper
 from services.cache import Cache
@@ -422,6 +422,12 @@ class AppController:
                 if gen != self._latest_gen:
                     logger.info("load_latest discarding stale page=%d", page_num)
                     return
+                if not session_alive():
+                    # Hot reload / app close tore the session down while this
+                    # load ran; the writes below would crash inside
+                    # Observable notify ("destroyed session", observed live).
+                    logger.info("load_latest page=%d dropped (session gone)", page_num)
+                    return
                 logger.info(
                     "load_latest page=%d got %d items, has_more=%s",
                     page_num,
@@ -434,7 +440,7 @@ class AppController:
                 if page_num == 1 and results:
                     state.cf_blocked = False
             except Exception as ex:
-                if gen != self._latest_gen:
+                if gen != self._latest_gen or not session_alive():
                     return
                 logger.error("load_latest page=%d failed: %s", page_num, ex)
                 state.latest_releases = []
@@ -443,13 +449,14 @@ class AppController:
                     self._show_error_snackbar("Couldn't load the latest releases.")
             finally:
                 if gen == self._latest_gen:
-                    state.is_loading = False
-                    # Only a confirmed-online empty feed is a Cloudflare gate.
-                    # An offline user used to get the SHIELD card here and told
-                    # to verify they're human — a network blip is not a challenge.
-                    if page_num == 1 and not state.latest_releases and state.is_online:
-                        state.cf_blocked = True
-                    state.latest_version += 1
+                    ui_set(state, "is_loading", False)
+                    if session_alive():
+                        # Only a confirmed-online empty feed is a Cloudflare gate.
+                        # An offline user used to get the SHIELD card here and told
+                        # to verify they're human — a network blip is not a challenge.
+                        if page_num == 1 and not state.latest_releases and state.is_online:
+                            state.cf_blocked = True
+                        state.latest_version += 1
 
     async def retry_cloudflare(self):
         """Clear the Cloudflare session + caches, then reload the home feed."""
@@ -501,6 +508,11 @@ class AppController:
                         "load_episodes discarding stale page for %s", anime_session
                     )
                     return
+                if not session_alive():
+                    logger.info(
+                        "load_episodes session=%s dropped (session gone)", anime_session
+                    )
+                    return
                 logger.info(
                     "load_episodes session=%s page=%d got %d",
                     anime_session,
@@ -511,7 +523,7 @@ class AppController:
                 state.episodes_has_more = has_more
                 state.cf_blocked = False
             except Exception as ex:
-                if gen != self._episodes_gen:
+                if gen != self._episodes_gen or not session_alive():
                     return
                 logger.error("load_episodes session=%s failed: %s", anime_session, ex)
                 state.episodes = []
@@ -519,8 +531,9 @@ class AppController:
                 self._show_error_snackbar("Couldn't load the episode list.")
             finally:
                 if gen == self._episodes_gen:
-                    state.is_loading = False
-                    state.episodes_version += 1
+                    ui_set(state, "is_loading", False)
+                    if session_alive():
+                        state.episodes_version += 1
 
         # The header poster from a latest-release card is an episode still
         # (/snapshots/). The original build self-healed it with a title
@@ -2025,6 +2038,9 @@ class AppController:
                 if gen != self._search_gen:
                     logger.info("load_search discarding stale response for %r", query)
                     return
+                if not session_alive():
+                    logger.info("load_search q=%r dropped (session gone)", query)
+                    return
                 state.search_results = results
                 state.search_has_more = has_more
                 state.search_source = self.router.last_winner or ""
@@ -2034,14 +2050,15 @@ class AppController:
                     state.search_history = await self.store.get_search_history()
             except Exception as ex:
                 logger.error("load_search q=%r page=%d failed: %s", query, page, ex)
-                if gen == self._search_gen:
+                if gen == self._search_gen and session_alive():
                     state.search_results = []
                     state.search_has_more = False
                     state.search_error = str(ex)
             finally:
                 if gen == self._search_gen:
-                    state.is_loading = False
-                    state.search_version += 1
+                    ui_set(state, "is_loading", False)
+                    if session_alive():
+                        state.search_version += 1
 
     async def toggle_follow(self, row: dict) -> bool:
         """Follow/unfollow a WHOLE anime; bumps the version so every

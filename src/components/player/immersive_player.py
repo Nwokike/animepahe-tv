@@ -785,7 +785,14 @@ class ImmersivePlayer(ft.Stack):
         self.overlay.visible = True
         self._overlay_hidden = False
         self._enable_tap_to_close()
-        self.update()
+        try:
+            self.update()
+        except RuntimeError:
+            # The session was torn down while the stream was dying (hot
+            # reload / app close): there is nothing left to update, and the
+            # raise used to cascade through the caller's error path
+            # (observed live: "Control must be added to the page first").
+            pass
 
     def _enable_tap_to_close(self):
         """A tap on the dead overlay goes Back — the error card is not a

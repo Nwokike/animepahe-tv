@@ -336,3 +336,24 @@ def test_re_solve_rebuilds_the_stale_cookie_client(monkeypatch):
     solver._client = _Client()
     asyncio.run(solver.get("https://animepahe.com/api"))
     assert closed, "the client must be rebuilt before the re-solve"
+
+
+def test_desktop_solver_bails_on_plain_server_pages():
+    """The owner saw pywebview sit on an nginx page for the full two-minute
+    wait: a plainly non-challenge page must fail fast with a message the
+    parent surfaces, not poll for cf_clearance that will never come."""
+    from services.desktop_cf_solver import served_a_plain_page
+
+    class _Win:
+        def __init__(self, title):
+            self._title = title
+
+        def evaluate_js(self, _expr):
+            return self._title
+
+    assert served_a_plain_page(_Win("Welcome to nginx!")) == "Welcome to nginx!"
+    assert served_a_plain_page(_Win("502 Bad Gateway")) == "502 Bad Gateway"
+    assert served_a_plain_page(_Win("Index of /")) == "Index of /"
+    assert served_a_plain_page(_Win("Just a moment...")) is None
+    assert served_a_plain_page(_Win("AnimePahe")) is None
+    assert served_a_plain_page(_Win("")) is None

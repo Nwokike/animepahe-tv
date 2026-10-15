@@ -21,7 +21,7 @@ from components.focus_styles import (
     card_focus_scale,
 )
 from core.shared_services import get_shared_services
-from core.tasks import spawn
+from core.tasks import session_alive, spawn
 from core.theme import AppColors
 
 # The developer's apps — same list the old rotating banner carried — plus
@@ -77,6 +77,12 @@ def PromoHero() -> ft.Control:
     async def _rotate():
         while True:
             await asyncio.sleep(ROTATE_SECONDS)
+            # Hot reload tears a session down without running effect
+            # cleanups; the next tick then wrote into a destroyed session
+            # (observed live: "promo-rotate failed: ... destroyed session"
+            # repeating). A dead session ends the rotation.
+            if not session_alive():
+                return
             # pinned is read through the closure — the effect re-arms on
             # the [pinned] dep change, so it never serves a stale
             # first-render False.
