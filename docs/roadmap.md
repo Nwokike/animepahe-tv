@@ -218,3 +218,80 @@ crash on first paint; the ~20s startup stall on web; the startup probe
 opening a Cloudflare window; the font 404. All recorded in
 docs/testing-findings.md along with the three open items (web image CORS,
 search showing 0 episodes, 170 episodes unpaged).
+
+---
+
+## The hybrid era — Phase 1 & Phase 2 (complete)
+
+The workstream after the downloads release. Its doctrine came from the
+owner: the app is a **hybrid of independent backends** — one backend is
+like its own app (its own catalog, art, playback, and solver), and nothing
+cross-links backends by itself. Auto exists only at startup; while the app
+is open the backend changes only when the owner changes it. The grid
+orientation is **not a user option**: the screen detects the art its own
+backend serves and swaps itself (grid, banners, shelves — everything).
+
+### Phase 1 — the art decides the shape (complete)
+
+1. `core/artwork.py`: byte sniffer (JPEG SOF / PNG IHDR / WebP with every
+   variant's length guard), shape classifier, data-URI path, majority vote.
+2. `services/artwork_probe.py`: cache-first (30-day shape TTL in the cache
+   tier), Range-reads a few KB per probe, never raises — unknown art is a
+   valid answer.
+3. Learned defaults per (provider, surface) in the durable store; the
+   `use_grid_mode` hook decides per surface: learned default → vote →
+   seeded default. Every screen wired: home's latest rail, search, detail
+   episodes, favorites shelf, discover.
+4. `components/artwork_card.py`: one frame, two aspect ratios; art that
+   does not match the mode fills a frosted backdrop instead of letterboxing.
+5. Each list stamps the provider that painted it (session/source keys
+   carry the owning backend).
+6. Storage unified on the `.flet/README.md` canon (`core/storage.py`:
+   data / cache / temp, one resolver); dead code swept with zero-ref
+   evidence; commits d8af1a1 → ea87eb2.
+
+### Pre-Phase-2 Step 1 — AniKato's CDN doors (complete, 8d9bc27)
+
+Episode 3's realid had several CDN "doors"; `s=tcdn` served a 66/66
+TikTok 1×1-PNG ad-stub playlist while bare/`bcdn` served real video.
+`is_ad_stub_playlist()` classifies a media playlist and `sources()` keeps
+the first door that serves real video; all-stub is an honest "no stream".
+Adjacent fixes the same day: full link/server cache keys (40-char base64
+prefixes collided across episodes), mirror-flavor collapse in the picker,
+and the desktop solver's fail-fast on plain nginx 403/401 pages.
+
+### Phase 2 — startup resolution & the independent-backend doctrine (complete)
+
+1. **Step 1** (83d9715): `startup_ready`/`startup_stage` flags + the
+   CollabShell-style splash (icon, ring, stage line) behind all hooks.
+2. **Step 2** (c37f483): `resolve_startup()` — a stored pin resolves
+   directly; `auto` races the four open backends (health only) and pins
+   the first healthy, **never AnimePahe**; every manual switch re-runs the
+   same gate behind the same splash; single-flight lock.
+3. **Step 3** (12f4ec3): `latest_releases`/`search` are owner-only
+   (session-owned catalog ops); heal and cold-open resolve through the
+   session's own owner.
+4. **Step 4** (d6228c9): playback stops hopping backends — an owner with
+   no sources is an honest snack; "Try another source" re-enters on the
+   match's **own** session instead of splicing foreign episodes.
+5. **Step 5** (71e3ef9): Discover filters/browse ask only the pinned
+   provider (no-browse → honest empty state); Schedule runs only on the
+   backend that serves it.
+6. **Step 6** (514958b): copy tells the truth — "What you choose is the
+   app — nothing else is consulted."
+7. **Step 7** (740c2dc): the desktop solver pins the stored UA (argv →
+   `webview.start(user_agent=)`, cf_clearance is bound to it), refuses a
+   non-Chromium renderer with an actionable message, and judges a solved
+   page on `loaded` behind a `_done` latch (the 1s poll stays backstop).
+8. **Step 8 — the exit gate**: full suite **462 passed under `-W error`**
+   (warnings are errors; one unclosed test handle fixed to get there);
+   `ruff check --select F src/ tests/` clean; the Step-7 `notifications.py`
+   RUF100 stray removed in its own commit (95f1d62).
+
+**Parked with evidence** (next levers, in order): AniKato's remaining
+content question — the app resolves the same realid the site's iframe
+embeds and the doors now serve real video, so the next lever is capturing
+the iframe's own network call through a browser resource log; AnimeOut
+artwork (every `wp-content` image 403s the renderer — the Phase 3 image
+route covers it); the three Phase-8 open items from testing-findings.md;
+production ad unit ids (owner's swap).

@@ -201,7 +201,8 @@ async def test_legacy_favorites_section_migrates_to_follows(store):
 
     assert await store.get_follows() == legacy
 
-    on_disk = json.load(open(store.path, encoding="utf-8"))
+    with open(store.path, encoding="utf-8") as f:
+        on_disk = json.load(f)
     assert on_disk["follows"] == legacy
     assert "favorites" not in on_disk  # the old name is retired, not kept
 
