@@ -702,6 +702,21 @@ class AniKatoProvider:
             return (False, "The source didn't answer in a way I understand.")
         return (bool(data.get("status")), str(data.get("msg") or "Reported."))
 
+    async def _get_embed_id(self, embed_url: str, fallback: str) -> str:
+        """Fetch the MegaPlay embed page and parse data-id.
+        The embed URL path carries the route ID (realid), but MegaPlay's
+        getSources expects data-id (episodeId). MegaPlay requires
+        Referer: https://anikototv.to/ to serve the embed HTML."""
+        try:
+            resp = await self._client.get(embed_url, headers={"Referer": f"{BASE}/"})
+            if resp.status_code == 200:
+                m = re.search(r'data-id=[\"\'](\d+)[\"\']', resp.text)
+                if m:
+                    return m.group(1)
+        except Exception as ex:
+            logger.debug("failed to fetch embed data-id from %s: %s", embed_url, ex)
+        return fallback
+
     async def _resolve_link(self, link_id: str) -> tuple[str, str, str, dict] | None:
         """link-id -> megaplay embed -> (realid, type, s, skip_data). The
         per-episode skip windows ride the same response."""
@@ -717,9 +732,12 @@ class AniKatoProvider:
         url = str(result.get("url") or "")
         params = _megaplay_params(url) if url else None
         if params:
+            realid, kind, s = params
+            ep_id = await self._get_embed_id(url, fallback=realid)
             skip = result.get("skip_data") or {}
-            self._cache_put(key, (*params, skip), CACHE_TTL_EPISODES)
-            return (*params, skip)
+            resolved = (ep_id, kind, s, skip)
+            self._cache_put(key, resolved, CACHE_TTL_EPISODES)
+            return resolved
         return None
 
     async def _manifest_for(

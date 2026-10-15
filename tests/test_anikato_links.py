@@ -221,3 +221,44 @@ def test_all_stub_doors_yield_no_stream_not_a_stub():
 
     provider._door_serves_video = everything_is_stub
     assert asyncio.run(provider.sources("anikato:x", "x|3")) == []
+
+
+def test_get_embed_id_parses_data_id_with_referer():
+    class _Resp:
+        def __init__(self, status_code, text):
+            self.status_code = status_code
+            self.text = text
+
+    class _Client:
+        def __init__(self):
+            self.calls = []
+
+        async def get(self, url, headers=None, **kwargs):
+            self.calls.append((url, headers))
+            return _Resp(
+                200,
+                '<div id="megaplay-player" data-id="104527" data-realid="27494"></div>',
+            )
+
+    client = _Client()
+    provider = AniKatoProvider(client=client)
+    res = asyncio.run(
+        provider._get_embed_id(
+            "https://megaplay.buzz/stream/s-2/27494/sub?s=tcdn", fallback="27494"
+        )
+    )
+    assert res == "104527"
+    assert len(client.calls) == 1
+    url, headers = client.calls[0]
+    assert headers.get("Referer") == "https://anikototv.to/"
+
+
+def test_get_embed_id_falls_back_when_missing_or_failed():
+    class _FailingClient:
+        async def get(self, url, **kwargs):
+            raise RuntimeError("net error")
+
+    provider = AniKatoProvider(client=_FailingClient())
+    res = asyncio.run(provider._get_embed_id("https://megaplay.buzz/x", fallback="fallback_id"))
+    assert res == "fallback_id"
+
