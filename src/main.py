@@ -1069,10 +1069,10 @@ class AppController:
     # ------------------------------------------------------------------
 
     async def load_discover_filters(self):
-        """Ask the serving provider for its own filter vocabulary. The
-        list is generated from what the source offers — nothing about
-        genres or categories is hardcoded in the UI."""
-        name, spec = await self.router.discover_filters()
+        """Ask the CHOSEN source for its own filter vocabulary. The list is
+        generated from what that source offers — nothing about genres or
+        categories is hardcoded, and no other backend is consulted."""
+        name, spec = await self.router.discover_filters(self.router.pin)
         state.discover_source = name
         state.discover_filters = spec
         state.discover_selections = {}
@@ -1080,7 +1080,9 @@ class AppController:
         state.discover_has_more = False
         state.discover_version += 1
         if not spec:
-            logger.info("discover: no provider offers a browse surface")
+            logger.info(
+                "discover: %s offers no browse surface", self.router.pin or "no source"
+            )
 
     async def load_discover(self, selections: dict | None = None, page: int = 1):
         """Run the filtered browse. An empty result is a RESULT (nothing
@@ -1088,8 +1090,10 @@ class AppController:
         if selections is not None:
             state.discover_selections = dict(selections)
         state.discover_page = page
+        # The chosen source serves Discover; a pin that cannot browse
+        # yields an honest empty state, never another backend's catalog.
         name, items, has_more = await self.router.browse(
-            state.discover_source or None,
+            self.router.pin or state.discover_source or None,
             state.discover_selections,
             page,
         )
@@ -1100,11 +1104,11 @@ class AppController:
 
     async def load_schedule(self, time: str | None = None):
         """Airing schedule: 7 day tabs, then the selected day's entries.
-        Only providers that expose a schedule answer (anikato); the router
-        is not involved — this is a source-specific extra."""
-        provider = self.router.get("anikato")
-        if provider is None:
-            self._show_error_snackbar("No source offers a schedule yet.")
+        A source-specific extra: only a backend that HAS a schedule answers
+        (anikato); any other chosen backend gets the honest message."""
+        provider = self.router.get(self.router.pin) if self.router.pin else None
+        if provider is None or not hasattr(provider, "schedule_tabs"):
+            self._show_error_snackbar("This source has no schedule.")
             return
         try:
             tabs = await provider.schedule_tabs()

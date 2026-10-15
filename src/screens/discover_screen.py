@@ -115,9 +115,10 @@ def DiscoverScreen() -> ft.Control:
                 ft.Container(height=24),
                 EmptyState(
                     icon=ft.Icons.EXPLORE_OFF_ROUNDED,
-                    title="No source offers discovery yet",
-                    message="The active sources expose catalogs but no filtered browse. "
-                    "Search still finds everything.",
+                    title="This source offers no discovery",
+                    message="The chosen source exposes no filtered browse. "
+                    "Pick another source (Settings → Content source) or "
+                    "just search — nothing else is consulted on its behalf.",
                 ),
             ],
             spacing=0,
