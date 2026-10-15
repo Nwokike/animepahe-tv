@@ -74,6 +74,17 @@ class SharedServices:
                 self.page.services.append(self._share)
         return self._share
 
+    @property
+    def file_picker(self) -> ft.FilePicker:
+        """Boot-singleton FilePicker — the first picker in the app (the
+        player's subtitle file). Mounting per tap leaked a service entry
+        every press, the same bug this module exists to kill."""
+        if not hasattr(self, "_file_picker") or self._file_picker is None:
+            self._file_picker = ft.FilePicker()
+            if self._file_picker not in self.page.services:
+                self.page.services.append(self._file_picker)
+        return self._file_picker
+
 
 def mount_shared_services(page: ft.Page) -> SharedServices:
     """Attach (once) and return the page's shared services."""

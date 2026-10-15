@@ -178,6 +178,10 @@ class ImmersivePlayer(ft.Stack):
         # (anikato carries both; animepahe carries neither — hardsubs).
         self.subtitles = subtitles or []
         self.skip = skip or {}
+        # A subtitle file the user loaded from the device ({name, text});
+        # its raw text rides fv.VideoSubtitleTrack directly — no host, no
+        # headers, every backend.
+        self._local_subtitle: dict | None = None
         self._subtitle_applied = False
         self.hls_proxy = None  # set by the shell mount; see _use_player_overlay
 
@@ -387,6 +391,19 @@ class ImmersivePlayer(ft.Stack):
                     icon_size=16,
                     tooltip="Screenshot",
                     on_click=lambda e: spawn(self._take_snapshot(), name="snapshot"),
+                )
+            )
+            # Subtitle file: this bar is the ONE always-reachable settings
+            # surface (the quality/audio chips hide when a stream has no
+            # options), so loading a local subtitle hangs here too.
+            items.append(
+                ft.IconButton(
+                    icon=ft.Icons.CLOSED_CAPTION_OUTLINED,
+                    icon_size=16,
+                    tooltip="Subtitle file",
+                    on_click=lambda e: spawn(
+                        self._pick_subtitle_file(), name="pick-subtitle"
+                    ),
                 )
             )
             # VideoSkipNext/PreviousButton are value objects without event
@@ -975,8 +992,15 @@ class ImmersivePlayer(ft.Stack):
             page = None
         if page is None or self._is_closing:
             return
-        if len(variants) <= 1 and len(tracks) < 2 and not self.subtitles:
+        if (
+            len(variants) <= 1
+            and len(tracks) < 2
+            and not self.subtitles
+            and not self._local_subtitle
+        ):
             return
+
+        from core.tasks import spawn
 
         from core.dialogs import show_app_dialog
 
@@ -1037,36 +1061,50 @@ class ImmersivePlayer(ft.Stack):
             sections.append(ft.Text("Audio", size=13, weight=ft.FontWeight.W_700))
             sections.append(ft.Column(rows, tight=True, spacing=6))
 
-        if self.subtitles:
+        def _pick_subtitle(index):
+            _close()
+            self.apply_subtitle(index)
 
-            def _pick_subtitle(index):
-                _close()
-                self.apply_subtitle(index)
-
-            sub_rows = [
-                ft.FilledButton(
-                    content="Off",
-                    on_click=lambda e: _pick_subtitle(None),
+        sub_rows = [
+            ft.FilledButton(
+                content="Off",
+                on_click=lambda e: _pick_subtitle(None),
+            )
+        ]
+        for i, track in enumerate(self.subtitles):
+            label = track.get("label") or f"Track {i + 1}"
+            if track.get("default"):
+                label += " (default)"
+            sub_rows.append(
+                ft.OutlinedButton(
+                    content=label,
+                    on_click=lambda e, idx=i: _pick_subtitle(idx),
                 )
-            ]
-            for i, track in enumerate(self.subtitles):
-                label = track.get("label") or f"Track {i + 1}"
-                if track.get("default"):
-                    label += " (default)"
-                sub_rows.append(
-                    ft.OutlinedButton(
-                        content=label,
-                        on_click=lambda e, idx=i: _pick_subtitle(idx),
-                    )
+            )
+        if self._local_subtitle:
+            sub_rows.append(
+                ft.OutlinedButton(
+                    content=f"Local: {self._local_subtitle['name']}",
+                    on_click=lambda e: (_close(), self.apply_local_subtitle()),
                 )
-            sections.append(ft.Container(height=8))
-            sections.append(ft.Text("Subtitles", size=13, weight=ft.FontWeight.W_700))
-            sections.append(ft.Column(sub_rows, tight=True, spacing=6))
+            )
+        sub_rows.append(
+            ft.TextButton(
+                content="Load from file…",
+                on_click=lambda e: (
+                    _close(),
+                    spawn(self._pick_subtitle_file(), name="pick-subtitle"),
+                ),
+            )
+        )
+        sections.append(ft.Container(height=8))
+        sections.append(ft.Text("Subtitles", size=13, weight=ft.FontWeight.W_700))
+        sections.append(ft.Column(sub_rows, tight=True, spacing=6))
 
         # Subtitle size + aspect fit — presentation controls that ride
         # every track (the source's own list stays untouched above).
         size_section: list[ft.Control] = []
-        if self.subtitles:
+        if self.subtitles or self._local_subtitle:
             size_section.append(
                 ft.Text("Subtitle size", size=13, weight=ft.FontWeight.W_700)
             )
@@ -1121,6 +1159,63 @@ class ImmersivePlayer(ft.Stack):
             self.video.update()
         except Exception as ex:
             logger.warning("subtitle switch failed: %s", ex)
+
+    def apply_local_subtitle(self) -> None:
+        """The loaded file's own text becomes the track. flet-video accepts
+        raw SRT/VTT text as src — no host, no headers, works on web and
+        native alike."""
+        local = self._local_subtitle
+        if not local:
+            return
+        try:
+            self.video.subtitle_track = fv.VideoSubtitleTrack(
+                src=local["text"], title=local["name"]
+            )
+            self.video.update()
+        except Exception as ex:
+            logger.warning("local subtitle failed: %s", ex)
+
+    async def _pick_subtitle_file(self, e=None) -> None:
+        """Pick an .srt/.vtt from the device and apply it. Every failure
+        mode is an honest snack, never a crash: no picker service (dev/web
+        quirks), cancel, unreadable bytes."""
+        from core.notify import show_snack
+
+        page = self._page()
+        if page is None:
+            return
+        try:
+            from core.shared_services import get_shared_services
+
+            picker = get_shared_services(page).file_picker
+            files = await picker.pick_files(
+                dialog_title="Choose a subtitle file",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["srt", "vtt"],
+                with_data=True,
+            )
+        except Exception as ex:
+            logger.info("subtitle picker unavailable: %s", ex)
+            show_snack(page, "File picker unavailable", bgcolor=AppColors.PRIMARY)
+            return
+        if not files:
+            return  # the user cancelled
+        picked = files[0]
+        raw = getattr(picked, "bytes", None)
+        text = raw.decode("utf-8", errors="replace") if raw else ""
+        if not text.strip():
+            show_snack(page, "Could not read that file", bgcolor=AppColors.PRIMARY)
+            return
+        self._local_subtitle = {
+            "name": getattr(picked, "name", "") or "Local subtitle",
+            "text": text,
+        }
+        self.apply_local_subtitle()
+        show_snack(
+            page,
+            f"Subtitles: {self._local_subtitle['name']}",
+            bgcolor=AppColors.PRIMARY,
+        )
 
     def _apply_default_subtitle(self) -> None:
         """The source's own default track (anikato marks English) applies
