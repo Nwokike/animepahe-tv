@@ -311,8 +311,15 @@ async def test_first_ready_applies_the_saved_speed():
 
 
 @pytest.mark.asyncio
-async def test_snapshot_confirmation_rides_the_result():
+async def test_snapshot_confirmation_rides_the_result(tmp_path):
+    """The confirmation rides the RESULT: the toast names the file that
+    was actually written (Phase 4 Step 1 made the save real)."""
     player = _player(video=_Video(screenshot=b"png"))
+
+    async def _dir():
+        return str(tmp_path)
+
+    player._snapshot_directory = _dir
     messages = []
     import core.notify as notify
 
@@ -322,7 +329,9 @@ async def test_snapshot_confirmation_rides_the_result():
         await player._take_snapshot()
     finally:
         notify.show_snack = original
-    assert messages == ["Saved a screenshot"]
+    files = [n for n in os.listdir(tmp_path) if n.endswith(".png")]
+    assert len(files) == 1, "the bytes reach the disk"
+    assert messages == [f"Saved {files[0]}"]
 
 
 @pytest.mark.asyncio

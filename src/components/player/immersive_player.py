@@ -24,11 +24,13 @@ The design decisions that matter, all learned from KTV:
 
 import asyncio
 import logging
+import os
 import re
 
 import flet as ft
 import flet_video as fv
 
+from core.snapshots import save_snapshot
 from core.theme import AppColors
 
 logger = logging.getLogger(__name__)
@@ -1175,24 +1177,46 @@ class ImmersivePlayer(ft.Stack):
             self._update_skip_chip(seconds)
 
     # ------------------------------------------------------------------
-    # Snapshot: take_screenshot (Android writes to MediaStore natively;
-    # the desktop fallback saves the file next to the app's storage)
+    # Snapshot: take_screenshot -> a real file. The device's Downloads dir
+    # when the platform offers one (visible outside the app), else the
+    # data tier; the toast carries the file's name, never a false claim.
     # ------------------------------------------------------------------
+
+    async def _snapshot_directory(self) -> str | None:
+        """The device Downloads directory on platforms that have it; None
+        routes the save into the app's data tier. Web has no service."""
+        page = self._page()
+        if page is None or getattr(page, "web", False):
+            return None
+        try:
+            paths = ft.StoragePaths()
+            return await asyncio.wait_for(
+                paths.get_downloads_directory(), timeout=5.0
+            ) or None
+        except Exception:
+            return None
 
     async def _take_snapshot(self, e=None):
         try:
             from core.notify import show_snack
 
             # The confirmation rides the RESULT — announcing before the
-            # await claimed success the frame may never produce (and an
-            # ignored failure left the user with a photo that isn't).
+            # await claimed success the frame may never produce (and a
+            # discarded failure left the user with a photo that isn't).
             shot = await asyncio.wait_for(self.video.take_screenshot(), timeout=5.0)
             if shot is None:
                 show_snack(
                     self._page(), "Screenshot unavailable", bgcolor=AppColors.PRIMARY
                 )
                 return
-            show_snack(self._page(), "Saved a screenshot", bgcolor=AppColors.PRIMARY)
+            directory = await self._snapshot_directory()
+            path = await asyncio.to_thread(save_snapshot, shot, directory)
+            logger.info("snapshot saved: %s", path)
+            show_snack(
+                self._page(),
+                f"Saved {os.path.basename(path)}",
+                bgcolor=AppColors.PRIMARY,
+            )
         except Exception as ex:
             logger.info("snapshot failed: %s", ex)
             from core.notify import show_snack
