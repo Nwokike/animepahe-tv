@@ -291,20 +291,31 @@ def SettingsScreen() -> ft.Control:
     )
 
     # ------------------------------------------------------------------
-    # Content source — auto (recommended) vs pinned provider, with live
-    # per-provider status. Once chosen, that source is the app:
-    # every catalogue op asks it alone (the startup gate picks at launch).
+    # Content source — the provider the owner picked, or the fixed launch
+    # order (AniKato first) when none was picked. There is no "automatic"
+    # entry: the order is simply how the app works.
     # ------------------------------------------------------------------
     controller_ref = getattr(controller, "_app_controller", None) or controller
     _ = state.sources_test_version
-    backend, set_backend = ft.use_state("auto")
+    backend, set_backend = ft.use_state("")
     source_status, set_source_status = ft.use_state({})
 
     def _load_backend():
         from services.store import get_store
 
         async def _read():
-            set_backend(await get_store().get_backend())
+            stored = await get_store().get_backend()
+            names = set(
+                (controller_ref.router.provider_names if controller_ref else []) or []
+            )
+            # Show the provider actually serving; a legacy/empty stored
+            # value never renders (a 1.0.x-era leftover is treated as
+            # "no preference").
+            active = (
+                getattr(controller_ref, "router", None)
+                and controller_ref.router.pin
+            ) or (stored if stored in names else "")
+            set_backend(active)
             set_source_status(controller_ref.sources_status())
 
         from core.tasks import spawn
@@ -314,7 +325,9 @@ def SettingsScreen() -> ft.Control:
     ft.use_effect(_load_backend, [])
 
     def _on_backend_change(e):
-        name = e.control.value or "auto"
+        name = e.control.value or ""
+        if not name:
+            return
         set_backend(name)
         if hasattr(controller, "set_backend_pin"):
             controller.set_backend_pin(name)
@@ -324,8 +337,9 @@ def SettingsScreen() -> ft.Control:
     ) or []
     backend_dropdown = ft.Dropdown(
         value=backend,
-        options=[ft.dropdown.Option("auto", "Automatic (picks at launch)")]
-        + [ft.dropdown.Option(name, name.capitalize()) for name in provider_names],
+        # Providers only, in the app's fixed launch order — there is no
+        # "pick automatically" row any more.
+        options=[ft.dropdown.Option(name, name.capitalize()) for name in provider_names],
         # 0.85.3's Dropdown has no on_change — on_select fires when the
         # user picks an option (on_text_change is the editable case).
         on_select=_on_backend_change,
@@ -335,7 +349,7 @@ def SettingsScreen() -> ft.Control:
     backend_row = _setting_row(
         ft.Icons.LAYERS_ROUNDED,
         "Content source",
-        "Automatic picks one source at launch. What you choose is the app — nothing else is consulted.",
+        "The app tries them in this order at launch. What you choose is the app.",
         trailing=backend_dropdown,
     )
 

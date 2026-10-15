@@ -181,11 +181,11 @@ class AppController:
         self.store = get_store()
         self.scraper = AnimePaheScraper()
         # The data layer: the ROUTER. Every provider is a complete app in
-        # its own way; the auto order runs the OPEN sources first and
-        # keeps AnimePahe (whose catalog is Cloudflare-walled) as the
-        # safety net — its breaker trips on walled calls while its files
-        # still get attempted. Per-request failover, never locked.
-        from services.providers.base import DEFAULT_OWNER, owner_of
+        # its own way, registered in the owner's fixed order — the app
+        # tries AniKato, AnimeOut, AnimePahe, then the rest; the first one
+        # that answers serves the session. Per-request failover, never
+        # locked; no user-facing "automatic" concept exists.
+        from services.providers.base import DEFAULT_OWNER, PROVIDER_ORDER, owner_of
         from services.providers.anikato import AniKatoProvider
         from services.providers.animeout import AnimeOutProvider
         from services.animeout_solver import AnimeOutSolver
@@ -200,14 +200,16 @@ class AppController:
                 AnimeOutProvider(
                     solver=AnimeOutSolver(store=self.store),
                 ),
+                AnimePaheProvider(self.scraper),
                 KusonimeProvider(),
                 KayoanimeProvider(),
-                AnimePaheProvider(self.scraper),
             ]
         )
         self._owner_of = owner_of
         self._default_owner = DEFAULT_OWNER
-        # Restore the user's content-source preference (auto or pinned).
+        self._provider_order = PROVIDER_ORDER
+        # Restore the owner's explicit choice, if any (a provider name;
+        # absent = the fixed order decides at launch).
         self.router.set_pin(await self.store.get_backend())
         self.kwik = KwikResolver(ddos_solver=self.scraper.ddos)
         self.update_service = UpdateService()
@@ -1450,14 +1452,17 @@ class AppController:
         spawn(_loop(), name="episode-checker")
 
     async def resolve_startup(self):
-        """Pick the session's backend once, then load the first home page.
+        """Resolve the session's source once, then load the first home page.
 
-        A stored preference pins directly; "auto" probes the four OPEN
-        backends in editorial order and pins the winner IN MEMORY ONLY (the
-        store keeps "auto", so the next launch resolves again). AnimePahe is
-        never auto-chosen — selecting it is the owner's pin, and its
-        Cloudflare flow appears exactly then. Single-flight via a lock; the
-        splash stays up (startup_ready False) for the whole flow, in a
+        A stored preference pins directly (the owner's explicit choice).
+        With no preference the app tries the fixed PROVIDER_ORDER — AniKato
+        first, then AnimeOut, then AnimePahe, then Kusonime/Kayoanime — and
+        the first one that answers serves the session, pinned IN MEMORY ONLY
+        (nothing is stored, so every launch re-tries the order). There is no
+        user-facing "automatic" concept: this order is simply how the app
+        works. "auto" in the store is a legacy 1.0.x value and means "no
+        preference"; it is never written again. Single-flight via a lock;
+        the splash stays up (startup_ready False) for the whole flow, in a
         finally so a failed fetch still lands on an honest home.
         """
         async with self._startup_lock:
@@ -1467,7 +1472,7 @@ class AppController:
             if preference and preference != "auto":
                 self.router.set_pin(preference)
             else:
-                self.router.set_pin(await self._auto_backend())
+                self.router.set_pin(await self._ordered_backend())
             state.startup_stage = "Loading releases…"
             try:
                 await self.load_latest(1)
@@ -1475,27 +1480,27 @@ class AppController:
                 state.startup_stage = ""
                 state.startup_ready = True
 
-    async def _auto_backend(self) -> str | None:
-        """First healthy OPEN backend in editorial order, or the first open
-        backend when none answer (an honest failure beats no session)."""
+    async def _ordered_backend(self) -> str | None:
+        """The first provider in PROVIDER_ORDER that answers its health
+        probe (the probes run under the router's bounded parallel budget;
+        the ORDER decides the winner). None of them answering falls back to
+        the first registered — an honest failure beats no session."""
         health = await self.router.probe_all()
-        open_names = [
-            name
-            for name in self.router.provider_names
-            if name != self._default_owner
-        ]
-        for name in open_names:
+        for name in self._provider_order:
             if health.get(name):
                 return name
-        return open_names[0] if open_names else None
+        return next(
+            (n for n in self._provider_order if self.router.get(n)),
+            None,
+        )
 
     async def set_backend_pin(self, name: str):
-        """Settings: 'auto' or a provider name. Applies immediately and
-        persists, then every switch — manual or a re-pick of Automatic —
-        goes through the startup gate: splash → resolve → first fetch."""
+        """Settings/picker: the owner picked this provider by name. Applies
+        immediately and persists; the switch goes through the startup gate:
+        splash → resolve → first fetch."""
         self.router.set_pin(name)
         await self.store.save_backend(name)
-        logger.info("content source pinned to: %s", self.router.pin or "auto")
+        logger.info("content source set to: %s", self.router.pin or "the default order")
         spawn(self.resolve_startup(), name="backend-switch")
 
     async def open_backend_picker(self) -> None:

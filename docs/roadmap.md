@@ -1,15 +1,16 @@
 # Roadmap — the multi-source app
 
 AnimePahe TV is a hybrid of independent backends: five sources (AniKato,
-AnimeOut, Kusonime, Kayoanime, AnimePahe), each treated like its own app —
+AnimeOut, AnimePahe, Kusonime, Kayoanime), each treated like its own app —
 its own catalog, artwork, playback and Cloudflare story. One source is
-resolved at startup behind a splash (a stored pin, or an automatic race of
-the open sources; AnimePahe is never auto-chosen — pinning it is the owner's
-act and brings its Cloudflare flow with it). While the app is open the source
-changes only when the owner changes it. Grid orientation is automatic: the
-screen sniffs the shape of the artwork the active source serves and swaps
-itself. No cross-linking: an ability only one source has appears only when
-that source is selected.
+resolved at startup behind a splash: a stored pin, or otherwise the FIXED
+ORDER — the app tries AniKato first, then AnimeOut, then AnimePahe, then
+Kusonime/Kayoanime, and the first one that answers serves the session.
+There is no "automatic" option anywhere, in any UI (owner's order,
+2026-10-15). While the app is open the source changes only when the owner
+changes it. Grid orientation is automatic: the screen sniffs the shape of
+the artwork the active source serves and swaps itself. No cross-linking: an
+ability only one source has appears only when that source is selected.
 
 **Standing rules.** Every phase starts with a full fresh read of all docs
 ("start afresh"), then a plan-mode presentation. Every step carries its own
@@ -44,14 +45,23 @@ swarm audit, and `docs/reference/`.
 
 ## Phase 2 — startup resolution & the independent-backend doctrine (complete)
 
+> **Revised 2026-10-15 (the owner's order).** The "Automatic" concept is
+> deleted everywhere — picker, settings, header badge. The app tries the
+> FIXED order **AniKato → AnimeOut → AnimePahe → Kusonime → Kayoanime**
+> (`PROVIDER_ORDER` in providers/base.py); the first that answers serves the
+> session, in memory only. A stored provider name pins directly. The
+> description below keeps Steps 1–8 as shipped; Step 2's "auto race" is what
+> this revision replaced.
+
 - Pre-step (8d9bc27): AniKato's CDN doors — `is_ad_stub_playlist()` skips the
   TikTok-stub playlist and `sources()` keeps the first door serving real
   video; full cache keys; mirror-flavor collapse; solver fail-fast on plain
   nginx pages.
 - Step 1 (83d9715): `startup_ready`/`startup_stage` + the CollabShell-style
   splash behind all hooks.
-- Step 2 (c37f483): `resolve_startup()` — stored pin resolves directly;
-  `auto` races the four open backends (health only) and never picks AnimePahe;
+- Step 2 (c37f483, revised): `resolve_startup()` — a stored pin resolves
+  directly; otherwise the fixed order decides (health probes run under the
+  bounded parallel budget; the ORDER picks the winner, AnimePahe included);
   every manual switch re-runs the same gate; single-flight.
 - Step 3 (12f4ec3): `latest_releases`/`search` are owner-only; heal and
   cold-open resolve through the session's own owner.

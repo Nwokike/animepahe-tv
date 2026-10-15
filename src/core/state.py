@@ -86,7 +86,7 @@ class LatestRelease:
 class AppState:
     is_loading: bool = False
     # Startup gate: the shell shows its splash until the backend is
-    # resolved and the first home fetch has been attempted (Phase 2 — auto
+    # resolved and the first home fetch has been attempted (the fixed order
     # runs once at startup; switching while open is the owner's act).
     startup_ready: bool = False
     startup_stage: str = ""

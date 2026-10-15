@@ -132,9 +132,10 @@ class ProviderRouter:
         return None
 
     def set_pin(self, name: str | None) -> None:
-        """'auto' (None) keeps the editorial order; a provider name sends
-        it first for every operation — still with full failover."""
-        self._pin = None if not name or name == "auto" else name
+        """A provider name sends it first for every operation — still with
+        full failover. None/empty means no pin: the fixed PROVIDER_ORDER
+        decides (the app's default behavior, never a user option)."""
+        self._pin = name or None
 
     @property
     def pin(self) -> str | None:

@@ -17,6 +17,17 @@ from core.state import Anime, Episode, LatestRelease, Source
 
 DEFAULT_OWNER = "animepahe"
 
+# The owner's fixed priority (2026-10-15): the app tries these in order and
+# the first one that answers serves the session. This order IS the app's
+# behavior — there is no "automatic" option anywhere, in any UI, ever.
+PROVIDER_ORDER: tuple[str, ...] = (
+    "anikato",
+    "animeout",
+    "animepahe",
+    "kusonime",
+    "kayoanime",
+)
+
 # One page of an episode grid (Prev · Page N · Next). AnimePahe pages this
 # server-side (30/page — its own shape); the providers whose sources return
 # the whole list in one shot slice it to this cap so no screen ever renders
@@ -168,6 +179,7 @@ __all__ = [
     "BrowserProvider",
     "DEFAULT_OWNER",
     "EPISODES_PER_PAGE",
+    "PROVIDER_ORDER",
     "all_episodes",
     "make_session",
     "page_slice",

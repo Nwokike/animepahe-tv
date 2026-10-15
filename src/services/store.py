@@ -513,14 +513,14 @@ class JsonStore:
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # Content source (auto vs pinned provider)
+    # Content source (a provider name; empty = the fixed order decides)
     # ------------------------------------------------------------------
 
     async def get_backend(self) -> str:
-        return str(await self.section("backend", "auto"))
+        return str(await self.section("backend", ""))
 
     async def save_backend(self, name: str) -> None:
-        await self.put_section("backend", str(name or "auto"))
+        await self.put_section("backend", str(name or ""))
 
     async def get_artwork_defaults(self) -> dict:
         """Learned shape per backend+surface — what the next launch paints

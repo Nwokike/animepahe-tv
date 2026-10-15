@@ -164,14 +164,12 @@ def _version_pill(state, page) -> ft.Control:
 
 def _backend_badge(state, controller) -> ft.Control:
     """The clickable backend badge: which provider is serving, and a state
-    colour from its live health. Tapping opens the picker — every provider
-    with its health, 'Automatic' first, one-tap pinning — so you can swap
-    backends from anywhere and see WHY it switched."""
+    colour from its live health. Tapping opens the picker for one-tap
+    switching. There is no "auto" label — the badge shows the provider that
+    IS serving (the splash covers the app until one resolves)."""
     name = (state.current_source_name or "").strip()
-    label = name.capitalize() if name else "Auto"
-    colour = AppColors.SUCCESS if name else AppColors.PRIMARY
-    if not name:
-        colour = AppColors.SECONDARY
+    label = name.capitalize() if name else ""
+    colour = AppColors.SUCCESS if name else ft.Colors.ON_SURFACE_VARIANT
     return ft.Container(
         content=ft.Row(
             [
@@ -182,7 +180,7 @@ def _backend_badge(state, controller) -> ft.Control:
                     bgcolor=colour,
                 ),
                 ft.Container(width=6),
-                ft.Text(label, size=12, weight=ft.FontWeight.W_700),
+                ft.Text(label or "…", size=12, weight=ft.FontWeight.W_700),
             ],
             spacing=0,
             tight=True,
@@ -193,7 +191,9 @@ def _backend_badge(state, controller) -> ft.Control:
         bgcolor=ft.Colors.with_opacity(0.1, colour),
         border=ft.Border.all(1, ft.Colors.with_opacity(0.35, colour)),
         ink=True,
-        tooltip=f"Served by {label} — tap to switch",
+        tooltip=f"Served by {label} — tap to switch"
+        if label
+        else "Choosing a source…",
         on_click=lambda e: controller.open_backend_picker(),
     )
 

@@ -277,14 +277,18 @@ def test_the_badge_names_the_serving_backend():
     badge.on_click(None)  # no exception = the wiring is real
 
 
-def test_the_badge_with_no_serving_backend_says_auto(tmp_path):
+def test_the_badge_with_no_serving_backend_says_nothing_auto(tmp_path):
+    """Before a source resolves the badge shows a neutral placeholder —
+    the word "Auto" never appears (the owner's rule)."""
     from screens.home_screen import _backend_badge
 
     class _State:
         current_source_name = ""
 
     badge = _backend_badge(_State(), type("C", (), {"open_backend_picker": lambda: None})())
-    assert "Auto" in _texts(badge)
+    texts = _texts(badge)
+    assert "…" in texts
+    assert not any("auto" in t.lower() for t in texts)
 
 
 def _texts(control) -> list[str]:

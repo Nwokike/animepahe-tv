@@ -678,11 +678,18 @@ def _build_download_quality_dialog(state, controller) -> ft.Control:
 
 def _build_backend_picker(state, controller) -> ft.Control:
     """Which provider is serving, every provider's live health, and
-    one-tap pinning — the header badge's destination. The health rows are
-    the router's own breaker state, so the picker explains a switch
-    instead of just announcing one."""
+    one-tap pinning — the header badge's destination. The rows follow the
+    FIXED order the app tries at launch (AniKato first); there is no
+    "automatic" entry anywhere. The health rows are the router's own
+    breaker state, so the picker explains a switch instead of just
+    announcing one."""
+    from services.providers.base import PROVIDER_ORDER
+
     health = controller.sources_status() if hasattr(controller, "sources_status") else {}
-    providers = sorted({*health, state.current_source_name} - {""})
+    listed = {*health, (state.current_source_name or "").strip()} - {""}
+    providers = [n for n in PROVIDER_ORDER if n in listed] + [
+        n for n in sorted(listed) if n not in PROVIDER_ORDER
+    ]
     current = (state.current_source_name or "").strip()
 
     def _row(name: str) -> ft.Control:
@@ -734,35 +741,9 @@ def _build_backend_picker(state, controller) -> ft.Control:
         title=ft.Text("Content source", weight=ft.FontWeight.W_700),
         content=ft.Column(
             [
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Text("Automatic", size=13, weight=ft.FontWeight.W_600),
-                            ft.Container(expand=True),
-                            ft.Text(
-                                "picks one open source at launch",
-                                size=11,
-                                color=ft.Colors.ON_SURFACE_VARIANT,
-                            ),
-                            ft.Text(
-                                "active" if not current else "tap to choose",
-                                size=11,
-                                color=ft.Colors.PRIMARY if not current else ft.Colors.ON_SURFACE_VARIANT,
-                            ),
-                        ],
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    padding=ft.Padding.symmetric(horizontal=10, vertical=10),
-                    border_radius=8,
-                    border=ft.Border.all(
-                        1.5 if not current else 1,
-                        ft.Colors.PRIMARY if not current else ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE),
-                    ),
-                    ink=True,
-                    on_click=lambda e: controller.pin_backend("auto"),
-                ),
                 *[_row(name) for name in providers],
                 ft.Text(
+                    "Tried in this order at launch (top first). "
                     "What you choose is the app — nothing else is consulted.",
                     size=11,
                     color=ft.Colors.ON_SURFACE_VARIANT,
