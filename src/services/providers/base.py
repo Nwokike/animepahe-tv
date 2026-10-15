@@ -17,6 +17,38 @@ from core.state import Anime, Episode, LatestRelease, Source
 
 DEFAULT_OWNER = "animepahe"
 
+# One page of an episode grid (Prev · Page N · Next). AnimePahe pages this
+# server-side (30/page — its own shape); the providers whose sources return
+# the whole list in one shot slice it to this cap so no screen ever renders
+# a 170-episode (or kusonime's 1000-episode) dump at once.
+EPISODES_PER_PAGE = 24
+
+
+def page_slice(items: list, page: int) -> tuple[list, bool]:
+    """One page of an all-at-once list, in the protocol's page shape."""
+    start = max(page - 1, 0) * EPISODES_PER_PAGE
+    window = items[start : start + EPISODES_PER_PAGE]
+    return window, start + EPISODES_PER_PAGE < len(items)
+
+
+async def all_episodes(provider, session: str, *, max_pages: int = 100) -> list[Episode]:
+    """Every episode across the provider's pages.
+
+    The title-keyed lookups and the new-episode checker need the whole
+    list, not page 1. Providers whose source returns everything at once
+    slice their cache, so the walk costs one fetch; server-paged providers
+    (animepahe) pay one call per page. The cap is defensive only — a buggy
+    has_more must never loop forever."""
+    episodes: list[Episode] = []
+    page = 1
+    while page <= max_pages:
+        chunk, has_more = await provider.episodes(session, page)
+        episodes.extend(chunk)
+        if not has_more:
+            break
+        page += 1
+    return episodes
+
 
 def make_session(provider_name: str, native_id: str) -> str:
     return f"{provider_name}:{native_id}"
@@ -135,7 +167,10 @@ __all__ = [
     "Provider",
     "BrowserProvider",
     "DEFAULT_OWNER",
+    "EPISODES_PER_PAGE",
+    "all_episodes",
     "make_session",
+    "page_slice",
     "split_session",
     "owner_of",
     "close_client",

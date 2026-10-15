@@ -22,8 +22,10 @@ from core.config import (
 from core.state import Anime, Episode, LatestRelease, Source
 import primp
 from services.providers.base import (
+    all_episodes,
     close_client,
     make_session,
+    page_slice,
     releases_from_anime,
     split_session,
 )
@@ -501,7 +503,7 @@ class KusonimeProvider:
         key = f"episodes_{native}"
         cached = self._cache_get(key)
         if cached is not None:
-            return cached
+            return page_slice(cached, page)
         files = await self._batch_files(native)
         results: list[Episode] = []
         if any(f.get("video") for f in files):
@@ -543,7 +545,7 @@ class KusonimeProvider:
                     )
         results.sort(key=lambda e: e.episode)
         self._cache_put(key, results, CACHE_TTL_EPISODES)
-        return (results, False)
+        return page_slice(results, page)
 
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
         """Movies stream (direct per-quality files, pixeldrain 206
@@ -601,8 +603,7 @@ class KusonimeProvider:
         results, _ = await self.search(title, 1)
         for anime in results:
             if _title_relevance(title, anime.title) >= 100:
-                episodes, _ = await self.episodes(anime.session, 1)
-                return episodes
+                return await all_episodes(self, anime.session)
         return []
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:

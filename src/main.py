@@ -1329,8 +1329,10 @@ class AppController:
             if not anime_session:
                 continue
             last_seen = await self.store.get_follow_progress(anime_session)
+            from services.providers.base import all_episodes
+
             try:
-                episodes, _ = await self.router.episodes(anime_session, 1)
+                episodes = await all_episodes(self.router, anime_session)
             except Exception as ex:
                 logger.debug("new-episode check failed for %s: %s", anime_session, ex)
                 continue

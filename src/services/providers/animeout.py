@@ -20,8 +20,10 @@ from core.config import (
 from core.state import Anime, Episode, LatestRelease, Source
 import primp
 from services.providers.base import (
+    all_episodes,
     close_client,
     make_session,
+    page_slice,
     releases_from_anime,
     split_session,
 )
@@ -306,7 +308,7 @@ class AnimeOutProvider:
         key = f"episodes_{native}"
         cached = self._cache_get(key)
         if cached is not None:
-            return cached
+            return page_slice(cached, page)
         resp = await self._client.get(
             f"{ANIMEOUT_API}/posts/{native}", params={"_fields": "id,content"}
         )
@@ -319,7 +321,7 @@ class AnimeOutProvider:
         # every quality of an episode without re-fetching the post.
         self._cache_put(f"variants_{native}", _variant_map(pairs), CACHE_TTL_EPISODES)
         self._cache_put(key, results, CACHE_TTL_EPISODES)
-        return (results, False)
+        return page_slice(results, page)
 
     async def _variants_for(self, native: str) -> dict[int, list[str]]:
         """Episode number -> every direct link. Fetches the post once when
@@ -391,15 +393,14 @@ class AnimeOutProvider:
         results, _ = await self.search(title, 1)
         for anime in results:
             if _title_relevance(title, anime.title) >= 100:
-                episodes, _ = await self.episodes(anime.session, 1)
-                return episodes
+                return await all_episodes(self, anime.session)
         return []
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:
         results, _ = await self.search(title, 1)
         for anime in results:
             if _title_relevance(title, anime.title) >= 100:
-                episodes, _ = await self.episodes(anime.session, 1)
+                episodes = await all_episodes(self, anime.session)
                 for ep in episodes:
                     if ep.episode == episode:
                         return await self.sources(anime.session, ep.session)

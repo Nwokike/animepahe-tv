@@ -27,6 +27,7 @@ import logging
 
 from core.state import Anime, Episode, LatestRelease, Source
 from services.animepahe import BASE as ANIMEPAHE_BASE, AnimePaheScraper
+from services.providers.base import all_episodes
 
 logger = logging.getLogger("animepahe.provider.animepahe")
 
@@ -187,15 +188,14 @@ class AnimePaheProvider:
         results, _ = await self.scraper.search(title, 1)
         for anime in results:
             if anime.title.strip().lower() == title.strip().lower():
-                episodes, _ = await self.scraper.episodes(anime.session, 1)
-                return episodes
+                return await all_episodes(self.scraper, anime.session)
         return []
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:
         results, _ = await self.scraper.search(title, 1)
         for anime in results:
             if anime.title.strip().lower() == title.strip().lower():
-                episodes, _ = await self.episodes(anime.session, 1)
+                episodes = await all_episodes(self, anime.session)
                 for ep in episodes:
                     if ep.episode == episode:
                         return await self.sources(anime.session, ep.session)

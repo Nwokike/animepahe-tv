@@ -27,7 +27,13 @@ import primp
 from core.config import CACHE_TTL_EPISODES, CACHE_TTL_LATEST, CACHE_TTL_SEARCH
 from core.state import Anime, Episode, LatestRelease, Source
 from services.aes import aes_cbc_decrypt
-from services.providers.base import close_client, make_session, split_session
+from services.providers.base import (
+    all_episodes,
+    close_client,
+    make_session,
+    page_slice,
+    split_session,
+)
 
 logger = logging.getLogger("animepahe.provider.anikato")
 
@@ -582,7 +588,7 @@ class AniKatoProvider:
         key = f"episodes_{slug}"
         cached = self._cache_get(key)
         if cached is not None:
-            return cached
+            return page_slice(cached, page)
         watch = await self._watch_page(slug)
         entries = await self._episode_entries(watch["anime_id"])
         poster = watch["poster"]
@@ -607,9 +613,8 @@ class AniKatoProvider:
             )
             for num, _ids, subs, dub, aired_ts in entries
         ]
-        result = (results, False)
-        self._cache_put(key, result, CACHE_TTL_EPISODES)
-        return result
+        self._cache_put(key, results, CACHE_TTL_EPISODES)
+        return page_slice(results, page)
 
     # ------------------------------------------------------------------
     # Files: episode entries -> servers -> megaplay getSources -> m3u8
@@ -875,8 +880,7 @@ class AniKatoProvider:
         results, _ = await self.search(title, 1)
         for anime in results:
             if anime.title.lower() == title.lower():
-                episodes, _ = await self.episodes(anime.session, 1)
-                return episodes
+                return await all_episodes(self, anime.session)
         return []
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:

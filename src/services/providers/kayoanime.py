@@ -34,8 +34,10 @@ from core.config import (
 )
 from core.state import Anime, Episode, LatestRelease, Source
 from services.providers.base import (
+    all_episodes,
     close_client,
     make_session,
+    page_slice,
     releases_from_anime,
     split_session,
 )
@@ -442,7 +444,7 @@ class KayoanimeProvider:
         key = f"episodes_{post_id}"
         cached = self._cache_get(key)
         if cached is not None:
-            return cached
+            return page_slice(cached, page)
         folders = await self._folders_for(post_id)
         if not folders:
             # href="#" / zero folder ids = links under maintenance.
@@ -504,8 +506,7 @@ class KayoanimeProvider:
             )
             for i, (key, info) in enumerate(sorted(by_episode.items()), start=1)
         ]
-        result = (results, False)
-        self._cache_put(key, result, CACHE_TTL_EPISODES)
+        self._cache_put(key, results, CACHE_TTL_EPISODES)
         if self._gated[post_id]:
             # Group-gated folders are a silent gap in the episode list, so
             # they are named here (the settings health panel shows them)
@@ -517,7 +518,7 @@ class KayoanimeProvider:
                     f"{label or folder_id}" for folder_id, label in self._gated[post_id]
                 ),
             )
-        return result
+        return page_slice(results, page)
 
     def gated_folders(self, anime_session: str) -> list[str]:
         """Folder labels this post's episode walk could not open. Empty
@@ -580,7 +581,7 @@ class KayoanimeProvider:
         )
         if best is None or _title_relevance(title, best.title) == 0:
             return []
-        episodes, _ = await self.episodes(best.session, 1)
+        episodes = await all_episodes(self, best.session)
         return episodes
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:
@@ -590,7 +591,7 @@ class KayoanimeProvider:
         )
         if best is None or _title_relevance(title, best.title) == 0:
             return []
-        episodes, _ = await self.episodes(best.session, 1)
+        episodes = await all_episodes(self, best.session)
         # The episode session is the Drive file id — resolve it directly.
         ep = next((e for e in episodes if e.episode == episode), None)
         return await self.sources(best.session, ep.session) if ep else []
