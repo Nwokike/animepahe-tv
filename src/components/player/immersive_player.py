@@ -183,6 +183,8 @@ class ImmersivePlayer(ft.Stack):
         # headers, every backend.
         self._local_subtitle: dict | None = None
         self._subtitle_applied = False
+        # One Stream Settings sheet at a time (the chips re-spawn it).
+        self._settings_open = False
         self.hls_proxy = None  # set by the shell mount; see _use_player_overlay
 
         self._is_closing = False
@@ -981,7 +983,14 @@ class ImmersivePlayer(ft.Stack):
         Only opens when the stream actually has options: a dialog listing a
         single quality is noise. Both sections are built from the live
         master playlist through the proxy.
+
+        Double-open guard: the chips re-spawn this on every tap, so a
+        second tap while the sheet is up (or while its options are still
+        being fetched) is a no-op — two stacked dialogs were reachable.
         """
+        if self._settings_open:
+            return
+        self._settings_open = True
         from flet import context as flet_context
 
         variants = await self.list_variants()
@@ -991,6 +1000,7 @@ class ImmersivePlayer(ft.Stack):
         except Exception:
             page = None
         if page is None or self._is_closing:
+            self._settings_open = False
             return
         if (
             len(variants) <= 1
@@ -998,6 +1008,7 @@ class ImmersivePlayer(ft.Stack):
             and not self.subtitles
             and not self._local_subtitle
         ):
+            self._settings_open = False
             return
 
         from core.tasks import spawn
@@ -1005,6 +1016,7 @@ class ImmersivePlayer(ft.Stack):
         from core.dialogs import show_app_dialog
 
         def _close():
+            self._settings_open = False
             setattr(page, "_app_dialog", None)
             try:
                 page.pop_dialog()
@@ -1135,16 +1147,23 @@ class ImmersivePlayer(ft.Stack):
         )
         sections.extend(size_section)
 
-        show_app_dialog(
-            page,
-            ft.AlertDialog(
-                modal=True,
-                title=ft.Text("Stream Settings", weight=ft.FontWeight.BOLD),
-                content=ft.Column(sections, tight=True, spacing=8),
-                actions=[ft.TextButton(content="Close", on_click=lambda e: _close())],
-                actions_alignment=ft.MainAxisAlignment.END,
-            ),
-        )
+        try:
+            show_app_dialog(
+                page,
+                ft.AlertDialog(
+                    modal=True,
+                    title=ft.Text("Stream Settings", weight=ft.FontWeight.BOLD),
+                    content=ft.Column(sections, tight=True, spacing=8),
+                    actions=[
+                        ft.TextButton(content="Close", on_click=lambda e: _close())
+                    ],
+                    actions_alignment=ft.MainAxisAlignment.END,
+                ),
+            )
+        except Exception as ex:
+            # A sheet that never showed must not lock the button forever.
+            self._settings_open = False
+            logger.warning("stream settings failed to open: %s", ex)
 
     def apply_subtitle(self, index: int | None) -> None:
         """Off (None) clears the track; an index applies that source
