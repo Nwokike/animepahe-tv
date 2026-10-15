@@ -300,3 +300,33 @@ async def test_a_series_alert_and_a_download_never_share_a_row(fake):
     ids = [call["id"] for call in fake.shown]
     assert ids[0] != ids[1]
     assert "Tap to watch" in fake.shown[0]["body"]
+
+
+@pytest.mark.asyncio
+async def test_channel_create_never_dials_after_a_failed_permission_probe(monkeypatch):
+    """Boot fires the permission probe and the channel create together; in
+    dev the first pays its 10s timeout and fails, and the second used to
+    pay ANOTHER 10s ("channel create failed" right after "notifications
+    unavailable", observed live). The channel must wait for the probe and
+    then decline without dialing."""
+    calls = []
+
+    class _Recording(_FakeService):
+        async def request_permissions(self):
+            calls.append("permissions")
+            raise TimeoutError("dev timeout")
+
+        async def create_notification_channel(self, channel):
+            calls.append("channel")
+
+    service = _Recording()
+    monkeypatch.setattr(notifications, "_available", True)
+    monkeypatch.setattr(notifications, "_service", service)
+    assert await notifications.ensure_channel() is False
+    assert calls == ["permissions"], "the channel must not pay its own timeout"
+
+
+@pytest.mark.asyncio
+async def test_channel_create_still_runs_after_a_granted_probe(fake):
+    assert await notifications.ensure_channel() is True
+    assert len(fake.channels) == 1

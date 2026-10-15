@@ -39,6 +39,7 @@ Notification shape (the reference's recommendations):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 logger = logging.getLogger("animepahe.notify")
@@ -83,21 +84,42 @@ def _ready() -> bool:
     return _detect() and not _unavailable
 
 
+def _permission_guard() -> asyncio.Lock:
+    """A lock per RUNNING LOOP (attached to the loop, not a module global):
+    a module-level Lock binds to the first loop it sees and raises on any
+    later one — which is also every pytest test's fresh loop."""
+    loop = asyncio.get_running_loop()
+    lock = getattr(loop, "_animepahe_permission_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        loop._animepahe_permission_lock = lock  # noqa: SLF001 — loop-scoped state
+    return lock
+
+
 async def request_permissions() -> bool:
     """Ask the OS for notification permission. False (quietly) when the
-    extension is unavailable — never raises."""
+    extension is unavailable — never raises.
+
+    Serialized: boot fires this and the channel create together, and
+    without a shared gate the second caller paid its OWN 10s timeout in
+    dev right after the first failed (observed live). A waiter re-checks
+    readiness after the first probe settles and returns without dialing.
+    """
     if not _ready():
         return False
     global _unavailable
-    try:
-        return bool(await _service.request_permissions())
-    except Exception as ex:
-        # Plain `flet run` ships no Dart half: the service is unknown, and
-        # every invoke waits its full timeout. Remember it once — this is
-        # the one slow probe the session pays.
-        _unavailable = True
-        logger.info("notifications unavailable this run (%s)", ex)
-        return False
+    async with _permission_guard():
+        if not _ready():
+            return False
+        try:
+            return bool(await _service.request_permissions())
+        except Exception as ex:
+            # Plain `flet run` ships no Dart half: the service is unknown, and
+            # every invoke waits its full timeout. Remember it once — this is
+            # the one slow probe the session pays.
+            _unavailable = True
+            logger.info("notifications unavailable this run (%s)", ex)
+            return False
 
 
 def on_tap(handler) -> None:
@@ -177,7 +199,14 @@ def download_id(episode_session: str) -> int:
 
 async def ensure_channel() -> bool:
     """The new_episodes channel at HIGH, created once. False (quietly)
-    when the extension is unavailable."""
+    when the extension is unavailable.
+
+    Settles the permission probe FIRST: boot fires both paths together,
+    and a create running concurrently with the permissions timeout paid a
+    second 10s invoke in dev ("channel create failed" right after
+    "notifications unavailable", observed live)."""
+    if not await request_permissions():
+        return False
     if not _ready():
         return False
     global _unavailable

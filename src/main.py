@@ -1529,13 +1529,14 @@ class AppController:
         from services.external_player import episode_title, launch_external
 
         if not self._resolved_m3u8:
-            # Nothing resolved: send the play page (KTV will resolve itself).
+            # Nothing resolved. The old path handed the site's play page to
+            # KTV — but that URL embeds ANOTHER backend's session (a
+            # kusonime one produced animepahe.com/play/kusonime:9538/…,
+            # which can never resolve), and a launch with no stream at all
+            # just raised the install dialog for nothing. Say what is true
+            # instead; a backend with no stream is a result, not a handoff.
             logger.warning("external fallback with no resolved stream")
-            await launch_external(
-                self.page,
-                f"https://animepahe.com/play/{anime_session}/{episode_session}",
-                episode_title(title, ep_num),
-            )
+            self._show_error_snackbar("No playable stream for this episode.")
             return
 
         resolution = state.selected_source.resolution if state.selected_source else None
