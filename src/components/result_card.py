@@ -12,11 +12,17 @@ from core.theme import AppColors
 
 
 def result_card(
-    anime, on_select, col: dict | None = None, now_playing: bool = False, mode: str = PORTRAIT
+    anime,
+    on_select,
+    col: dict | None = None,
+    now_playing: bool = False,
+    mode: str = PORTRAIT,
+    provider: str = "",
 ) -> ft.Control:
     media = card_media(
         anime.poster,
         mode,
+        provider=provider,
         placeholder=ft.Container(
             content=ft.Icon(
                 ft.Icons.MOVIE_ROUNDED, size=48, color=ft.Colors.ON_SURFACE_VARIANT

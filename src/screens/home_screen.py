@@ -31,6 +31,8 @@ from core.constants import (
 )
 from core.theme import AppColors, next_theme_mode
 from hooks.use_grid_mode import grid_sources, use_grid_mode
+from services.hls_proxy import image_url
+from services.providers.base import owner_of
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -41,6 +43,7 @@ def _release_card(
     now_playing: bool,
     col: dict | None = None,
     mode: str = LANDSCAPE,
+    provider: str = "",
 ) -> ft.Control:
     play_icon = ft.Icon(
         ft.Icons.EQUALIZER_ROUNDED
@@ -91,7 +94,7 @@ def _release_card(
     # plus the focus/blur scale are the focus ring.
     return card_frame(
         mode=mode,
-        media=card_media(release.snapshot, mode),
+        media=card_media(release.snapshot, mode, provider=provider),
         gradient=ft.Container(
             gradient=ft.LinearGradient(
                 begin=ft.Alignment.CENTER_LEFT,
@@ -298,7 +301,11 @@ def _continue_watching_row(
         body = ft.Column(
             [
                 ft.Container(
-                    content=ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True)
+                    content=ft.Image(
+                        src=image_url(poster, owner_of(record["anime_session"])),
+                        fit=ft.BoxFit.COVER,
+                        expand=True,
+                    )
                     if poster
                     else ft.Container(
                         content=ft.Icon(
@@ -539,6 +546,7 @@ def HomeScreen() -> ft.Control:
                 and now_playing["episode"] == r.session,
                 col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
                 mode=grid_mode,
+                provider=state.latest_source or state.current_source_name,
             )
             for r in releases
         ],

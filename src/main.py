@@ -237,7 +237,14 @@ class AppController:
 
         self.hls_proxy = HLSProxy()
         try:
-            await self.hls_proxy.start()
+            base = await self.hls_proxy.start()
+            # Artwork displays through the same loopback server when the
+            # platform needs it (web CORS) or a host is guarded. The wrap
+            # happens at the display sites on RAW provider URLs, so nothing
+            # persisted ever carries a loopback port.
+            from services.hls_proxy import set_display_context
+
+            set_display_context(base, bool(getattr(self.page, "web", False)))
         except Exception as ex:
             logger.error("HLS proxy failed to start: %s — playing direct", ex)
             self.hls_proxy = None

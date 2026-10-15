@@ -144,6 +144,7 @@ def DiscoverScreen() -> ft.Control:
                     controller.open_anime,
                     col=None,
                     mode=grid_mode,
+                    provider=state.discover_source or state.current_source_name,
                 ),
                 col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
             )

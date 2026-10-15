@@ -25,6 +25,8 @@ import urllib.parse
 
 import primp
 
+from core.artwork import PROBE_REFERERS, guarded_host
+
 logger = logging.getLogger(__name__)
 
 USER_AGENT = (
@@ -159,6 +161,43 @@ def _b64_decode(s: str) -> str:
     return base64.urlsafe_b64decode(s + ("=" * padding)).decode("utf-8")
 
 
+# --- The display context: display-ready srcs for remote artwork -----------
+# The controller sets this once the proxy is up. `image_url()` is what the
+# display sites call; it wraps a RAW provider URL on the way to a control,
+# so nothing persisted ever carries a loopback port (the port changes every
+# run).
+_display_base: str | None = None
+_display_web = False
+
+IMAGE_CACHE_TTL = 900.0
+IMAGE_CACHE_MAX = 128
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def set_display_context(base: str | None, web: bool) -> None:
+    """The running proxy's base URL, and whether the platform is web (where
+    CORS blocks every cross-origin image)."""
+    global _display_base, _display_web
+    _display_base = base
+    _display_web = web
+
+
+def image_url(url: str, provider: str = "") -> str:
+    """The display src for remote artwork: the raw URL, or the loopback
+    /image route when the platform needs it — web (CORS) or a guarded host
+    (animeout's CF-challenged images; live probe 2026-10-15). data: URIs
+    (animepahe bakes those) and URLs with no context pass through."""
+    if not url or url.startswith("data:") or _display_base is None:
+        return url
+    if not (_display_web or guarded_host(url)):
+        return url
+    params = {"url": _b64_encode(url)}
+    referer = PROBE_REFERERS.get(provider or "", "")
+    if referer:
+        params["referer"] = _b64_encode(referer)
+    return f"{_display_base}/image?{urllib.parse.urlencode(params)}"
+
+
 class HLSProxy:
     """A loopback HTTP server that rewrites HLS playlists and streams media."""
 
@@ -174,6 +213,8 @@ class HLSProxy:
         # URL (2 upstream GETs per dialog open).
         self._master_cache: dict[str, tuple[float, str, str]] = {}
         self._master_ttl = 30.0
+        # Artwork fetches (the /image route): small, immutable-ish, TTL'd.
+        self._image_cache: dict[str, tuple[bytes, str, float]] = {}
 
     async def start(self) -> str:
         """Start the proxy server and return base URL e.g. http://127.0.0.1:8888."""
@@ -256,6 +297,8 @@ class HLSProxy:
             self.port = None
             self._started = False
             self._master_cache.clear()
+            self._image_cache.clear()
+            set_display_context(None, False)
             if was_running:
                 logger.info("HLSProxy stopped")
 
@@ -498,6 +541,8 @@ class HLSProxy:
                 await self._handle_playlist(
                     writer, target_url, upstream_headers, referer, variant, audio
                 )
+            elif parsed.path == "/image":
+                await self._handle_image(writer, target_url, upstream_headers)
             elif parsed.path in ("/segment", "/key"):
                 range_header = req_headers.get("range")
                 if range_header:
@@ -728,6 +773,61 @@ class HLSProxy:
             output_lines.append(stream_inf_line)
 
         return "\n".join(output_lines)
+
+    async def _handle_image(
+        self,
+        writer: asyncio.StreamWriter,
+        target_url: str,
+        upstream_headers: dict[str, str],
+    ):
+        """One artwork fetch, served with the CORS header — the web-CORS
+        and guarded-host route. Bodies are read whole (artwork is small),
+        capped, and memoized after the master cache's TTL/eviction shape."""
+        key = f"{target_url}|{upstream_headers.get('Referer', '')}"
+        now = time.monotonic()
+        hit = self._image_cache.get(key)
+        if hit is not None and now < hit[2]:
+            await self._send_response(writer, 200, hit[1], hit[0])
+            return
+        if not self._http_client:
+            await self._send_response(
+                writer, 500, "text/plain", b"Proxy client uninitialized"
+            )
+            return
+        try:
+            resp = await self._http_client.get(
+                target_url, headers=upstream_headers, follow_redirects=True
+            )
+        except Exception as ex:
+            logger.debug("image fetch failed for %s: %s", target_url, ex)
+            await self._send_response(
+                writer, 502, "text/plain", b"Upstream unavailable"
+            )
+            return
+        if resp.status_code != 200:
+            await self._send_response(
+                writer,
+                502,
+                "text/plain",
+                f"Upstream {resp.status_code}".encode(),
+            )
+            return
+        body = resp.content
+        if len(body) > MAX_IMAGE_BYTES:
+            await self._send_response(writer, 502, "text/plain", b"Image too large")
+            return
+        content_type = next(
+            (v for k, v in resp.headers.items() if k.lower() == "content-type"), ""
+        )
+        if not str(content_type).lower().startswith("image/"):
+            # A non-image upstream response is forwarded honestly as bytes,
+            # never as a fake image type.
+            content_type = "application/octet-stream"
+        if len(self._image_cache) >= IMAGE_CACHE_MAX:
+            oldest = min(self._image_cache, key=lambda k: self._image_cache[k][2])
+            self._image_cache.pop(oldest, None)
+        self._image_cache[key] = (body, content_type, now + IMAGE_CACHE_TTL)
+        await self._send_response(writer, 200, content_type, body)
 
     async def _handle_passthrough(
         self,

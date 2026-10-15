@@ -28,6 +28,8 @@ from core.constants import (
 from core.theme import AppColors
 from hooks.use_debounce import use_debounce
 from hooks.use_grid_mode import grid_sources, use_grid_mode
+from services.hls_proxy import image_url
+from services.providers.base import owner_of
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -353,6 +355,7 @@ def SearchScreen() -> ft.Control:
                             col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
                             now_playing=state.current_anime_session == a.session,
                             mode=grid_mode,
+                            provider=state.search_source or state.current_source_name,
                         )
                         for a in state.search_results
                     ],
@@ -397,7 +400,10 @@ def SearchScreen() -> ft.Control:
                             [
                                 ft.Container(
                                     content=ft.Image(
-                                        src=row.get("poster"),
+                                        src=image_url(
+                                            row.get("poster") or "",
+                                            owner_of(row["anime_session"]),
+                                        ),
                                         fit=ft.BoxFit.COVER,
                                         expand=True,
                                     )

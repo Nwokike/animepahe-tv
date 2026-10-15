@@ -23,6 +23,7 @@ from components.focus_styles import (
 from core.artwork import LANDSCAPE, PORTRAIT
 from core.tokens import CARD_ASPECT_LANDSCAPE, CARD_ASPECT_PORTRAIT
 from services.artwork_probe import cached_shape
+from services.hls_proxy import image_url
 
 __all__ = ["aspect_for", "card_media", "card_frame"]
 
@@ -41,19 +42,24 @@ def card_media(
     placeholder: ft.Control | None = None,
     error_content: ft.Control | None = None,
     opacity: float = 1.0,
+    provider: str = "",
 ) -> ft.Control:
     """The image layer for one card cell.
 
     ``placeholder`` shows when the item has no art at all (every provider
     shows something — the caller passes the backend's own fallback per the
     house law); ``error_content`` shows when a URL fails to load.
-    """
+    ``provider`` feeds the display route's referer when the platform wraps
+    the image (web CORS / guarded hosts)."""
     if not src:
         return placeholder or ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH)
+    # Shape comes from the RAW URL (the shape memo keys on it); only the
+    # control's src goes through the display route.
     shape = cached_shape(src)
+    display = image_url(src, provider)
     if shape not in (LANDSCAPE, PORTRAIT) or shape == mode:
         return ft.Image(
-            src=src,
+            src=display,
             fit=ft.BoxFit.COVER,
             expand=True,
             opacity=opacity,
@@ -62,7 +68,7 @@ def card_media(
     # Mismatch: frosted fill — blurred blow-up behind, scrim, true-aspect copy.
     return ft.Stack(
         controls=[
-            ft.Image(src=src, fit=ft.BoxFit.COVER, expand=True, opacity=opacity),
+            ft.Image(src=display, fit=ft.BoxFit.COVER, expand=True, opacity=opacity),
             ft.Container(blur=FROSTED_BLUR, expand=True),
             ft.Container(
                 bgcolor=ft.Colors.with_opacity(FROSTED_SCRIM_OPACITY, ft.Colors.BLACK),
@@ -70,7 +76,7 @@ def card_media(
             ),
             ft.Container(
                 content=ft.Image(
-                    src=src,
+                    src=display,
                     fit=ft.BoxFit.CONTAIN,
                     expand=True,
                     opacity=opacity,

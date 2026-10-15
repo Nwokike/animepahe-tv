@@ -16,10 +16,12 @@ art arrives as data: URIs and is sniffed locally without any network.
 import base64
 import binascii
 from collections.abc import Mapping, Sequence
+from urllib.parse import urlsplit
 
 __all__ = [
     "DATA_URI_HEAD_CHARS",
     "FALLBACK_MODE",
+    "GUARDED_IMAGE_HOSTS",
     "HEAD_LIMIT",
     "LANDSCAPE",
     "PORTRAIT",
@@ -28,6 +30,7 @@ __all__ = [
     "artwork_default_key",
     "decide_mode",
     "default_mode",
+    "guarded_host",
     "majority_shape",
     "probe_referer",
     "shape_from_bytes",
@@ -102,6 +105,20 @@ PROBE_REFERERS: dict[str, str] = {
     "animeout": "https://www.animeout.xyz/",
     "kayoanime": "https://kayoanime.com/",
 }
+
+# Hosts whose artwork 403s a direct fetch. Live probe 2026-10-15: the
+# anikato/kusonime/kayoanime image CDNs answer 200 both bare and with their
+# referer; www.animeout.xyz answers a Cloudflare "Just a moment" 403 either
+# way — the same wall family as its files. The loopback /image route is the
+# one place such a host can ever be given headers (or a clearance) later.
+GUARDED_IMAGE_HOSTS: tuple[str, ...] = ("animeout.xyz",)
+
+
+def guarded_host(url: str) -> bool:
+    """Does this URL's host need the loopback image route on every
+    platform (not just web, where CORS forces it for every host)?"""
+    host = urlsplit(url).hostname or ""
+    return any(host == h or host.endswith("." + h) for h in GUARDED_IMAGE_HOSTS)
 
 _SOF_MARKERS = frozenset(
     (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF)

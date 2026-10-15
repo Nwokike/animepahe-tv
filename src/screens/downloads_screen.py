@@ -12,6 +12,8 @@ import flet as ft
 from components.banner_ad import build_banner_ad
 from components.empty_state import EmptyState
 from core.theme import AppColors
+from services.hls_proxy import image_url
+from services.providers.base import owner_of
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -225,7 +227,7 @@ def DownloadsScreen() -> ft.Control:
         group["rows"].append((session, row))
 
     sections = []
-    for group in groups.values():
+    for session_key, group in groups.items():
         rows = sorted(
             group["rows"], key=lambda r: r[1].get("episode_num", 0), reverse=True
         )
@@ -238,7 +240,9 @@ def DownloadsScreen() -> ft.Control:
             [
                 ft.Container(
                     content=ft.Image(
-                        src=group["poster"], fit=ft.BoxFit.COVER, expand=True
+                        src=image_url(group["poster"] or "", owner_of(session_key)),
+                        fit=ft.BoxFit.COVER,
+                        expand=True,
                     )
                     if group["poster"]
                     else ft.Icon(

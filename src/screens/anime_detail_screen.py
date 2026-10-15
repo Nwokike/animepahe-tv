@@ -19,6 +19,8 @@ from components.pagination import pager as ft_pager
 from core.artwork import LANDSCAPE
 from core.theme import AppColors
 from hooks.use_grid_mode import grid_sources, use_grid_mode
+from services.hls_proxy import image_url
+from services.providers.base import owner_of
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -32,6 +34,7 @@ def _episode_card(
     menu_items=None,
     mode: str = LANDSCAPE,
     fallback_src: str = "",
+    provider: str = "",
 ) -> ft.Control:
     # Compact three-dot overflow (the KTV full-dialog treatment was
     # rejected): items are built per episode state, so the menu never
@@ -152,7 +155,7 @@ def _episode_card(
         [
             card_frame(
                 mode=mode,
-                media=card_media(ep.snapshot or fallback_src, mode),
+                media=card_media(ep.snapshot or fallback_src, mode, provider=provider),
                 overlay=overlay,
                 on_click=lambda e: on_play(anime_session, ep.session),
             ),
@@ -189,6 +192,9 @@ def AnimeDetailScreen() -> ft.Control:
     anime = state.selected_anime or {}
     title = anime.get("title") or "Loading..."
     poster = anime.get("poster")
+    # The provider that owns this page — its referer rides the image route
+    # when the platform wraps the artwork (web CORS / guarded hosts).
+    provider = owner_of(state.current_anime_session or "")
 
     # The detected grid shape for the episode list (this backend's own art;
     # an episode with none falls back to the series poster below).
@@ -216,7 +222,12 @@ def AnimeDetailScreen() -> ft.Control:
     backdrop_src = anime.get("backdrop") or poster
     backdrop = ft.Stack(
         [
-            ft.Image(src=backdrop_src, fit=ft.BoxFit.COVER, expand=True, opacity=0.3)
+            ft.Image(
+                src=image_url(backdrop_src, provider),
+                fit=ft.BoxFit.COVER,
+                expand=True,
+                opacity=0.3,
+            )
             if backdrop_src
             else ft.Container(bgcolor=ft.Colors.SURFACE),
             ft.Container(
@@ -238,7 +249,7 @@ def AnimeDetailScreen() -> ft.Control:
             color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK),
             offset=ft.Offset(0, 10),
         ),
-        content=ft.Image(src=poster, fit=ft.BoxFit.COVER, expand=True)
+        content=ft.Image(src=image_url(poster, provider), fit=ft.BoxFit.COVER, expand=True)
         if poster
         else ft.Container(
             content=ft.Icon(
@@ -436,6 +447,7 @@ def AnimeDetailScreen() -> ft.Control:
                         menu_items=menu_items,
                         mode=grid_mode,
                         fallback_src=poster or "",
+                        provider=provider,
                     ),
                     col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
                 )
