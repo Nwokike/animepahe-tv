@@ -18,6 +18,7 @@ from components.focus_styles import attach_focus_zoom
 from components.pagination import pager as ft_pager
 from core.artwork import LANDSCAPE
 from core.theme import AppColors
+from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -188,6 +189,13 @@ def AnimeDetailScreen() -> ft.Control:
     anime = state.selected_anime or {}
     title = anime.get("title") or "Loading..."
     poster = anime.get("poster")
+
+    # The detected grid shape for the episode list (this backend's own art;
+    # an episode with none falls back to the series poster below).
+    episode_sources = grid_sources(episodes, lambda e: e.snapshot)
+    grid_mode = use_grid_mode(
+        "episodes", episode_sources, state.current_source_name, state
+    )
 
     if not episodes and state.is_loading:
         return ft.Container(
@@ -426,6 +434,8 @@ def AnimeDetailScreen() -> ft.Control:
                         and now_playing["episode"] == ep.session,
                         state_glyph=state_glyph,
                         menu_items=menu_items,
+                        mode=grid_mode,
+                        fallback_src=poster or "",
                     ),
                     col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
                 )

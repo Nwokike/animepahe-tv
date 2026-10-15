@@ -18,6 +18,7 @@ from components.focus_styles import (
 )
 from components.result_card import result_card as _result_card
 from components.pagination import pager as ft_pager
+from core.artwork import LANDSCAPE
 from core.constants import (
     LBL_CF_BLOCKED_SEARCH,
     LBL_OFFLINE,
@@ -26,6 +27,7 @@ from core.constants import (
 )
 from core.theme import AppColors
 from hooks.use_debounce import use_debounce
+from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -90,6 +92,15 @@ def SearchScreen() -> ft.Control:
 
     query, set_query = ft.use_state("")
     debounced_query = use_debounce(query, 250)
+
+    # The detected grid shape for this screen (its own backend's own art).
+    result_sources = grid_sources(state.search_results, lambda a: a.poster)
+    grid_mode = use_grid_mode(
+        "search",
+        result_sources,
+        state.search_source or state.current_source_name,
+        state,
+    )
 
     def _submit(e=None):
         # `query` is local state and only ever set from a string, but the
@@ -341,6 +352,7 @@ def SearchScreen() -> ft.Control:
                             controller.open_anime,
                             col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
                             now_playing=state.current_anime_session == a.session,
+                            mode=grid_mode,
                         )
                         for a in state.search_results
                     ],
@@ -402,7 +414,7 @@ def SearchScreen() -> ft.Control:
                                         ),
                                     ),
                                     width=120,
-                                    height=170,
+                                    height=68 if grid_mode == LANDSCAPE else 170,
                                     border_radius=10,
                                     clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
                                 ),

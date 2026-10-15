@@ -30,6 +30,7 @@ from core.constants import (
     LBL_OFFLINE_BODY,
 )
 from core.theme import AppColors, next_theme_mode
+from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -279,7 +280,9 @@ def _theme_cycle(page) -> tuple[str, object]:
     return _THEME_ICONS.get(nxt, ft.Icons.DARK_MODE_ROUNDED), nxt
 
 
-def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
+def _continue_watching_row(
+    entries: dict, on_open, mode: str = LANDSCAPE
+) -> ft.Control | None:
     """Continue Watching shelf — newest first, capped."""
     if not entries:
         return None
@@ -307,7 +310,7 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
                         bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
                     ),
                     width=120,
-                    height=68,
+                    height=68 if mode == LANDSCAPE else 170,
                     border_radius=8,
                     clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
                 ),
@@ -482,6 +485,15 @@ def HomeScreen() -> ft.Control:
     _ = state.latest_version  # re-render trigger, bumped by the controller
     _ = state.continue_version
 
+    # The detected grid shape for this screen (its own backend's own art).
+    latest_sources = grid_sources(state.latest_releases, lambda r: r.snapshot)
+    grid_mode = use_grid_mode(
+        "latest",
+        latest_sources,
+        state.latest_source or state.current_source_name,
+        state,
+    )
+
     from flet import context as flet_context
 
     try:
@@ -526,6 +538,7 @@ def HomeScreen() -> ft.Control:
                 now_playing["anime"] == r.anime_session
                 and now_playing["episode"] == r.session,
                 col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
+                mode=grid_mode,
             )
             for r in releases
         ],
@@ -555,7 +568,7 @@ def HomeScreen() -> ft.Control:
                         PromoHero(),
                         build_banner_ad(page, inline=True),
                         _continue_watching_row(
-                            state.continue_watching, controller.open_anime
+                            state.continue_watching, controller.open_anime, grid_mode
                         )
                         or ft.Container(width=0, height=0),
                         ft.Text(

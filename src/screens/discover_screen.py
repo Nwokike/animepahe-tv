@@ -13,6 +13,7 @@ from components.banner_ad import build_banner_ad
 from components.empty_state import EmptyState
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
+from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -62,6 +63,10 @@ def DiscoverScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.discover_version
+
+    # The detected grid shape for this screen (its own backend's own art).
+    discover_sources = grid_sources(state.discover_results or [], lambda a: a.poster)
+    grid_mode = use_grid_mode("discover", discover_sources, state.discover_source, state)
 
     def _pick(key: str, value):
         selections = dict(state.discover_selections or {})
@@ -137,6 +142,7 @@ def DiscoverScreen() -> ft.Control:
                     anime,
                     controller.open_anime,
                     col=None,
+                    mode=grid_mode,
                 ),
                 col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
             )
