@@ -39,21 +39,40 @@ _PROGRESS_FLUSH_SECONDS = 0.5
 
 def _source_choices(sources) -> list[dict]:
     """Every site source as a choice dict, SUB (JPN) first then DUB (ENG),
-    each best-first — the exact list the original build showed and the
-    one both the play dialog and the download dialog render, so the two
-    can never disagree about what a quality means."""
+    each best-first — the exact list both the play dialog and the download
+    dialog render, so the two can never disagree about what a quality
+    means.
+
+    One logical rendition is ONE row: entries sharing (resolution, audio,
+    fansub, size, BD) are the same stream reached by different URLs (a
+    provider's mirror routes), and collapsing them is what lets the
+    single-rendition paths auto-play instead of asking a question with
+    two identical answers."""
     ordered = sorted(
         sources,
         key=lambda s: (str(s.audio or "").lower().startswith("eng"), -s.resolution),
     )
     choices: list[dict] = []
+    seen: set[tuple] = set()
     for src in ordered:
+        rendition = (
+            int(src.resolution or 0),
+            str(src.audio or "").lower(),
+            src.fansub or "",
+            str(getattr(src, "size", "") or ""),
+            bool(getattr(src, "bd", False)),
+        )
+        if rendition in seen:
+            continue
+        seen.add(rendition)
         audio_label = (
             "DUB (ENG)"
             if "eng" in (src.audio or "").lower()
             else f"SUB ({(src.audio or 'jpn').upper()})"
         )
-        label = f"{src.resolution}p - {audio_label}"
+        # An unknown resolution renders NOTHING — AniKato's master-only
+        # sources are 0 by design, and "0p - SUB (JPN)" is a lie.
+        label = f"{src.resolution}p - {audio_label}" if src.resolution else audio_label
         if src.fansub:
             label += f" ({src.fansub})"
         if getattr(src, "size", ""):

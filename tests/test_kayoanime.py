@@ -183,12 +183,12 @@ def test_episodes_walk_folders_dedupe_and_use_file_ids():
     assert has_more is False
     # quality carried from the post title, not invented
     sources = asyncio.run(provider.sources("kayoanime:961", "f274"))
-    assert len(sources) == 2  # keyed + keyless routes
-    assert all(s.resolution == 1080 for s in sources)
+    assert len(sources) == 1  # ONE Source: play url + download route
+    assert sources[0].resolution == 1080
     assert sources[0].url.startswith(
         "https://www.googleapis.com/drive/v3/files/f274?alt=media"
     )
-    assert "confirm=t" in sources[1].url
+    assert "confirm=t" in sources[0].download_url
     # The gated folder is named (not just logged) and the real filename survives.
     assert provider.gated_folders("kayoanime:961") == ["1080p [Private Drive]"]
     assert provider.file_name("kayoanime:961", "f274") == "Boruto - 274.mkv"
@@ -207,8 +207,9 @@ def test_sources_rejects_a_foreign_session_shape():
     provider = KayoanimeProvider(client=_PrimpLikeClient([]))
     for junk in ("48968|1", "48968|movie", "a b", "x/y", ""):
         assert asyncio.run(provider.sources("kayoanime:1", junk)) == []
-    # a valid-shaped id still yields both routes
-    assert len(asyncio.run(provider.sources("kayoanime:1", "f274"))) == 2
+    # a valid-shaped id still yields the single Source with both routes
+    valid = asyncio.run(provider.sources("kayoanime:1", "f274"))
+    assert len(valid) == 1 and "confirm=t" in valid[0].download_url
 
 
 def test_kayoanime_box_labels_are_batches_not_seasons():

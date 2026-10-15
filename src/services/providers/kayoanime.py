@@ -536,10 +536,12 @@ class KayoanimeProvider:
         return None
 
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
-        """The episode's direct file on the two routes the map verified:
-        keyed alt=media (206 with seek incl. tail) and the keyless
-        usercontent download route (206, real filename — the download
-        route). The file id IS the episode session."""
+        """The episode's file, as ONE Source: the keyed alt=media route is
+        the play URL (206 with seek incl. tail), the keyless usercontent
+        route rides download_url (206, real filename — the download
+        route). Both used to surface as separate Sources, so the picker
+        showed two identical rows reading "0p". The file id IS the
+        episode session."""
         if not _looks_like_drive_file_id(episode_session):
             # A session from another provider (namespaced "post|ep" shapes,
             # anything with a pipe or separators) is NOT a Drive file id.
@@ -564,13 +566,7 @@ class KayoanimeProvider:
                 audio="jpn",
                 fansub="Kayoanime",
                 headers={"Referer": DRIVE_REFERER},
-            ),
-            Source(
-                url=keyless,
-                resolution=resolution,
-                audio="jpn",
-                fansub="Kayoanime",
-                headers={"Referer": DRIVE_REFERER},
+                download_url=keyless,
             ),
         ]
 
