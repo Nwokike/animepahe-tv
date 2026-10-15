@@ -42,6 +42,20 @@ PROBE_HEADERS = {
 _mem: dict[str, str | None] = {}
 
 
+def cached_shape(src: str) -> str | None:
+    """The shape already known for this URL — a synchronous memo read.
+
+    Cards call this while building: a probed URL answers instantly, a
+    ``data:`` URI is sniffed locally (microseconds, no network), and None
+    means unknown (the caller keeps the house cover-crop).
+    """
+    if not src:
+        return None
+    if src.startswith("data:"):
+        return shape_from_data_uri(src)
+    return _mem.get(CACHE_PREFIX + src)
+
+
 async def shape_for(
     src: str,
     *,

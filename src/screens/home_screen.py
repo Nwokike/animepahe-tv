@@ -11,6 +11,7 @@ the same line: icon + wordmark left, actions right.
 
 import flet as ft
 
+from components.artwork_card import card_frame, card_media
 from components.banner_ad import build_banner_ad
 from components.cross_promo import PromoHero
 from components.focus_styles import (
@@ -19,6 +20,7 @@ from components.focus_styles import (
     card_focus_scale,
 )
 from components.pagination import pager as ft_pager
+from core.artwork import LANDSCAPE
 from core.constants import (
     APP_NAME,
     APP_VERSION,
@@ -33,7 +35,11 @@ from state.controller_ctx import ControllerMethodsCtx
 
 
 def _release_card(
-    release, on_select, now_playing: bool, col: dict | None = None
+    release,
+    on_select,
+    now_playing: bool,
+    col: dict | None = None,
+    mode: str = LANDSCAPE,
 ) -> ft.Control:
     play_icon = ft.Icon(
         ft.Icons.EQUALIZER_ROUNDED
@@ -42,76 +48,63 @@ def _release_card(
         size=40,
         color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
     )
-    image = (
-        ft.Image(src=release.snapshot, fit=ft.BoxFit.COVER, expand=True)
-        if release.snapshot
-        else ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH)
-    )
-    content = ft.Stack(
-        [
-            image,
-            ft.Container(
-                gradient=ft.LinearGradient(
-                    begin=ft.Alignment.CENTER_LEFT,
-                    end=ft.Alignment.CENTER_RIGHT,
-                    colors=[
-                        ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
-                        ft.Colors.TRANSPARENT,
-                    ],
-                ),
-                expand=True,
+    overlay = [
+        ft.Container(
+            padding=16,
+            alignment=ft.Alignment.CENTER_LEFT,
+            content=ft.Column(
+                [
+                    ft.Text(
+                        release.anime_title,
+                        color=ft.Colors.WHITE,
+                        weight=ft.FontWeight.BOLD,
+                        size=16,
+                        max_lines=2,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    ft.Text(
+                        # A per-anime release (anikato's new-release
+                        # grid) has no episode number — say "New
+                        # release" rather than "Episode 0".
+                        f"Episode {release.episode}"
+                        if release.episode
+                        else "New release",
+                        color=AppColors.PRIMARY,
+                        weight=ft.FontWeight.BOLD,
+                        size=12,
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                spacing=4,
             ),
-            ft.Container(
-                padding=16,
-                alignment=ft.Alignment.CENTER_LEFT,
-                content=ft.Column(
-                    [
-                        ft.Text(
-                            release.anime_title,
-                            color=ft.Colors.WHITE,
-                            weight=ft.FontWeight.BOLD,
-                            size=16,
-                            max_lines=2,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        ft.Text(
-                            # A per-anime release (anikato's new-release
-                            # grid) has no episode number — say "New
-                            # release" rather than "Episode 0".
-                            f"Episode {release.episode}"
-                            if release.episode
-                            else "New release",
-                            color=AppColors.PRIMARY,
-                            weight=ft.FontWeight.BOLD,
-                            size=12,
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=4,
-                ),
+        ),
+        ft.Container(
+            alignment=ft.Alignment.CENTER_RIGHT,
+            padding=16,
+            content=play_icon,
+        ),
+    ]
+    # The shared frame: a flat FilledButton (in flet 1.0.4 a Container has no
+    # on_focus/on_blur and no per-state side, so a Container card can't
+    # receive D-pad focus at all on TV). The FOCUSED side from the style
+    # plus the focus/blur scale are the focus ring.
+    return card_frame(
+        mode=mode,
+        media=card_media(release.snapshot, mode),
+        gradient=ft.Container(
+            gradient=ft.LinearGradient(
+                begin=ft.Alignment.CENTER_LEFT,
+                end=ft.Alignment.CENTER_RIGHT,
+                colors=[
+                    ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
+                    ft.Colors.TRANSPARENT,
+                ],
             ),
-            ft.Container(
-                alignment=ft.Alignment.CENTER_RIGHT,
-                padding=16,
-                content=play_icon,
-            ),
-        ],
-        expand=True,
-    )
-    # A FilledButton styled flat, not a Container: in flet 1.0.4 a Container
-    # has no on_focus/on_blur and no per-state side, so a Container card
-    # can't receive D-pad focus at all on TV. The FOCUSED side from
-    # card_button_style + the focus/blur scale are the focus ring.
-    return attach_focus_zoom(
-        ft.FilledButton(
-            content=content,
-            style=card_button_style(radius=16),
-            aspect_ratio=1.67,
-            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-            animate_scale=card_focus_scale(),
-            col=col,
-            on_click=lambda e: on_select(release.anime_session),
-        )
+            expand=True,
+        ),
+        overlay=overlay,
+        col=col,
+        on_click=lambda e: on_select(release.anime_session),
     )
 
 

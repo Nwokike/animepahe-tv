@@ -54,7 +54,7 @@ class _Episode:
         self.filler = False
 
 
-def _assert_focusable_card(card):
+def _assert_focusable_card(card, aspect=1.67):
     # A Button is the only focusable family among the card-ish controls.
     # The episode card wraps its button in a Stack (the overflow menu is a
     # sibling, not button content — see _episode_card), so unwrap it.
@@ -68,8 +68,9 @@ def _assert_focusable_card(card):
     sides = card.style.side
     assert sides[ft.ControlState.FOCUSED].width == 2.5
     assert sides[ft.ControlState.FOCUSED].color == "#F43F5E"
-    # Artwork keeps its aspect: the 1.67 landscape grid contract.
-    assert card.aspect_ratio == 1.67
+    # Artwork keeps its shape on the inner container (default: the 1.67
+    # landscape grid contract; the detected mode can swap it to 0.67).
+    assert card.content.aspect_ratio == aspect
 
 
 def test_episode_card_overflow_is_a_sibling_not_button_content():
@@ -121,3 +122,38 @@ def test_cards_pass_col_through_for_responsive_rows():
     col = {"xs": 12, "sm": 6}
     card = _release_card(_release(), lambda s: None, now_playing=False, col=col)
     assert card.col == col
+
+
+def _walk_controls(control):
+    yield control
+    for child in getattr(control, "controls", []) or []:
+        yield from _walk_controls(child)
+    content = getattr(control, "content", None)
+    if content is not None:
+        yield from _walk_controls(content)
+
+
+def test_release_card_portrait_mode_swaps_the_shape():
+    card = _release_card(_release(), lambda s: None, now_playing=False, mode="portrait")
+    assert card.content.aspect_ratio == 0.67
+
+
+def test_episode_card_portrait_mode_swaps_the_shape():
+    card = _episode_card(
+        _Episode(), lambda a, e: None, "sess", now_playing=False, mode="portrait"
+    )
+    assert card.controls[0].content.aspect_ratio == 0.67
+
+
+def test_episode_card_uses_the_series_fallback_when_the_episode_has_no_art():
+    ep = _Episode()
+    ep.snapshot = ""
+    card = _episode_card(
+        ep,
+        lambda a, e: None,
+        "sess",
+        now_playing=False,
+        fallback_src="https://example/series.jpg",
+    )
+    images = [n for n in _walk_controls(card.controls[0]) if isinstance(n, ft.Image)]
+    assert images and images[0].src == "https://example/series.jpg"

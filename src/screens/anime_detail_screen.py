@@ -2,7 +2,8 @@
 
 Craft carried from the original view: the blurred-poster backdrop (poster at
 30% + surface wash), 200x300 poster with shadow, responsive title, bullet
-metadata row, and 1.67 episode cards with the focus-ring border reserve.
+metadata row, and episode cards in the detected grid shape with the
+focus-ring border reserve.
 
 Data comes from the controller (Phase 1). Phase 2 makes this screen fetch
 its own anime by session — today it reads state.episodes like the old view.
@@ -10,14 +11,12 @@ its own anime by session — today it reads state.episodes like the old view.
 
 import flet as ft
 
+from components.artwork_card import card_frame, card_media
 from components.banner_ad import build_banner_ad
 from components.empty_state import EmptyState
-from components.focus_styles import (
-    attach_focus_zoom,
-    card_button_style,
-    card_focus_scale,
-)
+from components.focus_styles import attach_focus_zoom
 from components.pagination import pager as ft_pager
+from core.artwork import LANDSCAPE
 from core.theme import AppColors
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -30,12 +29,9 @@ def _episode_card(
     now_playing: bool,
     state_glyph=None,
     menu_items=None,
+    mode: str = LANDSCAPE,
+    fallback_src: str = "",
 ) -> ft.Control:
-    image = (
-        ft.Image(src=ep.snapshot, fit=ft.BoxFit.COVER, expand=True)
-        if ep.snapshot
-        else ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH)
-    )
     # Compact three-dot overflow (the KTV full-dialog treatment was
     # rejected): items are built per episode state, so the menu never
     # shows an action the current state can't honour.
@@ -61,110 +57,103 @@ def _episode_card(
             )
         ],
     )
-    content = ft.Stack(
-        [
-            image,
-            ft.Container(
-                gradient=ft.LinearGradient(
-                    begin=ft.Alignment.CENTER_LEFT,
-                    end=ft.Alignment.CENTER_RIGHT,
-                    colors=[
-                        ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
-                        ft.Colors.TRANSPARENT,
-                    ],
-                ),
-                expand=True,
+    overlay = [
+        ft.Container(
+            gradient=ft.LinearGradient(
+                begin=ft.Alignment.CENTER_LEFT,
+                end=ft.Alignment.CENTER_RIGHT,
+                colors=[
+                    ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
+                    ft.Colors.TRANSPARENT,
+                ],
             ),
-            ft.Container(
-                padding=16,
-                alignment=ft.Alignment.CENTER_LEFT,
-                content=ft.Column(
-                    [
-                        ft.Row(
-                            [
-                                ft.Text(
-                                    f"Episode {ep.episode}",
-                                    color=ft.Colors.WHITE,
-                                    weight=ft.FontWeight.BOLD,
-                                    size=16,
-                                ),
-                                ft.Container(width=6),
-                                ft.Container(
-                                    content=ft.Text(
-                                        "Filler",
-                                        size=9,
-                                        weight=ft.FontWeight.W_700,
-                                        color=AppColors.WARNING,
-                                    ),
-                                    padding=ft.Padding.symmetric(
-                                        horizontal=5, vertical=1
-                                    ),
-                                    border_radius=4,
-                                    border=ft.Border.all(
-                                        1,
-                                        ft.Colors.with_opacity(0.4, AppColors.WARNING),
-                                    ),
-                                    visible=bool(ep.filler),
-                                ),
-                            ],
-                            spacing=4,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
-                        ft.Text(
-                            " • ".join(
-                                [ep.duration or "24m"]
-                                + (["SUB"] if getattr(ep, "subs", False) else [])
-                                + (["DUB"] if getattr(ep, "dub", False) else [])
-                                + (
-                                    [_fmt_air_date(getattr(ep, "aired_ts", 0))]
-                                    if getattr(ep, "aired_ts", 0)
-                                    else []
-                                )
+            expand=True,
+        ),
+        ft.Container(
+            padding=16,
+            alignment=ft.Alignment.CENTER_LEFT,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text(
+                                f"Episode {ep.episode}",
+                                color=ft.Colors.WHITE,
+                                weight=ft.FontWeight.BOLD,
+                                size=16,
                             ),
-                            size=12,
-                            color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
+                            ft.Container(width=6),
+                            ft.Container(
+                                content=ft.Text(
+                                    "Filler",
+                                    size=9,
+                                    weight=ft.FontWeight.W_700,
+                                    color=AppColors.WARNING,
+                                ),
+                                padding=ft.Padding.symmetric(
+                                    horizontal=5, vertical=1
+                                ),
+                                border_radius=4,
+                                border=ft.Border.all(
+                                    1,
+                                    ft.Colors.with_opacity(0.4, AppColors.WARNING),
+                                ),
+                                visible=bool(ep.filler),
+                            ),
+                        ],
+                        spacing=4,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Text(
+                        " • ".join(
+                            [ep.duration or "24m"]
+                            + (["SUB"] if getattr(ep, "subs", False) else [])
+                            + (["DUB"] if getattr(ep, "dub", False) else [])
+                            + (
+                                [_fmt_air_date(getattr(ep, "aired_ts", 0))]
+                                if getattr(ep, "aired_ts", 0)
+                                else []
+                            )
                         ),
-                    ],
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    spacing=4,
-                ),
+                        size=12,
+                        color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                spacing=4,
             ),
-            ft.Container(
-                alignment=ft.Alignment.CENTER_RIGHT,
-                padding=16,
-                content=ft.Row(
-                    [
-                        state_glyph or ft.Container(width=0),
-                        ft.Icon(
-                            ft.Icons.EQUALIZER_ROUNDED
-                            if now_playing
-                            else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
-                            size=40,
-                            color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
-                        ),
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
+        ),
+        ft.Container(
+            alignment=ft.Alignment.CENTER_RIGHT,
+            padding=16,
+            content=ft.Row(
+                [
+                    state_glyph or ft.Container(width=0),
+                    ft.Icon(
+                        ft.Icons.EQUALIZER_ROUNDED
+                        if now_playing
+                        else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                        size=40,
+                        color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
+                    ),
+                ],
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-        ],
-        expand=True,
-    )
-    # Flat FilledButton so the D-pad can focus the episode (Container cards
-    # are unreachable on TV in flet 1.0.4); the FOCUSED side + scale are
-    # the focus ring. The menu is a Stack SIBLING — not button content, so
-    # D-pad reaches it and a tap on it no longer plays the card.
+        ),
+    ]
+    # The shared frame is a flat FilledButton, so the D-pad can focus the
+    # episode (Container cards are unreachable on TV in flet 1.0.4). The
+    # menu is a Stack SIBLING, not button content, so D-pad reaches it and
+    # a tap on it no longer plays the card. Art falls back to the series
+    # poster (the backend's own) when the episode has none.
     return ft.Stack(
         [
-            attach_focus_zoom(
-                ft.FilledButton(
-                    content=content,
-                    style=card_button_style(radius=16),
-                    aspect_ratio=1.67,
-                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                    animate_scale=card_focus_scale(),
-                    on_click=lambda e: on_play(anime_session, ep.session),
-                )
+            card_frame(
+                mode=mode,
+                media=card_media(ep.snapshot or fallback_src, mode),
+                overlay=overlay,
+                on_click=lambda e: on_play(anime_session, ep.session),
             ),
             ft.Container(
                 alignment=ft.Alignment.TOP_RIGHT,
