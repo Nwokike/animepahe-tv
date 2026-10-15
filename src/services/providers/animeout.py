@@ -209,9 +209,13 @@ class AnimeOutProvider:
         return spec
 
     async def browse(self, filters: dict, page: int) -> tuple[list[Anime], bool]:
+        # primp params must be STRINGS: the int per_page/page here raised
+        # "'int' object is not an instance of 'str'" on every browse, which
+        # tripped the breaker and made later searches fail "all circuits
+        # open" (owner's run, 2026-10-15).
         params: dict = {
-            "per_page": 24,
-            "page": page,
+            "per_page": "24",
+            "page": str(page),
             "_fields": "id,title,featured_media",
         }
         categories = filters.get("categories")

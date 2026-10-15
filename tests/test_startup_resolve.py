@@ -26,9 +26,11 @@ from state.app_state import state  # noqa: E402
 def _fresh_gate():
     state.startup_ready = False
     state.startup_stage = ""
+    state.current_source_name = ""
     yield
     state.startup_ready = False
     state.startup_stage = ""
+    state.current_source_name = ""
 
 
 class _Store:
@@ -110,6 +112,30 @@ def test_a_stored_preference_pins_without_probing():
     assert controller.calls == [1]
     assert state.startup_ready is True
     assert state.startup_stage == ""
+    # The header names the active source from the moment it resolves.
+    assert state.current_source_name == "kayoanime"
+
+
+def test_the_header_name_survives_a_failed_first_fetch():
+    """AnimePahe's wall: the fetch fails, the badge must still name the
+    source the owner chose (this used to blank to '…')."""
+    controller = _controller(pref="animepahe", latest="raise")
+    with pytest.raises(RuntimeError):
+        asyncio.run(controller.resolve_startup())
+    assert state.current_source_name == "animepahe"
+
+
+def test_a_switch_names_the_new_source_immediately():
+    controller = _controller(pref="")
+    seen = {}
+
+    async def scenario():
+        await controller.set_backend_pin("animepahe")
+        # Synchronously, before the spawned gate resolves anything.
+        seen["name"] = state.current_source_name
+
+    asyncio.run(scenario())
+    assert seen["name"] == "animepahe"
 
 
 def test_the_first_in_order_that_answers_serves():

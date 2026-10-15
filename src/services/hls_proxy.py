@@ -172,6 +172,17 @@ _display_web = False
 IMAGE_CACHE_TTL = 900.0
 IMAGE_CACHE_MAX = 128
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+# Failed fetches are negative-cached briefly and answered with a 1×1
+# transparent PNG (200): the renderer treats any non-200 as a page error
+# per image, and one walled host (animeout's CF-challenged wp-content)
+# used to bury the log in hundreds of them per render — every repeat also
+# re-fetched the wall. The placeholder + cache makes a blocked host quiet
+# and cheap; a routable host that recovers serves real bytes after the TTL.
+IMAGE_FAIL_TTL = 90.0
+PLACEHOLDER_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+    "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
 
 
 def set_display_context(base: str | None, web: bool) -> None:
@@ -215,6 +226,8 @@ class HLSProxy:
         self._master_ttl = 30.0
         # Artwork fetches (the /image route): small, immutable-ish, TTL'd.
         self._image_cache: dict[str, tuple[bytes, str, float]] = {}
+        # Failed image keys -> retry-after stamp (negative cache).
+        self._image_fail: dict[str, float] = {}
 
     async def start(self) -> str:
         """Start the proxy server and return base URL e.g. http://127.0.0.1:8888."""
@@ -298,6 +311,7 @@ class HLSProxy:
             self._started = False
             self._master_cache.clear()
             self._image_cache.clear()
+            self._image_fail.clear()
             set_display_context(None, False)
             if was_running:
                 logger.info("HLSProxy stopped")
@@ -774,6 +788,17 @@ class HLSProxy:
 
         return "\n".join(output_lines)
 
+    async def _placeholder_image(
+        self, writer: asyncio.StreamWriter, key: str, now: float
+    ) -> None:
+        """A failed fetch: quiet 1×1 PNG + negative cache (see the
+        constants' comment — non-200 image responses are page errors)."""
+        if len(self._image_fail) >= IMAGE_CACHE_MAX:
+            oldest = min(self._image_fail, key=lambda k: self._image_fail[k])
+            self._image_fail.pop(oldest, None)
+        self._image_fail[key] = now + IMAGE_FAIL_TTL
+        await self._send_response(writer, 200, "image/png", PLACEHOLDER_PNG)
+
     async def _handle_image(
         self,
         writer: asyncio.StreamWriter,
@@ -782,12 +807,16 @@ class HLSProxy:
     ):
         """One artwork fetch, served with the CORS header — the web-CORS
         and guarded-host route. Bodies are read whole (artwork is small),
-        capped, and memoized after the master cache's TTL/eviction shape."""
+        capped, and memoized after the master cache's TTL/eviction shape;
+        failures serve the placeholder and are negative-cached."""
         key = f"{target_url}|{upstream_headers.get('Referer', '')}"
         now = time.monotonic()
         hit = self._image_cache.get(key)
         if hit is not None and now < hit[2]:
             await self._send_response(writer, 200, hit[1], hit[0])
+            return
+        if now < self._image_fail.get(key, 0.0):
+            await self._send_response(writer, 200, "image/png", PLACEHOLDER_PNG)
             return
         if not self._http_client:
             await self._send_response(
@@ -800,21 +829,16 @@ class HLSProxy:
             )
         except Exception as ex:
             logger.debug("image fetch failed for %s: %s", target_url, ex)
-            await self._send_response(
-                writer, 502, "text/plain", b"Upstream unavailable"
-            )
+            await self._placeholder_image(writer, key, now)
             return
         if resp.status_code != 200:
-            await self._send_response(
-                writer,
-                502,
-                "text/plain",
-                f"Upstream {resp.status_code}".encode(),
-            )
+            logger.debug("image upstream %s for %s", resp.status_code, target_url)
+            await self._placeholder_image(writer, key, now)
             return
         body = resp.content
         if len(body) > MAX_IMAGE_BYTES:
-            await self._send_response(writer, 502, "text/plain", b"Image too large")
+            logger.debug("image too large for %s", target_url)
+            await self._placeholder_image(writer, key, now)
             return
         content_type = next(
             (v for k, v in resp.headers.items() if k.lower() == "content-type"), ""

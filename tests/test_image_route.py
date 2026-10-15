@@ -27,6 +27,7 @@ from core.artwork import PORTRAIT, PROBE_REFERERS  # noqa: E402
 from core.state import Anime  # noqa: E402
 from services.hls_proxy import (  # noqa: E402
     MAX_IMAGE_BYTES,
+    PLACEHOLDER_PNG,
     HLSProxy,
     _b64_decode,
     image_url,
@@ -160,13 +161,26 @@ def test_non_image_upstream_is_forwarded_as_bytes():
     assert head.endswith(b"<html>err</html>")
 
 
-def test_caps_and_upstream_errors_are_502():
+def test_failures_serve_a_quiet_placeholder_and_negative_cache():
+    """Non-200 image responses are page errors in the renderer, and one
+    walled host re-fetched on every render — failures now answer a 1×1
+    transparent PNG (200) and are negative-cached, so a blocked host is
+    quiet and cheap instead of hundreds of page errors per session."""
     proxy = HLSProxy()
     proxy._http_client = _FakeClient(_Resp(200, b"x" * (MAX_IMAGE_BYTES + 1)))
-    assert b"502" in _run_image(proxy, "https://cdn/big.jpg")
-    proxy._http_client = _FakeClient(_Resp(403, b"Just a moment...", "text/html"))
+    out = _run_image(proxy, "https://cdn/big.jpg")
+    assert out.startswith(b"HTTP/1.1 200 OK") and PLACEHOLDER_PNG in out
+
+    proxy = HLSProxy()
+    client = _FakeClient(_Resp(403, b"Just a moment...", "text/html"))
+    proxy._http_client = client
     out = _run_image(proxy, "https://cdn/blocked.jpg")
-    assert b"502" in out and b"Upstream 403" in out
+    assert out.startswith(b"HTTP/1.1 200 OK") and PLACEHOLDER_PNG in out
+    # Negative-cached: the second request never touches upstream again.
+    again = _run_image(proxy, "https://cdn/blocked.jpg")
+    assert PLACEHOLDER_PNG in again
+    assert client.calls == 1
+
     proxy._http_client = None
     assert b"500" in _run_image(proxy, "https://cdn/x.jpg")
 

@@ -1473,6 +1473,10 @@ class AppController:
                 self.router.set_pin(preference)
             else:
                 self.router.set_pin(await self._ordered_backend())
+            # The header names the ACTIVE source from the moment it is
+            # resolved — a failing first fetch (AnimePahe's wall) must not
+            # blank the badge. load_latest still updates it on success.
+            state.current_source_name = self.router.pin or ""
             state.startup_stage = "Loading releases…"
             try:
                 await self.load_latest(1)
@@ -1499,6 +1503,9 @@ class AppController:
         immediately and persists; the switch goes through the startup gate:
         splash → resolve → first fetch."""
         self.router.set_pin(name)
+        # The header/badge name the choice immediately — even if this
+        # source's first fetch fails (the gate card still offers Verify).
+        state.current_source_name = self.router.pin or ""
         await self.store.save_backend(name)
         logger.info("content source set to: %s", self.router.pin or "the default order")
         spawn(self.resolve_startup(), name="backend-switch")

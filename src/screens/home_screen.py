@@ -198,8 +198,20 @@ def _backend_badge(state, controller) -> ft.Control:
     )
 
 
+def _app_title(state) -> str:
+    """`<Backend> TV` — "Anikato TV", "Animepahe TV" — the active source's
+    own name for the header. The brand name only stands in before anything
+    is resolved (the splash covers that moment)."""
+    name = (getattr(state, "current_source_name", "") or "").strip()
+    return f"{name.capitalize()} TV" if name else APP_NAME
+
+
 def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
-    """Icon + wordmark left; search, version, theme right — the original line."""
+    """Icon + title-pill left; badge, version, actions right.
+
+    The title is the source switcher: "<Backend> TV ▾" — tapping it (like
+    the badge) opens the content-source picker, so changing backends never
+    depends on finding Settings."""
 
     def action(icon, tip, handler, icon_color=None) -> ft.Control:
         return ft.Container(
@@ -221,11 +233,30 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
                 ft.Row(
                     [
                         ft.Image(src="icon.png", width=32, height=32, fit="contain"),
-                        ft.Text(
-                            APP_NAME,
-                            size=20,
-                            weight=ft.FontWeight.W_800,
-                            color=ft.Colors.ON_SURFACE,
+                        ft.Container(
+                            content=ft.Row(
+                                [
+                                    ft.Text(
+                                        _app_title(state),
+                                        size=20,
+                                        weight=ft.FontWeight.W_800,
+                                        color=ft.Colors.ON_SURFACE,
+                                    ),
+                                    ft.Icon(
+                                        ft.Icons.ARROW_DROP_DOWN,
+                                        size=20,
+                                        color=ft.Colors.ON_SURFACE_VARIANT,
+                                    ),
+                                ],
+                                spacing=2,
+                                tight=True,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                            ),
+                            padding=ft.Padding.symmetric(horizontal=6, vertical=4),
+                            border_radius=10,
+                            ink=True,
+                            tooltip="Change content source",
+                            on_click=lambda e: controller.open_backend_picker(),
                         ),
                     ],
                     spacing=10,
@@ -411,6 +442,14 @@ def _cf_overlay_card(state, controller) -> ft.Control:
                     ),
                     on_click=lambda e: controller.retry_cloudflare(),
                 ),
+                ft.Container(height=6),
+                # The wall must never trap the user: swapping sources is
+                # one tap from the card itself (the header's title/arrow
+                # and badge do the same).
+                ft.TextButton(
+                    content="Change source",
+                    on_click=lambda e: controller.open_backend_picker(),
+                ),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=0,
@@ -566,43 +605,44 @@ def HomeScreen() -> ft.Control:
         is_loading=state.is_loading,
     )
 
-    body = ft.Column(
+    content = ft.Container(
+        content=ft.Column(
+            [
+                PromoHero(),
+                build_banner_ad(page, inline=True),
+                _continue_watching_row(
+                    state.continue_watching, controller.open_anime, grid_mode
+                )
+                or ft.Container(width=0, height=0),
+                ft.Text(
+                    "Recent Episodes",
+                    size=18,
+                    weight=ft.FontWeight.W_700,
+                    color=ft.Colors.ON_SURFACE,
+                ),
+                grid,
+                pager,
+                build_banner_ad(page, inline=True),
+                ft.Container(height=32),
+            ],
+            spacing=16,
+        ),
+        expand=True,
+        padding=ft.Padding.only(left=16, right=16, bottom=16),
+    )
+
+    # The CF gate scrims the CONTENT only — the header (title/arrow, badge,
+    # actions) stays live so the owner can always swap to another backend
+    # while one source is walled (owner's run, 2026-10-15).
+    if state.cf_blocked:
+        content = _cf_gate(content, state, controller)
+    return ft.Column(
         [
             _offline_banner() if not state.is_online else ft.Container(width=0),
             _header(state, page, controller, _toggle_theme, theme_icon),
-            ft.Container(
-                content=ft.Column(
-                    [
-                        PromoHero(),
-                        build_banner_ad(page, inline=True),
-                        _continue_watching_row(
-                            state.continue_watching, controller.open_anime, grid_mode
-                        )
-                        or ft.Container(width=0, height=0),
-                        ft.Text(
-                            "Recent Episodes",
-                            size=18,
-                            weight=ft.FontWeight.W_700,
-                            color=ft.Colors.ON_SURFACE,
-                        ),
-                        grid,
-                        pager,
-                        build_banner_ad(page, inline=True),
-                        ft.Container(height=32),
-                    ],
-                    spacing=16,
-                ),
-                expand=True,
-                padding=ft.Padding.only(left=16, right=16, bottom=16),
-            ),
+            content,
         ],
         spacing=0,
         expand=True,
         scroll=ft.ScrollMode.AUTO,
     )
-
-    if state.cf_blocked:
-        # The original kept the live grid behind a 60% scrim instead of
-        # replacing the screen — the app never looks broken, just gated.
-        return _cf_gate(body, state, controller)
-    return body
