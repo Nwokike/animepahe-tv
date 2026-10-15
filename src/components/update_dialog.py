@@ -22,6 +22,10 @@ def show_update_dialog(page: ft.Page, update_data: dict):
     """'New Version Available!' — mandatory updates block dismissal."""
     mandatory = bool(update_data.get("mandatory"))
     shared = get_shared_services(page)
+    # One guard for every dismissal path (the Later button, the global
+    # Back, a framework dismiss): the dialog used to be escapable through
+    # Back because only the button scheduled the re-show.
+    reshowing = False
 
     def _dismiss_dialog():
         # Clear the Back-handler registration whether the pop lands or not.
@@ -31,26 +35,50 @@ def show_update_dialog(page: ft.Page, update_data: dict):
         except Exception:
             pass
 
+    def _schedule_reshow():
+        nonlocal reshowing
+        if not mandatory or reshowing:
+            return
+        reshowing = True
+        page.run_task(_reshow)
+
+    async def _reshow():
+        nonlocal reshowing
+        await asyncio.sleep(0.35)
+        reshowing = False
+        try:
+            show_update_dialog(page, update_data)
+        except Exception:
+            pass
+
     async def open_download(e):
-        _dismiss_dialog()
-        await shared.launch_url(update_data["apk_url"])
+        apk_url = update_data.get("apk_url") or ""
+        if not apk_url:
+            # A missing/unsafe URL used to KeyError here and leave the
+            # dialog half-torn-down.
+            logger.info("update dialog: no apk_url, nothing to launch")
+            page.update()
+            return
+        # Dismiss only once the launch actually happens: a failed launch
+        # must not silently bypass a mandatory update.
+        launched = True
+        try:
+            await shared.launch_url(apk_url)
+        except Exception as ex:
+            launched = False
+            logger.info("update launch failed: %s", ex)
+        if launched:
+            _dismiss_dialog()
+        else:
+            _schedule_reshow()
         page.update()
 
     def dismiss(e):
         _dismiss_dialog()
         if mandatory:
-            # A mandatory update cannot be backed out of: dismissing
-            # (or Back) re-shows it (KTV's version_dialog discipline).
-            page.run_task(_reshow)
+            _schedule_reshow()
         else:
             page.update()
-
-    async def _reshow():
-        await asyncio.sleep(0.35)
-        try:
-            show_update_dialog(page, update_data)
-        except Exception:
-            pass
 
     actions = [
         ft.TextButton(content="Later", on_click=dismiss),
@@ -84,5 +112,7 @@ def show_update_dialog(page: ft.Page, update_data: dict):
         ),
         actions=actions,
         actions_alignment=ft.MainAxisAlignment.END,
+        # Back / any framework dismissal re-shows a mandatory update.
+        on_dismiss=lambda e: _schedule_reshow(),
     )
     show_app_dialog(page, dlg)

@@ -22,6 +22,15 @@ def result_card(
             fit=ft.BoxFit.COVER,
             expand=True,
             opacity=0.5 if now_playing else 1.0,
+            error_content=ft.Container(
+                content=ft.Icon(
+                    ft.Icons.BROKEN_IMAGE_ROUNDED,
+                    size=48,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                alignment=ft.Alignment.CENTER,
+                bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
+            ),
         )
         if anime.poster
         else ft.Container(
@@ -75,13 +84,13 @@ def result_card(
                         ft.Row(
                             [
                                 ft.Text(
-                                    str(anime.year),
+                                    str(anime.year or "—"),
                                     size=12,
                                     color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
                                 ),
                                 ft.Container(expand=True),
                                 ft.Text(
-                                    anime.type,
+                                    anime.type or "",
                                     size=12,
                                     color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
                                 ),

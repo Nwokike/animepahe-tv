@@ -31,6 +31,15 @@ def next_theme_mode(mode) -> ft.ThemeMode:
     return THEME_ORDER[(THEME_ORDER.index(mode) + 1) % len(THEME_ORDER)]
 
 
+def next_theme_token(token: str) -> str:
+    current_mode = mode_for_token(token)
+    return token_for_mode(next_theme_mode(current_mode))
+
+
+mode_from_token = mode_for_token
+token_from_mode = token_for_mode
+
+
 class AppColors:
     # Animepahe-TV custom premium palette
     PRIMARY = "#F43F5E"  # Rose 500

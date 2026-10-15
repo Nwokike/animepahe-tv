@@ -12,6 +12,26 @@ logger = logging.getLogger(__name__)
 BASE = "https://animepahe.com"
 
 
+def _safe_int(val, default: int = 0) -> int:
+    try:
+        if val is None or val == "":
+            return default
+        m = re.search(r"\d+", str(val))
+        return int(m.group(0)) if m else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(val, default: float = 0.0) -> float:
+    try:
+        if val is None or val == "":
+            return default
+        m = re.search(r"\d+(?:\.\d+)?", str(val))
+        return float(m.group(0)) if m else default
+    except (TypeError, ValueError):
+        return default
+
+
 class AnimePaheScraper:
     def __init__(self):
         self.ddos = DDoSSolver()
@@ -158,7 +178,8 @@ class AnimePaheScraper:
         results, has_more = await self._search_html(query, page)
         logger.info("SEARCH HTML fallback returned %d results", len(results))
         result = (results, has_more)
-        self._set_mem(cache_key, result, ttl=600)
+        if results:
+            self._set_mem(cache_key, result, ttl=600)
         return result
 
     async def _search_api(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
@@ -176,9 +197,15 @@ class AnimePaheScraper:
         except ValueError as ex:
             logger.error("SEARCH_API JSON decode failed: %s", ex)
             return [], False
-        # Resolve posters to base64 in parallel to bypass client-side Cloudflare blocks
+        # Resolve posters to base64 with bounded concurrency (avoids massive fan-out)
+        sem = asyncio.Semaphore(6)
+
+        async def _bounded_poster(url: str) -> str:
+            async with sem:
+                return await self._get_image_base64(url)
+
         tasks = [
-            self._get_image_base64(item.get("poster", ""))
+            _bounded_poster(item.get("poster", ""))
             for item in data.get("data", [])
         ]
         posters = await asyncio.gather(*tasks)
@@ -207,7 +234,7 @@ class AnimePaheScraper:
         logger.info("SEARCH_HTML q=%s page=%d", query, page)
         try:
             resp = await self.ddos.get(
-                f"{BASE}/", params={"search": query, "page": page}
+                f"{BASE}/", params={"search": query, "page": str(page)}
             )
             logger.info(
                 "SEARCH_HTML status=%s len=%s", resp.status_code, len(resp.text)
@@ -220,8 +247,14 @@ class AnimePaheScraper:
             return [], False
         cards, has_next = extract_anime_cards(resp.text)
 
-        # Resolve posters to base64 in parallel to bypass client-side Cloudflare blocks
-        tasks = [self._get_image_base64(card.get("data-poster", "")) for card in cards]
+        # Resolve posters to base64 with bounded concurrency
+        sem = asyncio.Semaphore(6)
+
+        async def _bounded_poster(url: str) -> str:
+            async with sem:
+                return await self._get_image_base64(url)
+
+        tasks = [_bounded_poster(card.get("data-poster", "")) for card in cards]
         posters = await asyncio.gather(*tasks)
 
         results = []
@@ -231,11 +264,11 @@ class AnimePaheScraper:
                     id=0,
                     title=card.get("data-title", ""),
                     type=card.get("data-type", ""),
-                    episodes=int(card.get("data-episodes", 0)),
+                    episodes=_safe_int(card.get("data-episodes", 0)),
                     status=card.get("data-status", ""),
                     season=card.get("data-season", ""),
-                    year=int(card.get("data-year", 0)),
-                    score=float(card.get("data-score", 0)),
+                    year=_safe_int(card.get("data-year", 0)),
+                    score=_safe_float(card.get("data-score", 0)),
                     poster=posters[i],
                     session=card.get("data-session", ""),
                 )
@@ -344,7 +377,8 @@ class AnimePaheScraper:
         logger.warning("SOURCES data-src empty, trying regex fallback")
         results = await self._sources_regex(anime_session, episode_session)
         logger.info("SOURCES regex returned %d results", len(results))
-        self._set_mem(cache_key, results, ttl=300)
+        if results:
+            self._set_mem(cache_key, results, ttl=300)
         return results
 
     async def _sources_data_src(
@@ -375,7 +409,7 @@ class AnimePaheScraper:
                 sources.append(
                     Source(
                         url=src,
-                        resolution=int(
+                        resolution=_safe_int(
                             el.get("data-resolution", 0) or el.get("data-res", 0) or 0
                         ),
                         audio=el.get("data-audio", "") or el.get("data-lang", "jpn"),

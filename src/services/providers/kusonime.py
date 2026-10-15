@@ -12,15 +12,23 @@ fetched by the downloader, not streamed).
 import logging
 import re
 
-from core.config import CACHE_TTL_EPISODES, CACHE_TTL_LATEST, CACHE_TTL_SEARCH
-from core.state import Anime, Episode, Source
+from core.config import (
+    CACHE_TTL_EPISODES,
+    CACHE_TTL_LATEST,
+    CACHE_TTL_SEARCH,
+    KUSONIME_API,
+    KUSONIME_BASE,
+)
+from core.state import Anime, Episode, LatestRelease, Source
 import primp
-from services.providers.base import make_session, split_session
+from services.providers.base import (
+    close_client,
+    make_session,
+    releases_from_anime,
+    split_session,
+)
 
 logger = logging.getLogger("animepahe.provider.kusonime")
-
-KUSONIME_API = "https://kusonime.com/wp-json/wp/v2"
-KUSONIME_BASE = "https://kusonime.com"
 
 # Hosts with a public, direct, documented API (verified in Phase 0).
 # Anything else on the page is ignored — no fragile leecher resolvers.
@@ -194,7 +202,7 @@ class KusonimeProvider:
                     f"{KUSONIME_API}/media",
                     params={
                         "include": ",".join(str(i) for i in media_ids),
-                        "per_page": 20,
+                        "per_page": "20",
                         "_fields": "id,source_url",
                     },
                 )
@@ -245,7 +253,7 @@ class KusonimeProvider:
         try:
             resp = await self._client.get(
                 f"{KUSONIME_API}/categories",
-                params={"per_page": 100, "_fields": "id,name,count"},
+                params={"per_page": "100", "_fields": "id,name,count"},
             )
             if resp.status_code == 200:
                 for row in resp.json():
@@ -300,7 +308,7 @@ class KusonimeProvider:
         posts = resp.json()
         return (await self._posts_to_anime(posts), len(posts) == 12)
 
-    async def latest_releases(self, page: int) -> tuple[list[Anime], bool]:
+    async def latest_releases(self, page: int) -> tuple[list[LatestRelease], bool]:
         key = f"latest_{page}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -318,7 +326,7 @@ class KusonimeProvider:
         if resp.status_code != 200:
             raise RuntimeError(f"kusonime HTTP {resp.status_code}")
         posts = resp.json()
-        result = (await self._posts_to_anime(posts), len(posts) == 12)
+        result = (releases_from_anime(await self._posts_to_anime(posts)), len(posts) == 12)
         self._cache_put(key, result, CACHE_TTL_LATEST)
         return result
 
@@ -489,7 +497,8 @@ class KusonimeProvider:
         episode (the film) — never a batch."""
         _, native = split_session(session)
         if not native.isdigit():
-            return []
+            # Callers unpack `episodes, has_more = ...` — a bare [] broke them.
+            return ([], False)
         key = f"episodes_{native}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -605,9 +614,12 @@ class KusonimeProvider:
         return []
 
     async def close(self):
-        await self._client.aclose()
-        if self._page_client and not self._page_client.is_closed:
-            await self._page_client.aclose()
+        # primp 2.0.1 has no aclose()/is_closed — close_client handles both
+        # real clients and the aclose-only test fakes.
+        await close_client(self._client)
+        if self._page_client is not None:
+            await close_client(self._page_client)
+            self._page_client = None
 
 
 def _post_slug(post: dict) -> str:

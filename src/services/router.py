@@ -20,7 +20,6 @@ docs/decisions.md):
   sessions ("animeout:123") route to their owner first.
 """
 
-import asyncio
 import logging
 import time
 
@@ -192,7 +191,14 @@ class ProviderRouter:
         )
         return result
 
-    async def _run(self, op: str, *args, force: bool = False, owner: str | None = None):
+    async def _run(
+        self,
+        op: str,
+        *args,
+        force: bool = False,
+        owner: str | None = None,
+        session_owned: bool = False,
+    ):
         """Try providers in editorial order (owner first when it owns the
         session); first provider with an actual ANSWER wins.
 
@@ -204,10 +210,23 @@ class ProviderRouter:
         The candidates race: while they run together the worst case is
         max(fastest, deadline) instead of the sum of the chain's
         timeouts, so a walled provider no longer sits at the front of
-        the wait. The first ANSWER (non-empty) cancels the rest."""
+        the wait. The first ANSWER (non-empty) cancels the rest.
+
+        session_owned: the op takes a session string that NAMES its
+        provider — only that provider is asked. Racing the others was
+        wasted work AND dangerous (flet run log, 2026-10-15): a provider
+        that returns unvalidated URLs (kayoanime probes nothing) won the
+        race with a stream built from another provider's session string,
+        and the ownerless lookups tripped animepahe's CF-clearing path
+        on every call. Title-keyed ops (episodes_for_title_any /
+        sources_for_title_any) are the sanctioned cross-provider path."""
         owner = owner or self._pin
         providers = self._providers
-        if owner:
+        if session_owned and owner:
+            providers = [p for p in providers if p.name == owner]
+            if not providers:
+                raise RouterError(f"no provider owns the session for {op}")
+        elif owner:
             providers = [p for p in providers if p.name == owner] + [
                 p for p in providers if p.name != owner
             ]
@@ -265,9 +284,18 @@ class ProviderRouter:
             self.last_winner = winner.name
             return outcomes[winner.name]
         if outcomes:
-            last = eligible[-1]
-            self.last_winner = last.name
-            return outcomes[last.name]
+            # The last provider that ANSWERED. Indexing by eligible[-1]
+            # assumed it answered — a later provider that raised (and so
+            # cancelled the group) is not in outcomes, and that indexing
+            # raised KeyError on the empty-then-raise path.
+            last_answered_name = list(outcomes)[-1]
+            final_name = (
+                eligible[-1].name
+                if eligible[-1].name in outcomes
+                else last_answered_name
+            )
+            self.last_winner = final_name
+            return outcomes[final_name]
         if errors:
             raise RouterError(f"all providers failed for {op}") from errors[-1]
         raise RouterError(f"no provider answered for {op}")
@@ -283,11 +311,21 @@ class ProviderRouter:
         return await self._run("search", query, page)
 
     async def episodes(self, session: str, page: int) -> tuple[list, bool]:
-        return await self._run("episodes", session, page, owner=owner_of(session))
+        return await self._run(
+            "episodes",
+            session,
+            page,
+            owner=owner_of(session),
+            session_owned=True,
+        )
 
     async def sources(self, anime_session: str, episode_session: str) -> list:
         return await self._run(
-            "sources", anime_session, episode_session, owner=owner_of(anime_session)
+            "sources",
+            anime_session,
+            episode_session,
+            owner=owner_of(anime_session),
+            session_owned=True,
         )
 
     async def episodes_for_title_any(
@@ -458,7 +496,16 @@ class ProviderRouter:
     async def _probe_one(self, provider: Provider) -> bool:
         started = self._clock()
         try:
-            ok = await asyncio.wait_for(provider.probe(), timeout=STARTUP_PROBE_TIMEOUT)
+            with anyio.fail_after(STARTUP_PROBE_TIMEOUT):
+                ok = await provider.probe()
+        except TimeoutError:
+            self._record_health(
+                provider,
+                ok=False,
+                latency_ms=(self._clock() - started) * 1000.0,
+                error="timeout",
+            )
+            return False
         except Exception as ex:
             self._record_health(
                 provider,

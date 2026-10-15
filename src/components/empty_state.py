@@ -24,6 +24,7 @@ def EmptyState(
             icon or ft.Icons.INBOX_ROUNDED,
             size=64,
             color=ft.Colors.ON_SURFACE_VARIANT,
+            semantics_label=title,
         ),
         ft.Text(
             title,
@@ -31,6 +32,8 @@ def EmptyState(
             weight=ft.FontWeight.W_600,
             color=ft.Colors.ON_SURFACE,
             text_align=ft.TextAlign.CENTER,
+            max_lines=2,
+            overflow=ft.TextOverflow.ELLIPSIS,
         ),
     ]
     if message:
@@ -41,6 +44,8 @@ def EmptyState(
                 color=ft.Colors.ON_SURFACE_VARIANT,
                 text_align=ft.TextAlign.CENTER,
                 width=320,
+                max_lines=4,
+                overflow=ft.TextOverflow.ELLIPSIS,
             )
         )
     if action_label and on_action:

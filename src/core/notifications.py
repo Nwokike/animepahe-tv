@@ -7,7 +7,7 @@ no-op instead of an exception. Nothing in the app may import
 flet_notifications directly.
 
 Every call below is written against the INSTALLED flet-notifications
-0.1.3 surface (verified in .venv, and its README):
+0.1.4 surface (verified in .venv, and its README):
 - ``flet_notifications.LocalNotifications`` is an ``ft.Service`` — one
   instance, self-registered with the page, never added to controls
 - ``await service.request_permissions() -> bool`` is the permission flow
@@ -121,6 +121,13 @@ def on_tap(handler) -> None:
 
     try:
         _service.on_tap = _dispatch
+        # Push the change: a handler assigned AFTER registration is not
+        # sent to Dart until the control updates, so the taps silently
+        # never arrived. Guarded — an unmounted service raises here.
+        try:
+            _service.update()
+        except Exception:
+            pass
     except Exception as ex:
         logger.info("on_tap install failed: %s", ex)
 
@@ -148,6 +155,18 @@ def stable_id(anime_session: str) -> int:
     return zlib.crc32(anime_session.encode()) % 1_000_000_000
 
 
+def stable_filename(anime_session: str, suffix: str = ".img") -> str:
+    """A stable, filesystem-safe FILE name for a per-anime artifact (the
+    cached poster art). Session strings contain ':', '|', '/', '*' —
+    all illegal or awkward in paths on some platform — so the name is the
+    session's crc32 plus the suffix. Stable across runs, so a re-cache
+    overwrites the same file instead of accumulating.
+
+    This helper used to be referenced from main.py but never defined —
+    the first follow-with-poster notification raised NameError."""
+    return f"notify-{stable_id(anime_session):010d}{suffix}"
+
+
 def download_id(episode_session: str) -> int:
     """A stable per-DOWNLOAD notification id. Its own band, so a
     download's progress row can never collide with a series' alert."""
@@ -161,6 +180,7 @@ async def ensure_channel() -> bool:
     when the extension is unavailable."""
     if not _ready():
         return False
+    global _unavailable
     try:
         from flet_notifications.channels import NotificationChannel
         from flet_notifications.types import Importance
@@ -174,6 +194,7 @@ async def ensure_channel() -> bool:
         await _service.create_notification_channel(channel)
         return True
     except Exception as ex:
+        _unavailable = True
         logger.info("channel create failed: %s", ex)
         return False
 
@@ -221,6 +242,7 @@ async def show_new_episode(
         )
         return True
     except Exception as ex:
+        _unavailable = True
         logger.info("show failed: %s", ex)
         return False
 
@@ -240,6 +262,7 @@ async def show_progress(
     imports the package."""
     if not _ready():
         return False
+    global _unavailable
     try:
         await _service.show(
             id=notification_id,
@@ -254,6 +277,7 @@ async def show_progress(
         )
         return True
     except Exception as ex:
+        _unavailable = True
         logger.info("progress show failed: %s", ex)
         return False
 
@@ -269,5 +293,6 @@ __all__ = [
     "payload_for",
     "anime_session_from",
     "stable_id",
+    "stable_filename",
     "CHANNEL_NEW_EPISODES",
 ]

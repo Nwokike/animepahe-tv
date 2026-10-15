@@ -36,6 +36,31 @@ def _episode_card(
         if ep.snapshot
         else ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH)
     )
+    # Compact three-dot overflow (the KTV full-dialog treatment was
+    # rejected): items are built per episode state, so the menu never
+    # shows an action the current state can't honour.
+    #
+    # A SIBLING of the play button, not nested in its content: an
+    # activatable control inside a Button's content swallows the card's
+    # on_play on tap AND is unreachable for D-pad focus (focus sits on
+    # the parent button). Overlaid in a Stack so the visual position is
+    # unchanged.
+    overflow = ft.PopupMenuButton(
+        icon=ft.Icons.MORE_VERT_ROUNDED,
+        icon_size=20,
+        icon_color=ft.Colors.WHITE,
+        menu_position=ft.PopupMenuPosition.UNDER,
+        tooltip="Episode options",
+        items=menu_items
+        or [
+            ft.PopupMenuItem(
+                content="Play",
+                icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                height=40,
+                on_click=lambda e: on_play(anime_session, ep.session),
+            )
+        ],
+    )
     content = ft.Stack(
         [
             image,
@@ -117,28 +142,6 @@ def _episode_card(
                             size=40,
                             color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
                         ),
-                        # Compact three-dot overflow (the KTV full-dialog
-                        # treatment was rejected): items are built per
-                        # episode state, so the menu never shows an action
-                        # the current state can't honour.
-                        ft.PopupMenuButton(
-                            icon=ft.Icons.MORE_VERT_ROUNDED,
-                            icon_size=20,
-                            icon_color=ft.Colors.WHITE,
-                            menu_position=ft.PopupMenuPosition.UNDER,
-                            tooltip="Episode options",
-                            items=menu_items
-                            or [
-                                ft.PopupMenuItem(
-                                    content="Play",
-                                    icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
-                                    height=40,
-                                    on_click=lambda e: on_play(
-                                        anime_session, ep.session
-                                    ),
-                                )
-                            ],
-                        ),
                     ],
                     spacing=8,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -149,16 +152,27 @@ def _episode_card(
     )
     # Flat FilledButton so the D-pad can focus the episode (Container cards
     # are unreachable on TV in flet 1.0.4); the FOCUSED side + scale are
-    # the focus ring.
-    return attach_focus_zoom(
-        ft.FilledButton(
-            content=content,
-            style=card_button_style(radius=16),
-            aspect_ratio=1.67,
-            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-            animate_scale=card_focus_scale(),
-            on_click=lambda e: on_play(anime_session, ep.session),
-        )
+    # the focus ring. The menu is a Stack SIBLING — not button content, so
+    # D-pad reaches it and a tap on it no longer plays the card.
+    return ft.Stack(
+        [
+            attach_focus_zoom(
+                ft.FilledButton(
+                    content=content,
+                    style=card_button_style(radius=16),
+                    aspect_ratio=1.67,
+                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                    animate_scale=card_focus_scale(),
+                    on_click=lambda e: on_play(anime_session, ep.session),
+                )
+            ),
+            ft.Container(
+                alignment=ft.Alignment.TOP_RIGHT,
+                padding=ft.Padding.only(top=14, right=10),
+                content=overflow,
+            ),
+        ],
+        expand=True,
     )
 
 
@@ -330,14 +344,6 @@ def AnimeDetailScreen() -> ft.Control:
         )
         return trailing, items
 
-    checked: set[str] = set()
-
-    def _toggle_issue(value: str):
-        if value in checked:
-            checked.discard(value)
-        else:
-            checked.add(value)
-
     def _open_series_download():
         """The whole-series dialog: a range, a quality preset, and N
         independent queued jobs (each failure is its own episode's)."""
@@ -353,10 +359,17 @@ def AnimeDetailScreen() -> ft.Control:
 
         No hooks: this dialog is built inside an event handler, so the
         note rides a plain cell (a setter call would raise — use_state is
-        render-time only)."""
+        render-time only). Checked issues are scoped per dialog open."""
         from core.tasks import spawn
 
+        checked: set[str] = set()
         cell = {"note": ""}
+
+        def _toggle_issue(value: str):
+            if value in checked:
+                checked.discard(value)
+            else:
+                checked.add(value)
 
         def _send():
             controller.close_dialog()
@@ -410,22 +423,28 @@ def AnimeDetailScreen() -> ft.Control:
             )
         )
 
-    grid = ft.ResponsiveRow(
-        controls=[
-            ft.Container(
-                content=_episode_card(
-                    ep,
-                    controller.play_episode,
-                    anime_session,
-                    now_playing["anime"] == anime_session
-                    and now_playing["episode"] == ep.session,
-                    state_glyph=_episode_state(ep)[0],
-                    menu_items=_episode_state(ep)[1],
-                ),
-                col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
+    def _render_ep_cards():
+        cards = []
+        for ep in episodes:
+            state_glyph, menu_items = _episode_state(ep)
+            cards.append(
+                ft.Container(
+                    content=_episode_card(
+                        ep,
+                        controller.play_episode,
+                        anime_session,
+                        now_playing["anime"] == anime_session
+                        and now_playing["episode"] == ep.session,
+                        state_glyph=state_glyph,
+                        menu_items=menu_items,
+                    ),
+                    col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
+                )
             )
-            for ep in episodes
-        ],
+        return cards
+
+    grid = ft.ResponsiveRow(
+        controls=_render_ep_cards(),
         spacing=12,
         run_spacing=12,
     )
@@ -720,8 +739,14 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
 
     def _preset(value):
         ui["preset"] = value
+        # The ui cell must ride as the ui= kwarg — it used to land in the
+        # `downloads` slot (the preset never stuck, and the range math
+        # called .get() on the string). `downloads` is this builder's own
+        # argument, so the re-open keeps the same completed-exclusion set.
         controller.open_sheet(
-            _build_series_download_dialog(episodes, controller, anime_session, ui)
+            _build_series_download_dialog(
+                episodes, controller, anime_session, downloads, ui
+            )
         )
 
     count = len([e for e in episodes if lo <= e.episode <= hi and e.session not in done])

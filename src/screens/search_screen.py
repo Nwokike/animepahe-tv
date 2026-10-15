@@ -177,17 +177,22 @@ def SearchScreen() -> ft.Control:
         set_query(value)
 
     field = ft.TextField(
+        autofocus=True,
         hint_text="Search anime...",
-        # 0.85.3 shape: the border is the InputBorder enum plus the flat
-        # radius/width/color kwargs. (A per-ControlState map of
-        # OutlineInputBorder is a LATER Flet API — it does not exist
-        # here, and constructing it raised on every render.)
-        border=ft.InputBorder.OUTLINE,
-        border_radius=16,
-        border_width=1,
-        border_color=ft.Colors.TRANSPARENT,
-        focused_border_width=1.5,
-        focused_border_color=AppColors.PRIMARY,
+        # flet 1.0.4 shape: the per-state OutlineInputBorder map. The old
+        # flat kwargs (border_radius/border_width/border_color/focused_*)
+        # still work but emit DeprecationWarnings at render and are
+        # removed in 1.3.0.
+        border={
+            ft.ControlState.DEFAULT: ft.OutlineInputBorder(
+                side=ft.BorderSide(width=1, color=ft.Colors.TRANSPARENT),
+                border_radius=16,
+            ),
+            ft.ControlState.FOCUSED: ft.OutlineInputBorder(
+                side=ft.BorderSide(width=1.5, color=AppColors.PRIMARY),
+                border_radius=16,
+            ),
+        },
         bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
         focused_bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
         prefix_icon=ft.Icons.SEARCH_ROUNDED,
@@ -418,12 +423,13 @@ def SearchScreen() -> ft.Control:
                             padding=4, radius=12, overlay_alpha=0.18
                         ),
                         animate_scale=card_focus_scale(1.03),
-                        on_click=lambda e, s=row["anime_session"]: (
-                            controller.open_anime(s)
+                        on_click=lambda e, s=row.get("anime_session", ""): (
+                            controller.open_anime(s) if s else None
                         ),
                     )
                 )
                 for row in follows[:20]
+                if isinstance(row, dict) and row.get("anime_session")
             ]
             follows_shelf = ft.Column(
                 [

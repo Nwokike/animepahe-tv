@@ -225,11 +225,11 @@ def test_one_progress_contract_for_both_paths(tmp_path):
 
 
 def test_the_queue_caps_concurrency_across_both_paths(tmp_path):
+    mgr = _manager(tmp_path)
+    assert mgr._job_limiter.total_tokens == MAX_PARALLEL_DOWNLOADS
     assert MAX_PARALLEL_DOWNLOADS >= 2
 
     async def _scenario():
-        import anyio
-
         held = 0
         peak = 0
 
@@ -240,15 +240,16 @@ def test_the_queue_caps_concurrency_across_both_paths(tmp_path):
             await asyncio.sleep(0.05)
             held -= 1
 
-        limiter = anyio.CapacityLimiter(MAX_PARALLEL_DOWNLOADS)
         async with anyio.create_task_group() as tg:
             for _ in range(8):
-                tg.start_soon(_guarded, limiter, _job)
+                tg.start_soon(_guarded, mgr._job_limiter, _job)
         return peak
 
     async def _guarded(limiter, coro_fn):
         async with limiter:
             await coro_fn()
+
+    import anyio
 
     peak = asyncio.run(_scenario())
     assert peak == MAX_PARALLEL_DOWNLOADS  # the rest queued, in start order

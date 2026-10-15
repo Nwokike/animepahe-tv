@@ -34,9 +34,12 @@ def register_fullscreen_toast(handler) -> None:
     _toast = handler
 
 
-def unregister_fullscreen_toast() -> None:
+def unregister_fullscreen_toast(handler=None) -> None:
+    """Clear the registered toast handler. When handler is given, clears
+    only if it matches the registered one to prevent stale teardown races."""
     global _toast
-    _toast = None
+    if handler is None or _toast == handler:
+        _toast = None
 
 
 def show_snack(
@@ -48,6 +51,13 @@ def show_snack(
     on_action=None,
 ) -> None:
     """Best-effort snackbar: logs failures, never raises."""
+    # Always dispatch to in-player toast if registered (dual dispatch)
+    if _toast is not None:
+        try:
+            _toast(message)
+        except Exception:
+            pass
+
     try:
         action = None
         if action_label:
@@ -60,11 +70,6 @@ def show_snack(
             action=action,
         )
         page.show_dialog(snack)
-        if _toast is not None:
-            try:
-                _toast(message)
-            except Exception:
-                pass
     except RuntimeError:
         # Same snack instance still on the stack: the message is already on
         # screen. Popping would close whatever real dialog is on top and

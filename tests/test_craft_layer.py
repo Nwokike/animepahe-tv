@@ -87,6 +87,6 @@ def test_promo_hero_has_the_support_slide():
     assert "feedback" in support["name"].lower()
 
 
-def test_promo_rotation_is_pausable():
-    """Rotation must pause on focus/click — never move focus under the user."""
-    assert ROTATE_SECONDS == 8  # unchanged from the original cadence
+def test_promo_rotation_cadence():
+    """Rotation interval is 8 seconds (unchanged from the original cadence)."""
+    assert ROTATE_SECONDS == 8

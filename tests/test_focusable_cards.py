@@ -56,6 +56,11 @@ class _Episode:
 
 def _assert_focusable_card(card):
     # A Button is the only focusable family among the card-ish controls.
+    # The episode card wraps its button in a Stack (the overflow menu is a
+    # sibling, not button content — see _episode_card), so unwrap it.
+    if isinstance(card, ft.Stack):
+        assert card.controls, "a Stack card must carry its button"
+        card = card.controls[0]
     assert isinstance(card, ft.Button), type(card).__name__
     assert card.on_focus is not None
     assert card.on_blur is not None
@@ -65,6 +70,31 @@ def _assert_focusable_card(card):
     assert sides[ft.ControlState.FOCUSED].color == "#F43F5E"
     # Artwork keeps its aspect: the 1.67 landscape grid contract.
     assert card.aspect_ratio == 1.67
+
+
+def test_episode_card_overflow_is_a_sibling_not_button_content():
+    """The overflow menu must NOT sit inside the play button's content:
+    nested, it swallowed the card's on_play and was unreachable on D-pad."""
+    import flet as ft
+
+    from screens.anime_detail_screen import _episode_card
+
+    card = _episode_card(_Episode(), lambda a, e: None, "sess", now_playing=False)
+    assert isinstance(card, ft.Stack)
+    button, menu_slot = card.controls
+    assert isinstance(button, ft.FilledButton)
+    assert isinstance(menu_slot.content, ft.PopupMenuButton)
+    # The button's own content tree carries no activatable menu.
+    def _walk(control):
+        yield control
+        for child in getattr(control, "controls", []) or []:
+            yield from _walk(child)
+        content = getattr(control, "content", None)
+        if content is not None:
+            yield from _walk(content)
+
+    for node in _walk(button):
+        assert not isinstance(node, ft.PopupMenuButton)
 
 
 def test_release_card_is_focusable():

@@ -20,13 +20,14 @@ import json
 import logging
 import re
 import time
+from urllib.parse import quote
 
 import primp
 
 from core.config import CACHE_TTL_EPISODES, CACHE_TTL_LATEST, CACHE_TTL_SEARCH
 from core.state import Anime, Episode, LatestRelease, Source
 from services.aes import aes_cbc_decrypt
-from services.providers.base import make_session, split_session
+from services.providers.base import close_client, make_session, split_session
 
 logger = logging.getLogger("animepahe.provider.anikato")
 
@@ -106,6 +107,13 @@ def _parse_items(html: str) -> list[Anime]:
     return results
 
 
+def _safe_float(raw: str) -> float:
+    """Leading numeric of a text field ("7.89 (1.2K users)" -> 7.89).
+    The old code let float() see the whole string and raised on the suffix."""
+    m = re.match(r"\s*(\d+(?:\.\d+)?)", raw or "")
+    return float(m.group(1)) if m else 0.0
+
+
 def _parse_watch(html: str) -> dict:
     """The watch page: anime id (drives the VRF episode list) + the full
     metadata the page serves — nothing dropped."""
@@ -141,7 +149,7 @@ def _parse_watch(html: str) -> dict:
         "status": _meta_after("Status"),
         "season": _clean(season_m.group(1)) if season_m else "",
         "episodes": int(episodes_raw) if episodes_raw.isdigit() else 0,
-        "score": float(score_raw) if re.match(r"[\d.]+", score_raw) else 0.0,
+        "score": _safe_float(score_raw),
         "aired": _meta_after("Aired"),
         "duration": _meta_after("Duration"),
         "genres": genres,
@@ -311,8 +319,10 @@ class AniKatoProvider:
         }
         from urllib.parse import urlencode
 
+        # primp's content arg is bytes — a str raises a TypeError in the
+        # Rust layer, so encode here.
         resp = await self._client.post(
-            url, headers=headers, content=urlencode(fields)
+            url, headers=headers, content=urlencode(fields).encode()
         )
         if resp.status_code != 200:
             raise RuntimeError(f"anikato POST {resp.status_code} for {url}")
@@ -518,7 +528,9 @@ class AniKatoProvider:
         self._cache_put(key, data, CACHE_TTL_EPISODES)
         return data
 
-    async def _episode_entries(self, anime_id: int) -> list[tuple[int, str]]:
+    async def _episode_entries(
+        self, anime_id: int
+    ) -> list[tuple[int, str, bool, bool, int]]:
         key = f"eplist_{anime_id}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -528,7 +540,7 @@ class AniKatoProvider:
         # bare before giving up.
         try:
             body = await self._get_text(
-                f"{BASE}/ajax/episode/list/{anime_id}?style=list&vrf={_vrf(anime_id)}",
+                f"{BASE}/ajax/episode/list/{anime_id}?style=list&vrf={quote(_vrf(anime_id), safe='')}",
                 xhr=True,
             )
         except Exception:
@@ -588,7 +600,10 @@ class AniKatoProvider:
         if cached is not None:
             return cached
         html = await self._get_text(
-            f"{BASE}/ajax/server/list?servers={ids_token}", xhr=True
+            # ids_token is base64 (contains +/=) — unquoted it corrupts the
+            # query (+ decodes as a space server-side).
+            f"{BASE}/ajax/server/list?servers={quote(ids_token, safe='')}",
+            xhr=True,
         )
         data = json.loads(html)
         if data.get("status") != 200:
@@ -637,7 +652,10 @@ class AniKatoProvider:
         watch = await self._watch_page(slug)
         fields: list[tuple[str, str]] = [
             ("show_id", str(watch.get("anime_id") or "")),
-            ("episode_id", ""),
+            # The site's own form (buildReportPostData in the watch page)
+            # sends the episode NUMBER as episode_id — it is not a numeric
+            # row id. ep_num is validated above, so this is always filled.
+            ("episode_id", str(ep_num)),
             ("server_name", server_name),
             ("show_slug", slug),
             ("note", note.strip()[:500]),
@@ -729,7 +747,9 @@ class AniKatoProvider:
         num = int(num_s)
         watch = await self._watch_page(slug)
         entries = await self._episode_entries(watch["anime_id"])
-        ids_token = next((ids for n, ids in entries if n == num), "")
+        # Entries are 5-tuples (num, ids, subs, dub, aired_ts) — the old
+        # 2-name unpack raised ValueError on every call.
+        ids_token = next((ids for n, ids, *_ in entries if n == num), "")
         if not ids_token:
             return []  # genuinely no servers for this episode — a result
         servers = await self._server_links(ids_token)
@@ -788,7 +808,9 @@ class AniKatoProvider:
         return []
 
     async def close(self) -> None:
-        pass
+        # pass used to leak the pooled client; close_client releases a real
+        # primp client (and tolerates the aclose-only test fakes).
+        await close_client(self._client)
 
     # ------------------------------------------------------------------
     # Discovery: airing schedule + surprise-me

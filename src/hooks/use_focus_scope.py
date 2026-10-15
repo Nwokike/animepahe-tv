@@ -14,7 +14,7 @@ import inspect
 
 import flet as ft
 
-_KEYS = {"Back", "Escape", "BrowserBack", "Go Back", "Browser Back"}
+_KEYS = {"Back", "Escape", "BrowserBack", "Go Back", "Browser Back", "Backspace"}
 
 
 def focus_scope(content, on_back) -> ft.Control:
@@ -23,17 +23,29 @@ def focus_scope(content, on_back) -> ft.Control:
 
     def _handler(e):
         if e.key in _KEYS:
-            page = ft.context.page
+            # ft.context.page RAISES RuntimeError outside a live page
+            # context — it never returns None, so the old `if page is
+            # None` guard was dead code.
+            try:
+                page = ft.context.page
+            except RuntimeError:
+                return
             if page is None:
                 return
-            # run_task() only accepts coroutine FUNCTIONS; a sync handler
-            # would raise "handler must be a coroutine function".
+            # run_task() only accepts coroutine FUNCTIONS; a lambda
+            # returning a coroutine fails that check with a TypeError —
+            # which is exactly what the old code passed, breaking player
+            # Back entirely.
             if inspect.iscoroutinefunction(on_back):
                 page.run_task(on_back)
             else:
                 result = on_back()
                 if asyncio.iscoroutine(result):
-                    page.run_task(lambda: result)
+
+                    async def _run():
+                        await result
+
+                    page.run_task(_run)
 
     return ft.KeyboardListener(
         content=content,

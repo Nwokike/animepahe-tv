@@ -75,20 +75,29 @@ _BOX_FITS = {
 }
 
 
-def _stream_variants(m3u8_text: str) -> list[dict]:
+def _stream_variants(
+    m3u8_text: str, playlist_url: str | None = None
+) -> list[dict]:
     """Parse an HLS master playlist into variants.
 
     Returns [] for a media playlist (single quality) or anything
     malformed — the caller then hides the quality chip entirely.
+
+    Relative variant URIs resolve against ``playlist_url`` (the master's
+    own address). The old code used the FIRST media line as the base, so
+    every relative variant collapsed onto one URI — pinning any quality
+    replayed the same rendition.
     """
     if not m3u8_text or "#EXT-X-STREAM-INF" not in m3u8_text:
         return []
-    base = None
     lines = m3u8_text.splitlines()
-    for line in lines:
-        if line and not line.startswith("#"):
-            base = line
-            break
+
+    def _resolve(line: str) -> str:
+        if line.startswith("http") or not playlist_url:
+            return line
+        base = playlist_url.rsplit("/", 1)[0]
+        return f"{base}/{line}"
+
     variants = []
     pending: dict = {}
     for line in lines:
@@ -103,7 +112,7 @@ def _stream_variants(m3u8_text: str) -> list[dict]:
             if bw:
                 pending["bandwidth"] = int(bw.group(1))
         elif pending and line and not line.startswith("#"):
-            uri = line if line.startswith("http") else base
+            uri = _resolve(line)
             entry = dict(pending)
             entry["uri"] = uri
             label = (
@@ -877,25 +886,37 @@ class ImmersivePlayer(ft.Stack):
 
         spawn(_seek(), name="player-seek")
 
-    async def will_unmount(self):
+    def will_unmount(self):
         """Overlay-removal safety net: the shell can drop the player
         without handle_close (remount races) — the position save must
-        not depend on the close path landing."""
-        # The toast registry goes with the chip; a survivor chip pointing
-        # at unmounted controls is the leak this closes.
+        not depend on the close path landing.
+
+        SYNC on purpose: flet invokes ``will_unmount()`` without awaiting
+        (messaging/session.py), so an async version produced a
+        "coroutine was never awaited" warning and the save NEVER RAN.
+        The async half rides spawn(); the toast unregister — staleness-
+        guarded so a stale unmount cannot clear a newer player's chip —
+        happens synchronously.
+        """
         try:
             from core.notify import unregister_fullscreen_toast
 
-            unregister_fullscreen_toast()
+            unregister_fullscreen_toast(self._toast_show)
         except Exception:
             pass
         if self._position_saved or self._is_closing:
             return
-        try:
-            await asyncio.wait_for(self._save_current_position(), timeout=2.0)
-        except Exception:
-            pass
-        self._position_saved = True
+
+        async def _save():
+            try:
+                await asyncio.wait_for(self._save_current_position(), timeout=2.0)
+            except Exception:
+                pass
+            self._position_saved = True
+
+        from core.tasks import spawn
+
+        spawn(_save(), name="player-unmount-save")
 
     async def _save_current_position(self):
         if self._position_saved or self._is_closing:
@@ -1117,9 +1138,17 @@ class ImmersivePlayer(ft.Stack):
 
     def _on_first_ready(self, e=None):
         logger.info("player ready")
-        self._hide_overlay()
-        self._check_and_trigger_seek()
-        self._apply_default_subtitle()
+        # A close or a final error can land between "loading" and this
+        # signal — hiding the overlay then swallowed the error card the
+        # user needed to see.
+        if not self._is_closing and not self._is_final_error:
+            self._hide_overlay()
+            self._check_and_trigger_seek()
+            self._apply_default_subtitle()
+        # The speed read can land before or after this signal; either way
+        # the saved rate must reach the video (it used to only ride the
+        # chip text and be reapplied after a playlist swap).
+        self._restore_speed_after_swap()
 
     def _on_duration_change(self, e):
         seconds = self._seconds(getattr(e, "data", None))
@@ -1147,10 +1176,21 @@ class ImmersivePlayer(ft.Stack):
         try:
             from core.notify import show_snack
 
+            # The confirmation rides the RESULT — announcing before the
+            # await claimed success the frame may never produce (and an
+            # ignored failure left the user with a photo that isn't).
+            shot = await asyncio.wait_for(self.video.take_screenshot(), timeout=5.0)
+            if shot is None:
+                show_snack(
+                    self._page(), "Screenshot unavailable", bgcolor=AppColors.PRIMARY
+                )
+                return
             show_snack(self._page(), "Saved a screenshot", bgcolor=AppColors.PRIMARY)
-            await asyncio.wait_for(self.video.take_screenshot(), timeout=5.0)
         except Exception as ex:
             logger.info("snapshot failed: %s", ex)
+            from core.notify import show_snack
+
+            show_snack(self._page(), "Screenshot failed", bgcolor=AppColors.PRIMARY)
 
     def _page(self):
         from flet import context as flet_context
@@ -1228,10 +1268,14 @@ class ImmersivePlayer(ft.Stack):
             self.toast_chip.update()
         except Exception:
             pass
+        # Generation counter: an older _hide task used to fire early and
+        # hide a toast that had just been replaced.
+        self._toast_gen = getattr(self, "_toast_gen", 0) + 1
+        gen = self._toast_gen
 
         async def _hide():
             await asyncio.sleep(2.0)
-            if self._is_closing:
+            if self._is_closing or gen != self._toast_gen:
                 return
             self.toast_chip.visible = False
             try:
@@ -1313,8 +1357,10 @@ class ImmersivePlayer(ft.Stack):
             return
         start, end = window
         # Land 1s past the window so the chip does not re-flash.
+        # ft.DurationValue: a bare int is MILLISECONDS in flet-video, so
+        # the raw-seconds seek jumped to ~1ms instead of ~1s.
         try:
-            await self.video.seek(end + 1)
+            await self.video.seek(ft.Duration(seconds=end + 1))
         except Exception as ex:
             logger.warning("skip seek failed: %s", ex)
             return

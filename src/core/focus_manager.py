@@ -2,6 +2,19 @@ import flet as ft
 
 _BACK_KEYS = ("Escape", "Go Back", "Browser Back", "Backspace", "Back", "BrowserBack")
 
+# Key names that mean "erase a character" when a text field has focus —
+# they must not also mean "navigate away" (the search fields type them
+# hundreds of times a session).
+_TEXT_INPUT_TYPES = tuple(
+    t
+    for t in (
+        getattr(ft, "TextField", None),
+        getattr(ft, "SearchBar", None),
+        getattr(ft, "CupertinoTextField", None),
+    )
+    if t is not None
+)
+
 
 class FocusManager:
     """Global Back delivery. CHAINED, not overwritten: a plain
@@ -24,15 +37,36 @@ class FocusManager:
         self._back_handler = handler
 
     def _handle_keyboard(self, e: ft.KeyboardEvent):
-        # The previously installed handler still gets its event.
+        # The previously installed handler still gets its event — and if
+        # it is async, its result is awaited on the loop (the old code
+        # dropped the coroutine on the floor).
         if self._previous is not None and callable(self._previous):
             try:
-                self._previous(e)
+                result = self._previous(e)
+                if hasattr(result, "__await__"):
+                    # run_task takes a coroutine FUNCTION and calls it;
+                    # pass the awaiting wrapper plus the coroutine as its
+                    # argument (not the coroutine object itself).
+                    self.page.run_task(_await_coroutine, result)
             except Exception:
                 pass
-        if e.key in _BACK_KEYS:
+        if e.key in _BACK_KEYS and not self._is_text_editing(e):
             if self._back_handler:
-                self._back_handler()
+                try:
+                    self._back_handler()
+                except Exception:
+                    pass  # never break key dispatch
+
+    @staticmethod
+    def _is_text_editing(e: ft.KeyboardEvent) -> bool:
+        """Backspace while a text field holds focus deletes a character —
+        it must not navigate away from the user's half-typed query."""
+        if e.key != "Backspace":
+            return False
+        control = getattr(e, "control", None)
+        if control is None:
+            return False
+        return isinstance(control, _TEXT_INPUT_TYPES)
 
     def restore(self) -> None:
         """Give the page back the handler that was here before (an
@@ -51,3 +85,8 @@ class FocusManager:
                     pass
 
         return _on_focus
+
+
+async def _await_coroutine(result):
+    """Schedule a bare coroutine (a previous handler returning one)."""
+    await result

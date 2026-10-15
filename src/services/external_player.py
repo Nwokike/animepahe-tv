@@ -125,6 +125,17 @@ async def launch_external(
     deep_link = build_deep_link(m3u8_url, title)
     logger.info("launching external player: %s", title)
     shared = get_shared_services(page)
+    # Ask the OS FIRST: a custom scheme with no handler does not raise on
+    # Android — the void-returning launch_url "succeeds" and the install
+    # dialog never showed.
+    try:
+        if not await shared.launcher.can_launch_url(deep_link):
+            logger.warning("no app handles %s — offering install dialog", deep_link)
+            show_ktv_install_dialog(page)
+            return False
+    except Exception as ex:
+        # can_launch_url itself is best-effort: fall through and try.
+        logger.info("can_launch_url failed: %s", ex)
     if await shared.launch_url(deep_link):
         return True
     logger.warning("external player launch failed — offering install dialog")

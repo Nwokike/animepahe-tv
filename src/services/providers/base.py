@@ -36,6 +36,47 @@ def owner_of(session: str) -> str:
     return name or DEFAULT_OWNER
 
 
+async def close_client(client) -> None:
+    """Release a primp client. primp 2.0.1's AsyncClient exposes ONLY the
+    context-manager protocol (``__aenter__``/``__aexit__``) — there is no
+    ``aclose()``/``close()``/``is_closed`` (calling one is an AttributeError
+    at runtime; the old code did exactly that on every close path). Test
+    fakes implement ``aclose()`` only, so prefer ``__aexit__`` and fall
+    back to it."""
+    if client is None:
+        return
+    aexit = getattr(client, "__aexit__", None)
+    if aexit is not None:
+        await aexit(None, None, None)
+        return
+    aclose = getattr(client, "aclose", None)
+    if aclose is not None:
+        await aclose()
+
+
+def releases_from_anime(items: list) -> list:
+    """Catalog rows -> the release-grid shape the home screen reads.
+
+    ``latest_releases`` must return ``LatestRelease`` rows (anime_session /
+    anime_title / snapshot / episode / session) — the WP-shaped providers
+    used to return raw ``Anime`` rows, and the home grid crashed on
+    ``release.anime_session`` the first time one of them won the race.
+    episode=0 and session="" say "per-anime row, no specific episode",
+    which is the truth for a new-release grid; nothing is invented."""
+    return [
+        LatestRelease(
+            anime_id=a.id,
+            anime_title=a.title,
+            anime_session=a.session,
+            episode=0,
+            snapshot=a.poster,
+            session="",
+            created_at="",
+        )
+        for a in items
+    ]
+
+
 @runtime_checkable
 class Provider(Protocol):
     name: str
@@ -56,11 +97,24 @@ class Provider(Protocol):
         that is a RESULT, not a failure, and does not fail over."""
         ...
 
-    # ------------------------------------------------------------------
-    # Discovery (OPTIONAL — duck-typed, exactly like schedule_tabs /
-    # random_slug). A provider whose source has no browse surface simply
-    # does not define these, and the router never asks it for them.
-    # ------------------------------------------------------------------
+    # The router's title-keyed failover calls these on every provider —
+    # they were missing from this Protocol entirely while all five
+    # providers implemented them and router.py called them at :307/:343.
+    async def episodes_for_title(self, title: str) -> list[Episode]: ...
+
+    async def sources_for_title(self, title: str, episode: int) -> list[Source]: ...
+
+    async def close(self) -> None: ...
+
+
+@runtime_checkable
+class BrowserProvider(Protocol):
+    """Discovery surface a provider exposes only when its source has one.
+    Kept separate from ``Provider`` because ``isinstance`` against a
+    runtime_checkable Protocol checks attribute presence — declaring these
+    as required members made valid providers (e.g. animepahe) fail the
+    check. The router's duck-typed hasattr probing is the right gate; this
+    Protocol only documents the shape."""
 
     async def filters(self) -> list[dict]:
         """The filter vocabulary THIS provider's source offers, as
@@ -76,13 +130,14 @@ class Provider(Protocol):
         matched — a RESULT, not a failure."""
         ...
 
-    async def close(self) -> None: ...
-
 
 __all__ = [
     "Provider",
+    "BrowserProvider",
     "DEFAULT_OWNER",
     "make_session",
     "split_session",
     "owner_of",
+    "close_client",
+    "releases_from_anime",
 ]

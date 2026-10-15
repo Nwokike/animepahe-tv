@@ -192,13 +192,15 @@ async def test_toast_registers_at_mount_and_unregisters_at_unmount():
 
     player.did_mount()
     # Identity-free check: bound methods are fresh objects per access, so
-    # drive the registered handler instead of comparing it.
+    # drive the registered handler instead of comparing them.
     assert notify._toast is not None
     notify._toast("hello")
     assert player.toast_chip.content.value == "hello"
 
-    await player.will_unmount()
+    # will_unmount is SYNC (flet never awaits it); the save rides spawn().
+    player.will_unmount()
     assert notify._toast is None
+    await asyncio.sleep(0)  # let the spawned save task finish
 
 
 @pytest.mark.asyncio
@@ -207,8 +209,45 @@ async def test_unmount_unregisters_even_when_the_close_path_already_saved():
     net must still release the registry (it short-circuits the save)."""
     player = _player()
     player._position_saved = True
-    await player.will_unmount()
+    player.will_unmount()
     assert notify._toast is None
+
+
+@pytest.mark.asyncio
+async def test_will_unmount_is_sync_and_still_saves_the_position():
+    """The crash the flet run log exposed: an ASYNC will_unmount produced
+    "coroutine was never awaited" — flet calls it without awaiting, so the
+    safety-net save never ran. It must be sync and schedule the save."""
+    import asyncio as _asyncio
+    from types import SimpleNamespace
+
+    saved = {}
+
+    class _Store:
+        async def save_position(self, key, position, duration, rate):
+            saved.update(
+                key=key, position=position, duration=duration, rate=rate
+            )
+
+    class _SavingVideo(_Video):
+        async def get_current_position(self):
+            return SimpleNamespace(in_seconds=55.0)
+
+        async def get_duration(self):
+            return SimpleNamespace(in_seconds=1440.0)
+
+    player = _player(video=_SavingVideo(), store=_Store(), resume_key="ep-1")
+
+    result = player.will_unmount()
+    assert not _asyncio.iscoroutine(result), "will_unmount must be sync"
+    await _asyncio.sleep(0.05)  # the spawned save completes
+    assert saved == {
+        "key": "ep-1",
+        "position": 55.0,
+        "duration": 1440.0,
+        "rate": 1.0,
+    }
+    assert player._position_saved is True
 
 
 @pytest.mark.asyncio
@@ -247,14 +286,19 @@ async def test_skip_confirm_says_intro_or_outro(no_spawn):
         "outro": {"start": 1280, "end": 1369},
     }
 
+    # seek() takes DurationValue: a bare int is MILLISECONDS in
+    # flet-video, so the seconds travel as an explicit Duration.
+    def _seek_seconds():
+        return [float(getattr(s, "seconds", s)) for s in player.video.seeks]
+
     player._last_position = 60.0
     await player._on_skip_chip()
-    assert player.video.seeks == [120.0]
+    assert _seek_seconds() == [120.0]
     assert player.toast_chip.content.value == "Skipped intro"
 
     player._last_position = 1300.0
     await player._on_skip_chip()
-    assert player.video.seeks == [120.0, 1370.0]
+    assert _seek_seconds() == [120.0, 1370.0]
     assert player.toast_chip.content.value == "Skipped outro"
 
 

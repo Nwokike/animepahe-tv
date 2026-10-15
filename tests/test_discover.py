@@ -203,8 +203,22 @@ async def test_discover_provider_picks_the_first_that_can_browse():
 
 def test_the_protocol_declares_the_optional_methods():
     """The route: duck-typed like schedule_tabs/random_slug, so a provider
-    is free not to implement them."""
+    is free not to implement them — the CORE Provider must not declare
+    them (runtime_checkable isinstance would then demand them and reject
+    every provider without a browse surface). BrowserProvider carries the
+    shape for the ones that do."""
+    from services.providers.base import BrowserProvider, Provider as _P
+
+    assert not hasattr(_P, "filters")
+    assert not hasattr(_P, "browse")
+    assert hasattr(BrowserProvider, "filters")
+    assert hasattr(BrowserProvider, "browse")
+
+
+def test_provider_without_browse_still_satisfies_the_protocol():
+    """The exact regression: animepahe defines neither filters nor browse
+    and must still pass the isinstance gate."""
+    from services.providers.animepahe_provider import AnimePaheProvider
     from services.providers.base import Provider as _P
 
-    assert hasattr(_P, "filters")
-    assert hasattr(_P, "browse")
+    assert isinstance(AnimePaheProvider(scraper=object()), _P)

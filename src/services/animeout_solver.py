@@ -83,8 +83,7 @@ class AnimeOutSolver:
         try:
             import primp
 
-            client = primp.AsyncClient(impersonate="chrome", timeout=20.0)
-            try:
+            async with primp.AsyncClient(impersonate="chrome", timeout=20.0) as client:
                 resp = await client.get(
                     BASE_URL,
                     headers={
@@ -92,8 +91,6 @@ class AnimeOutSolver:
                         "Cookie": clearance.get("cookies") or "",
                     },
                 )
-            finally:
-                await client.aclose()
         except Exception as ex:
             logger.debug("animeout clearance probe failed: %s", ex)
             return False

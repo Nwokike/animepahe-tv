@@ -74,13 +74,16 @@ def card_button_style(
 
 
 def card_focus_scale(scale: float = 1.04) -> ft.Animation:
-    """Implicit scale animation for focusable cards.
+    """The implicit scale animation for focusable cards.
 
-    Assign to the card control's ``animate_scale`` (the ``FilledButton`` in
-    the card builders) and set ``control.scale`` in on_focus/on_blur as
-    KTV does — the animation declaration interpolates the change instead of
-    snapping. Declarative, so it survives alongside the frozen-control
-    rules that killed KTV's old imperative ``attach_focus_pop``.
+    ``scale`` is the TARGET the focus/blur handlers apply (via
+    :func:`attach_focus_zoom`, which owns the setattr) — it is validated
+    here so both sides agree on one number; this function contributes the
+    Animation interpolation, not the scale value itself. Keep the two
+    defaults in sync.
+
+    Raises:
+        ValueError: if ``scale`` is not positive.
     """
     if scale <= 0:
         raise ValueError(f"scale must be positive, got {scale!r}")
@@ -92,22 +95,52 @@ def attach_focus_zoom(button: ft.Control, scale: float = 1.04) -> ft.Control:
 
     Assigned after construction on the local object (KTV's documented
     idiom): the handlers close over the button itself, so the scale change
-    targets the exact control the remote just focused. The setattr is
-    guarded — a card built inside a component tree is frozen after mount,
-    and the FOCUSED border from ``card_button_style`` is the primary cue;
-    the zoom is a bonus, never a crash.
+    targets the exact control the remote just focused.
+
+    A handler the caller already installed (e.g.
+    ``FocusManager.make_scroll_on_focus``) is CHAINED, not dropped —
+    overwriting it silently killed the scroll-on-focus behavior.
+    The setattr is guarded: a card built inside a component tree is
+    frozen after mount, and the FOCUSED border from ``card_button_style``
+    is the primary cue; the zoom is a bonus, never a crash.
     """
-    button.on_focus = lambda e: _safe_scale(button, scale)
-    button.on_blur = lambda e: _safe_scale(button, 1.0)
+    previous_focus = getattr(button, "on_focus", None)
+    previous_blur = getattr(button, "on_blur", None)
+
+    def _on_focus(e):
+        _call(previous_focus, e)
+        _safe_scale(button, scale)
+
+    def _on_blur(e):
+        _call(previous_blur, e)
+        _safe_scale(button, 1.0)
+
+    button.on_focus = _on_focus
+    button.on_blur = _on_blur
     return button
+
+
+def _call(handler, e) -> None:
+    if handler is None:
+        return
+    try:
+        handler(e)
+    except Exception:
+        pass  # a prior handler's failure must not break focus dispatch
 
 
 def _safe_scale(button: ft.Control, value: float) -> None:
     try:
+        # Nothing changed: skip the redraw entirely (the old code pushed
+        # an update on every focus AND blur event).
+        if getattr(button, "scale", None) == value:
+            return
         button.scale = value
         button.update()
-    except RuntimeError:
-        pass  # frozen/unmounted: the FOCUSED border already carries focus
+    except (RuntimeError, AttributeError):
+        # frozen/unmounted (frozen raises FrozenInstanceError, an
+        # AttributeError): the FOCUSED border already carries focus.
+        pass
 
 
 __all__ = [

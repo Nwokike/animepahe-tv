@@ -32,8 +32,13 @@ from core.config import (
     DRIVE_REFERER,
     DRIVE_WEB_KEY,
 )
-from core.state import Anime, Episode, Source
-from services.providers.base import make_session, split_session
+from core.state import Anime, Episode, LatestRelease, Source
+from services.providers.base import (
+    close_client,
+    make_session,
+    releases_from_anime,
+    split_session,
+)
 
 logger = logging.getLogger("animepahe.provider.kayoanime")
 
@@ -89,20 +94,32 @@ def _folder_pairs(content_html: str) -> list[tuple[str, str]]:
     return unique
 
 
-def _episode_number(filename: str) -> int | None:
-    """The three observed shapes, in the map's order:
-    `[Kayoanime] Show - NNN.mkv` → `- 274.mkv` trailing number,
+def _looks_like_drive_file_id(session: str) -> bool:
+    """A Google Drive file id is [A-Za-z0-9_-]+. Anything with a pipe,
+    slash or whitespace is another provider's session shape (kusonime's
+    "post|ep", anikato's tokens) and can never be a Drive file."""
+    return bool(session) and re.fullmatch(r"[A-Za-z0-9_-]+", session) is not None
+
+
+def _episode_key(filename: str) -> tuple[int, int] | None:
+    """(season, episode) — the three observed shapes, in the map's order:
+    `[Kayoanime] Show - NNN.mkv` → `- 274.mkv` trailing number (season 1,
+    the default when the name carries no SxxExx),
     `[Kayoanime] Show - S02E05.mkv` → the season-episode form,
-    movies (`- Movie 08 - Film.mkv`) → extras, no number."""
+    movies (`- Movie 08 - Film.mkv`) → extras, no number.
+
+    The key keeps the SEASON: a flat episode number collided across
+    multi-season posts (Dandadan S1 and S2 both had "episode 5"), and the
+    dedupe silently kept only one of them."""
     name = filename.rsplit("/", 1)[-1]
     se = re.search(r"\bS(\d{1,2})E(\d{1,3})\b", name, re.I)
     if se:
-        return int(se.group(2))
+        return int(se.group(1)), int(se.group(2))
     if re.search(r"\bmovie\b", name, re.I):
         return None
     trailing = re.search(r"-\s*(\d{1,4})\s*\.(?:mkv|mp4)$", name, re.I)
     if trailing:
-        return int(trailing.group(1))
+        return 1, int(trailing.group(1))
     loose = re.search(r"\b(\d{1,4})\s*\.(?:mkv|mp4)$", name, re.I)
     return int(loose.group(1)) if loose else None
 
@@ -203,7 +220,7 @@ class KayoanimeProvider:
         try:
             resp = await self._client.get(
                 f"{KAYOANIME_API}/categories",
-                params={"per_page": 100, "_fields": "id,name,count"},
+                params={"per_page": "100", "_fields": "id,name,count"},
             )
             if resp.status_code == 200:
                 for row in resp.json():
@@ -264,7 +281,7 @@ class KayoanimeProvider:
         )
         return result
 
-    async def latest_releases(self, page: int) -> tuple[list[Anime], bool]:
+    async def latest_releases(self, page: int) -> tuple[list[LatestRelease], bool]:
         key = f"latest_{page}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -282,7 +299,10 @@ class KayoanimeProvider:
         if resp.status_code != 200:
             raise RuntimeError(f"kayoanime HTTP {resp.status_code}")
         posts = resp.json()
-        result = ([self._to_anime(p) for p in posts], len(posts) >= 30)
+        result = (
+            releases_from_anime([self._to_anime(p) for p in posts]),
+            len(posts) >= 30,
+        )
         self._cache_put(key, result, CACHE_TTL_LATEST)
         return result
 
@@ -321,6 +341,9 @@ class KayoanimeProvider:
         key = f"post_{post_id}"
         cached = self._cache_get(key)
         if cached is not None:
+            # The cache holds the ANIME only — it used to hold the
+            # (anime, folders) tuple, so the second call handed a tuple
+            # to callers typed for Anime.
             return cached
         resp = await self._client.get(
             f"{KAYOANIME_API}/posts/{post_id}",
@@ -331,10 +354,14 @@ class KayoanimeProvider:
         post = resp.json()
         anime = self._to_anime(post)
         content = (post.get("content") or {}).get("rendered", "")
-        folders = _folder_pairs(content)
-        self._folders[post_id] = folders
-        result = (anime, folders)
-        self._cache_put(key, result, CACHE_TTL_EPISODES)
+        self._folders[post_id] = _folder_pairs(content)
+        # The post title carries its one quality — the sources() path reads
+        # this even when episodes() never ran (detail-then-play), so it is
+        # populated here too, not only in _folders_for().
+        self._quality[post_id] = _extract_resolution(
+            post.get("title", {}).get("rendered", "")
+        )
+        self._cache_put(key, anime, CACHE_TTL_EPISODES)
         return anime
 
     async def probe(self) -> bool:
@@ -425,17 +452,25 @@ class KayoanimeProvider:
         # is the complete copy. BOX labels are BATCH volumes, not seasons,
         # so they name a folder in the gated report rather than splitting
         # the episode list.
-        by_episode: dict[int, dict] = {}
+        by_episode: dict[tuple[int, int], dict] = {}
         restricted_folders: list[tuple[str, str]] = []
         for folder_id, label in folders:
-            files = await self._list_folder(folder_id)
-            if not files:
-                if await self._is_restricted(folder_id):
-                    restricted_folders.append((folder_id, label))
+            # One folder's transport error must not abort the whole walk
+            # (it used to: the exception propagated out of episodes()).
+            try:
+                files = await self._list_folder(folder_id)
+                if not files:
+                    if await self._is_restricted(folder_id):
+                        restricted_folders.append((folder_id, label))
+                    continue
+            except Exception as ex:
+                logger.warning(
+                    "kayoanime folder %s (%s) failed: %s", folder_id, label, ex
+                )
                 continue
             for f in files:
-                num = _episode_number(f.get("name", ""))
-                if num is None:
+                ep_key = _episode_key(f.get("name", ""))
+                if ep_key is None:
                     continue
                 try:
                     size = int(f.get("size") or 0)
@@ -443,9 +478,9 @@ class KayoanimeProvider:
                     size = 0
                 if size and size < _MIN_EPISODE_BYTES:
                     continue
-                prev = by_episode.get(num)
+                prev = by_episode.get(ep_key)
                 if prev is None or size > prev.get("size", 0):
-                    by_episode[num] = {
+                    by_episode[ep_key] = {
                         "file_id": f["id"],
                         "name": f.get("name", ""),
                         "size": size,
@@ -458,8 +493,8 @@ class KayoanimeProvider:
             Episode(
                 id=i,
                 anime_id=int(post_id or 0),
-                episode=num,
-                title=f"Episode {num}",
+                episode=key[1],
+                title=f"Episode {key[1]}",
                 snapshot="",
                 disc="",
                 audio="jpn",
@@ -467,7 +502,7 @@ class KayoanimeProvider:
                 session=info["file_id"],  # the Drive file id IS the session
                 filler=False,
             )
-            for i, (num, info) in enumerate(sorted(by_episode.items()), start=1)
+            for i, (key, info) in enumerate(sorted(by_episode.items()), start=1)
         ]
         result = (results, False)
         self._cache_put(key, result, CACHE_TTL_EPISODES)
@@ -504,7 +539,14 @@ class KayoanimeProvider:
         keyed alt=media (206 with seek incl. tail) and the keyless
         usercontent download route (206, real filename — the download
         route). The file id IS the episode session."""
-        if not episode_session:
+        if not _looks_like_drive_file_id(episode_session):
+            # A session from another provider (namespaced "post|ep" shapes,
+            # anything with a pipe or separators) is NOT a Drive file id.
+            # Building /files/<junk> produced a stream that 404'd — and
+            # because these URLs were returned UNVALIDATED, they used to
+            # WON the router race over the real owner (flet run log,
+            # 2026-10-15: kusonime's "48025|1" played as a Drive 404).
+            # Empty is the honest answer; the owner gets the call.
             return []
         keyed = f"{DRIVE_API}/files/{episode_session}?alt=media&key={DRIVE_WEB_KEY}"
         keyless = (
@@ -554,4 +596,6 @@ class KayoanimeProvider:
         return await self.sources(best.session, ep.session) if ep else []
 
     async def close(self) -> None:
-        pass
+        # pass used to leak the pooled client; close_client releases a real
+        # primp client (and tolerates the aclose-only test fakes).
+        await close_client(self._client)

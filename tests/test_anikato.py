@@ -853,10 +853,17 @@ def test_report_broken_stream_posts_the_sites_own_form():
     assert message == "Reported."
     (url, body) = client.posts[0]
     assert url.endswith("/ajax/episode/report")
+    # primp's content arg is bytes — the old code passed a str, which the
+    # Rust layer rejects.
+    if isinstance(body, bytes):
+        body = body.decode()
     # the repeated field survives: one issue[] per checked issue
     assert body.count("issue%5B%5D=") == 2
     assert "video_broken" in body and "sub_sync" in body
     assert "show_id=958" in body
+    # episode_id is the site's own episode NUMBER (buildReportPostData),
+    # not a row id — it used to be sent empty.
+    assert "episode_id=220" in body
     assert "show_slug=naruto-eybxz" in body
     assert "stops+at+4%3A10" in body
 

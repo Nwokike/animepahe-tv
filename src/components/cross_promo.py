@@ -70,13 +70,32 @@ def PromoHero() -> ft.Control:
     except Exception:
         page = None
 
+    # A stable slot for the rotation task, so the effect's cleanup can
+    # cancel exactly the task it started.
+    task_ref = ft.use_ref()
+
     async def _rotate():
         while True:
             await asyncio.sleep(ROTATE_SECONDS)
+            # pinned is read through the closure — the effect re-arms on
+            # the [pinned] dep change, so it never serves a stale
+            # first-render False.
             if not pinned:
                 setindex(lambda i: (i + 1) % len(PROMO_APPS))
 
-    ft.use_effect(lambda: spawn(_rotate(), name="promo-rotate"), [])
+    def _start_rotation():
+        task_ref.current = spawn(_rotate(), name="promo-rotate")
+
+    def _cancel_rotation():
+        task = task_ref.current
+        if task is not None:
+            task.cancel()
+            task_ref.current = None
+
+    # The effect re-arms when pinned flips, and the cleanup CANCELS the
+    # rotation task: the old fire-and-forget version rotated forever
+    # after Home unmounted (a leak, and setindex on a dead component).
+    ft.use_effect(_start_rotation, [pinned], cleanup=_cancel_rotation)
 
     app = PROMO_APPS[index]
     leading = (
@@ -102,6 +121,10 @@ def PromoHero() -> ft.Control:
 
     def _pin_and_open(e):
         set_pinned(True)
+        # page can be None outside a live context (the guard above) —
+        # the old code ran page.run_task unconditionally.
+        if page is None:
+            return
         if app["url"]:
             page.run_task(_open_url, page, app["url"])
         else:
@@ -193,11 +216,15 @@ def PromoHero() -> ft.Control:
     )
     # A focusable button, not a Container: the D-pad has to be able to
     # reach the hero at all. Same shared styling as the content cards.
+    # on_focus pins the rotation (the module's core promise — "rotation
+    # pauses the moment anything gains focus") and chains safely with the
+    # zoom handler.
     return attach_focus_zoom(
         ft.FilledButton(
             content=body,
             style=card_button_style(padding=16, radius=16, overlay_alpha=0.18),
             animate_scale=card_focus_scale(1.02),
             on_click=_pin_and_open,
+            on_focus=lambda e: set_pinned(True),
         )
     )

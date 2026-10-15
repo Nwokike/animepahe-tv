@@ -17,9 +17,14 @@ from core.config import (
     CACHE_TTL_LATEST,
     CACHE_TTL_SEARCH,
 )
-from core.state import Anime, Episode, Source
+from core.state import Anime, Episode, LatestRelease, Source
 import primp
-from services.providers.base import make_session, split_session
+from services.providers.base import (
+    close_client,
+    make_session,
+    releases_from_anime,
+    split_session,
+)
 
 logger = logging.getLogger("animepahe.provider.animeout")
 
@@ -98,7 +103,7 @@ class AnimeOutProvider:
         try:
             resp = await self._client.get(
                 f"{ANIMEOUT_API}/posts",
-                params={"per_page": 1, "_fields": "id"},
+                params={"per_page": "1", "_fields": "id"},
                 timeout=10.0,
             )
             return resp.status_code == 200
@@ -119,7 +124,7 @@ class AnimeOutProvider:
                     f"{ANIMEOUT_API}/media",
                     params={
                         "include": ",".join(str(i) for i in media_ids),
-                        "per_page": 20,
+                        "per_page": "20",
                         "_fields": "id,source_url",
                     },
                 )
@@ -164,7 +169,7 @@ class AnimeOutProvider:
         try:
             resp = await self._client.get(
                 f"{ANIMEOUT_API}/categories",
-                params={"per_page": 100, "_fields": "id,name,count"},
+                params={"per_page": "100", "_fields": "id,name,count"},
             )
             if resp.status_code == 200:
                 for row in resp.json():
@@ -223,7 +228,7 @@ class AnimeOutProvider:
         result = (await self._posts_to_anime(posts), len(posts) >= 24)
         return result
 
-    async def latest_releases(self, page: int) -> tuple[list[Anime], bool]:
+    async def latest_releases(self, page: int) -> tuple[list[LatestRelease], bool]:
         key = f"latest_{page}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -231,8 +236,8 @@ class AnimeOutProvider:
         resp = await self._client.get(
             f"{ANIMEOUT_API}/posts",
             params={
-                "per_page": 12,
-                "page": page,
+                "per_page": "12",
+                "page": str(page),
                 "orderby": "date",
                 "order": "desc",
                 "_fields": "id,title,featured_media",
@@ -241,7 +246,7 @@ class AnimeOutProvider:
         if resp.status_code != 200:
             raise RuntimeError(f"animeout HTTP {resp.status_code}")
         posts = resp.json()
-        result = (await self._posts_to_anime(posts), len(posts) == 12)
+        result = (releases_from_anime(await self._posts_to_anime(posts)), len(posts) == 12)
         self._cache_put(key, result, CACHE_TTL_LATEST)
         return result
 
@@ -254,8 +259,8 @@ class AnimeOutProvider:
             f"{ANIMEOUT_API}/posts",
             params={
                 "search": query,
-                "per_page": 12,
-                "page": page,
+                "per_page": "12",
+                "page": str(page),
                 "_fields": "id,title,featured_media",
             },
         )
@@ -297,7 +302,9 @@ class AnimeOutProvider:
     async def episodes(self, session: str, page: int) -> tuple[list[Episode], bool]:
         _, native = split_session(session)
         if not native.isdigit():
-            return []
+            # Callers unpack `episodes, has_more = ...` — a bare [] raised
+            # "too many values to unpack" (actually: not enough values).
+            return ([], False)
         key = f"episodes_{native}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -361,9 +368,10 @@ class AnimeOutProvider:
         for href in links:
             url = await _resolve_direct_url(href, client=self._client)
             if _FILE_HOST in url and clearance is None:
-                # The file host is Cloudflare-challenged today; treat as
-                # no-stream rather than hammering it on every tap.
-                return []
+                # The file host is Cloudflare-challenged today; skip this
+                # link rather than hammering it. continue, not return — a
+                # bare return discarded the qualities already collected.
+                continue
             if not url.startswith("http"):
                 continue
             resolution, audio, fansub = _parse_filename(url)
@@ -399,7 +407,7 @@ class AnimeOutProvider:
         return []
 
     async def close(self):
-        await self._client.aclose()
+        await close_client(self._client)
 
 
 def _episode_number(filename: str) -> int:
@@ -450,7 +458,9 @@ def _episode_rows(pairs: list[tuple[int, str]], anime_id: int) -> list[Episode]:
                 title=f"Episode {ep_num}",
                 snapshot="",
                 disc="",
-                audio="jpn" if "dual" not in filename.lower() else "eng",
+                # Dual-audio rows say "dual" — the same vocabulary
+                # _parse_filename uses for the source rows.
+                audio="dual" if "dual" in filename.lower() else "jpn",
                 duration="",
                 session=href,
                 filler=False,
@@ -540,4 +550,5 @@ async def _resolve_direct_url(episode_url: str, client=None) -> str:
         return ""
     finally:
         if own and client is not None:
-            await client.aclose()
+            # Own client: real primp 2.0.1 — __aexit__ is the only release.
+            await client.__aexit__(None, None, None)

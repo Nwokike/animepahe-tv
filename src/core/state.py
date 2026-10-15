@@ -2,7 +2,7 @@ import flet as ft
 from dataclasses import dataclass, field
 
 
-@dataclass(unsafe_hash=True)
+@dataclass
 class Anime:
     id: int
     title: str
@@ -26,7 +26,7 @@ class Anime:
     backdrop: str = ""
 
 
-@dataclass(unsafe_hash=True)
+@dataclass
 class Episode:
     id: int
     anime_id: int
@@ -47,7 +47,7 @@ class Episode:
     aired_ts: int = 0
 
 
-@dataclass(unsafe_hash=True)
+@dataclass
 class Source:
     url: str
     resolution: int
@@ -71,7 +71,7 @@ class Source:
     bd: bool = False
 
 
-@dataclass(unsafe_hash=True)
+@dataclass
 class LatestRelease:
     anime_id: int
     anime_title: str
@@ -96,7 +96,6 @@ class AppState:
     episodes_page: int = 1
     current_anime_session: str = ""
     current_episode_session: str = ""
-    player_error: str | None = None
     cache: object | None = None
     cf_blocked: bool = False
     is_online: bool = True
@@ -182,11 +181,24 @@ class AppState:
     busy_version: int = 0
 
     def __init__(self):
+        # All mutable collections are instantiated per-instance in __init__
+        # so they are not shared at the class level and Observable.__setattr__
+        # wraps them in ObservableList and ObservableDict automatically.
         self.search_results = []
+        self.latest_releases = []
         self.episodes = []
-        self.update_data = None
-        self.starting_downloads = set()
+        self.search_history = []
+        self.continue_watching = {}
+        self.source_test_results = []
+        self.schedule_tabs = []
+        self.schedule_entries = []
+        self.discover_filters = []
+        self.discover_selections = {}
+        self.discover_results = []
+        self.downloads = {}
         self.follows = {}
+        self.starting_downloads = set()
+        self.update_data = None
 
 
 state = AppState()

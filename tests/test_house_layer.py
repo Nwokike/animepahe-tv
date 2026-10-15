@@ -10,9 +10,8 @@ sys.path.insert(0, __file__.rsplit("tests", 1)[0] + "src")
 import flet as ft
 
 from components.empty_state import EmptyState
-from core.state import AppState
 from core.shared_services import get_shared_services
-from core.tokens import SPACING_XS, SPACING_XL
+from core.state import AppState
 
 
 class _FakeLauncher:
@@ -48,9 +47,10 @@ def _page():
 def test_shared_services_mount_once():
     page = _page()
     first = get_shared_services(page)
-    page.services.clear()
     second = get_shared_services(page)
     assert first is second
+    # Exactly one launcher and one clipboard mounted, never duplicated
+    assert len(page.services) == 2
 
 
 def test_shared_services_survive_a_failing_launcher():
@@ -124,7 +124,21 @@ def test_empty_state_without_action_has_no_button():
 
 
 def test_tokens_are_a_4pt_grid():
-    for token in (SPACING_XS, SPACING_XL):
+    from core.tokens import (
+        SPACING_XS,
+        SPACING_SM,
+        SPACING_MD,
+        SPACING_LG,
+        SPACING_XL,
+    )
+
+    for token in (
+        SPACING_XS,
+        SPACING_SM,
+        SPACING_MD,
+        SPACING_LG,
+        SPACING_XL,
+    ):
         assert token % 4 == 0
     # Animation tokens are milliseconds, not px.
     from core.tokens import ANIMATION_FAST

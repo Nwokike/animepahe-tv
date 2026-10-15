@@ -1,9 +1,14 @@
 import sys
 import json
+import os
 import time
 import webview
 
-captured_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
+# The UA clearance is bound to; the parent process falls back to this same
+# string, so the two can never disagree.
+FALLBACK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
+
+captured_ua = FALLBACK_UA
 
 
 def on_loaded():
@@ -57,8 +62,15 @@ def is_challenge_complete(window, cookie_keys: set[str]) -> bool:
 
 def check_cookies(window):
     global captured_ua
+    # The user closing the window must END the wait: without this the
+    # 120×1s poll kept calling get_cookies() on a dead window and the
+    # parent's communicate() hung the app for two full minutes.
+    closed = getattr(window.events, "closed", None)
     # Loop and check for completed challenge
     for _ in range(120):  # 2 minutes timeout
+        if closed is not None and closed.is_set():
+            print("[DEBUG] Window closed by the user", file=sys.stderr)
+            _fail("closed")
         time.sleep(1.0)
         try:
             cookies = window.get_cookies()
@@ -95,8 +107,26 @@ def check_cookies(window):
         except Exception as e:
             print(f"[DEBUG] Error reading cookies: {e}", file=sys.stderr)
 
-    # If timeout or closed
-    window.destroy()
+    # Timeout: an explicit error line and a NON-ZERO exit, so the parent
+    # can tell "never finished" from "user closed it" from "solved".
+    print("[DEBUG] Timed out waiting for the challenge", file=sys.stderr)
+    try:
+        window.destroy()
+    except Exception:
+        pass
+    _fail("timeout")
+
+
+def _fail(reason: str) -> None:
+    """Signal failure to the parent and exit the subprocess.
+
+    os._exit (not sys.exit) because this runs on pywebview's background
+    thread — a plain SystemExit there would only end the thread and leave
+    the GUI pumping.
+    """
+    print(json.dumps({"error": reason}))
+    sys.stdout.flush()
+    os._exit(3)
 
 
 if __name__ == "__main__":

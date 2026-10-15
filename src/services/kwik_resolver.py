@@ -93,7 +93,13 @@ class KwikResolver:
     async def _resolve_dean(self, kwik_url: str) -> str | None:
         client = self._get_client()
         logger.info("fetching %s", kwik_url)
-        resp = await client.get(kwik_url, headers=self._headers(kwik_url))
+        try:
+            resp = await client.get(kwik_url, headers=self._headers(kwik_url))
+        except Exception as ex:
+            # The documented contract is None on failure — an unguarded
+            # get propagated transport errors to the caller instead.
+            logger.info("kwik fetch failed: %s", ex)
+            return None
         logger.info("status=%s, len=%s", resp.status_code, len(resp.text))
         if resp.status_code != 200:
             return None
@@ -108,7 +114,11 @@ class KwikResolver:
 
     async def _resolve_direct_scan(self, kwik_url: str) -> str | None:
         client = self._get_client()
-        resp = await client.get(kwik_url, headers=self._headers(kwik_url))
+        try:
+            resp = await client.get(kwik_url, headers=self._headers(kwik_url))
+        except Exception as ex:
+            logger.info("kwik direct scan fetch failed: %s", ex)
+            return None
         logger.info("direct_scan status=%s, len=%s", resp.status_code, len(resp.text))
         if resp.status_code != 200:
             return None
@@ -124,9 +134,15 @@ class KwikResolver:
     async def _verify(self, url: str, referer: str) -> bool:
         try:
             client = self._get_client()
-            resp = await client.head(url, headers=self._headers(url), timeout=5)
+            # The verification request must carry the KWIK PAGE as Referer
+            # (where the link was issued), not a header derived from the
+            # CDN's own URL — deriving from the CDN URL always fell back
+            # to the wrong host.
+            resp = await client.head(
+                url, headers=self._headers(referer or url), timeout=5
+            )
             ct = resp.headers.get("content-type", "")
-            result = resp.status_code == 200 and "mpegurl" in ct
+            result = resp.status_code == 200 and "mpegurl" in ct.lower()
             logger.info(
                 "verify HEAD %s -> %s ct=%s result=%s",
                 url,

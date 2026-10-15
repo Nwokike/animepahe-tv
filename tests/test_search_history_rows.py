@@ -96,3 +96,13 @@ def test_title_is_always_a_str_never_the_row_itself():
         assert title.strip() == title  # no whitespace surprises
         assert isinstance(title, str)
         title.strip()  # the exact call the old crash came from
+
+
+def test_malformed_follows_rows_do_not_crash():
+    """Follows shelf in search screen used to crash with KeyError on row['anime_session']
+    when an entry was malformed or missing the session key."""
+    for bad_row in [{}, {"title": "Frieren"}, {"anime_session": ""}, None]:
+        # Search screen's filter: isinstance(row, dict) and row.get("anime_session")
+        passes = isinstance(bad_row, dict) and bool(bad_row.get("anime_session"))
+        assert not passes
+

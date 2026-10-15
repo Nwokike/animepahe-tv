@@ -31,7 +31,7 @@ def test_player_spec_round_trip():
         "title": "Frieren",
         "episode_session": "ep123",
         "anime_session": "abc",
-        "headers": {"User-Agent": "UA", "Referer": "https://kwik.cx/"},
+        "source_headers": {"User-Agent": "UA", "Referer": "https://kwik.cx/"},
     }
     state.player_spec = spec
     state.player_open = True
@@ -40,7 +40,7 @@ def test_player_spec_round_trip():
     read = getattr(state, "player_spec", None) or {}
     assert read["resource"] == spec["resource"]
     assert read["title"] == "Frieren"
-    assert read["headers"]["Referer"] == "https://kwik.cx/"
+    assert read["source_headers"]["Referer"] == "https://kwik.cx/"
     assert len(read["variants"]) == 1
 
 

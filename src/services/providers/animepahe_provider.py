@@ -65,23 +65,21 @@ class AnimePaheProvider:
         reason."""
         import primp
 
-        client = primp.AsyncClient(impersonate="chrome", timeout=8.0)
         try:
-            resp = await client.get(
-                f"{ANIMEPAHE_BASE}/api",
-                params={"m": "airing", "page": "1"},
-                headers={"Accept": "application/json"},
-            )
-            # Any answer at all means the host is alive: 200 (open), 403
-            # (the wall we deliberately did not solve), 429 (rate limit).
-            # Only a transport failure answers nothing.
-            _ = resp
-            return True
+            async with primp.AsyncClient(impersonate="chrome", timeout=8.0) as client:
+                resp = await client.get(
+                    f"{ANIMEPAHE_BASE}/api",
+                    params={"m": "airing", "page": "1"},
+                    headers={"Accept": "application/json"},
+                )
+                # Any answer at all means the host is alive: 200 (open), 403
+                # (the wall we deliberately did not solve), 429 (rate limit).
+                # Only a transport failure answers nothing.
+                _ = resp
+                return True
         except Exception as ex:
             logger.info("animepahe probe: %s", ex)
             return False
-        finally:
-            await client.aclose()
 
     async def latest_releases(self, page: int) -> tuple[list[LatestRelease], bool]:
         return await self.scraper.latest_releases(page)
@@ -129,7 +127,14 @@ class AnimePaheProvider:
             if not isinstance(entry, dict) or not entry.get("kwik"):
                 continue
             try:
-                resolution = int(key) if isinstance(key, str) and key.isdigit() else 0
+                if isinstance(key, str) and key.isdigit():
+                    resolution = int(key)
+                elif isinstance(entry.get("quality"), (int, str)) and str(entry.get("quality")).isdigit():
+                    resolution = int(entry.get("quality"))
+                elif isinstance(entry.get("resolution"), (int, str)) and str(entry.get("resolution")).isdigit():
+                    resolution = int(entry.get("resolution"))
+                else:
+                    resolution = 0
             except (TypeError, ValueError):
                 resolution = 0
             # hd rides the fansub label the way the play-page scrape
@@ -169,10 +174,14 @@ class AnimePaheProvider:
     async def anime(self, session: str) -> Anime | None:
         """The /anime/{session} details page — synopsis, genres, studios,
         aired range, external ids (the detail screen's Phase-3 note)."""
-        resp = await self.scraper.ddos.get(f"{ANIMEPAHE_BASE}/anime/{session}")
-        if resp is None or resp.status_code != 200:
+        try:
+            resp = await self.scraper.ddos.get(f"{ANIMEPAHE_BASE}/anime/{session}")
+            if resp is None or resp.status_code != 200:
+                return None
+            return _parse_details(resp.text, session)
+        except Exception as ex:
+            logger.info("animepahe details failed for %s: %s", session, ex)
             return None
-        return _parse_details(resp.text, session)
 
     async def episodes_for_title(self, title: str) -> list[Episode]:
         results, _ = await self.scraper.search(title, 1)
@@ -186,12 +195,14 @@ class AnimePaheProvider:
         results, _ = await self.scraper.search(title, 1)
         for anime in results:
             if anime.title.strip().lower() == title.strip().lower():
-                for ep in (await self.scraper.episodes(anime.session, 1))[0]:
+                episodes, _ = await self.episodes(anime.session, 1)
+                for ep in episodes:
                     if ep.episode == episode:
                         return await self.sources(anime.session, ep.session)
         return []
 
     def clear_cache(self) -> None:
+        self._anime_ids.clear()
         self.scraper.clear_cache()
 
     async def close(self) -> None:

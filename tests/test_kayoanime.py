@@ -11,19 +11,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 # --- pure functions ----------------------------------------------------
 
 
-def test_episode_number_three_shapes_plus_movie():
-    from services.providers.kayoanime import _episode_number
+def test_episode_key_three_shapes_plus_movie():
+    from services.providers.kayoanime import _episode_key
 
-    assert (
-        _episode_number("[Kayoanime] Boruto - Naruto Next Generations - 107.mkv") == 107
+    # Trailing numbers default to season 1.
+    assert _episode_key("[Kayoanime] Boruto - Naruto Next Generations - 107.mkv") == (
+        1,
+        107,
     )
-    assert _episode_number("[Kayoanime] Boruto - 274.mkv") == 274
-    assert _episode_number("[Kayoanime] Dandadan - S02E05.mkv") == 5
-    assert _episode_number("Sousou no Frieren - 01.mkv") == 1
-    assert (
-        _episode_number("[Kayoanime] Naruto Shippuden - Movie 08 - Boruto.mkv") is None
-    )
-    assert _episode_number("random-notes.txt") is None
+    assert _episode_key("[Kayoanime] Boruto - 274.mkv") == (1, 274)
+    # SxxExx keeps the season, so a multi-season post no longer collides
+    # (S02E05 used to collapse onto the same "5" as S01E05).
+    assert _episode_key("[Kayoanime] Dandadan - S02E05.mkv") == (2, 5)
+    assert _episode_key("Sousou no Frieren - 01.mkv") == (1, 1)
+    assert _episode_key("[Kayoanime] Naruto Shippuden - Movie 08 - Boruto.mkv") is None
+    assert _episode_key("random-notes.txt") is None
 
 
 def test_folder_pairs_and_maintenance_rule():
@@ -195,6 +197,22 @@ def test_episodes_walk_folders_dedupe_and_use_file_ids():
     assert provider.gated_folders("kayoanime:961") == ["1080p [Private Drive]"]
     assert provider.file_name("kayoanime:961", "f274") == "Boruto - 274.mkv"
     assert provider.file_name("kayoanime:961", "nope") is None
+
+
+def test_sources_rejects_a_foreign_session_shape():
+    """The flet-run bug: a kusonime session ("48025|1") built an
+    UNVALIDATED Drive URL that won the router race over the real owner.
+    A pipe/slash/space session can never be a Drive file id — return []
+    (an empty answer is honest; the owner provider gets the call)."""
+    import asyncio
+
+    from services.providers.kayoanime import KayoanimeProvider
+
+    provider = KayoanimeProvider(client=_PrimpLikeClient([]))
+    for junk in ("48968|1", "48968|movie", "a b", "x/y", ""):
+        assert asyncio.run(provider.sources("kayoanime:1", junk)) == []
+    # a valid-shaped id still yields both routes
+    assert len(asyncio.run(provider.sources("kayoanime:1", "f274"))) == 2
 
 
 def test_kayoanime_box_labels_are_batches_not_seasons():

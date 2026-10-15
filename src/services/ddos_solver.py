@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from urllib.parse import urlparse
 import primp
@@ -61,6 +62,9 @@ class DDoSSolver:
         self._base_url = "https://animepahe.com"
         self._cookies_str = ""
         self._store = get_store()
+        # Concurrent callers once shared the solve: two parallel get()s
+        # could open TWO verification windows.
+        self._solve_lock = asyncio.Lock()
         self._user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     def _get_client(self) -> primp.AsyncClient:
@@ -201,6 +205,17 @@ class DDoSSolver:
             method, url, headers=headers, params=params, **kwargs
         )
 
+    async def _ensure_solved(self) -> None:
+        """One solve gate for every caller (the get() rewrite branch and
+        the plain path used to EACH call solve(), so an unsolved state
+        could open the verification window twice). The lock also makes
+        concurrent callers share one solve instead of racing."""
+        if self._solved:
+            return
+        async with self._solve_lock:
+            if not self._solved:
+                await self.solve()
+
     async def get(
         self,
         url: str,
@@ -212,14 +227,14 @@ class DDoSSolver:
 
         # Check if URL references hardcoded animepahe.com, rewrite to resolved base url
         if "animepahe.com" in url:
-            if not self._solved:
-                # Solve once to get active base URL redirect
-                await self.solve()
+            # Solve first: the dynamic base URL (and the clearance) come
+            # from it, and the old code called solve() here AND again in
+            # the branch below — two solves, two windows when the first
+            # failed.
+            await self._ensure_solved()
             url = url.replace("https://animepahe.com", self._base_url)
-
-        if not self._solved:
-            logger.debug("DDoS not solved yet, attempting solve")
-            await self.solve()
+        else:
+            await self._ensure_solved()
 
         client = self._get_client()
         merged = {"User-Agent": self._user_agent}
@@ -228,7 +243,11 @@ class DDoSSolver:
         if headers:
             merged.update(headers)
 
-        logger.info("Outbound request to %s with headers: %s", url, merged)
+        logger.debug(
+            "Outbound request to %s (cookie=%s)",
+            url,
+            "redacted" if "Cookie" in merged else "none",
+        )
 
         resp = await self._request("GET", client, url, merged, params, **kwargs)
         logger.debug(
@@ -249,7 +268,11 @@ class DDoSSolver:
             self._solved = False
             self._cookies_str = ""
             await self._store.clear_clearance()
-            await self.solve()
+            # The REUSED primp client's cookie_store still holds the dead
+            # cf_clearance and would resend it on the re-solve — rebuild
+            # the client (its pool) so the fresh solve starts clean.
+            await self.close()
+            await self._ensure_solved()
 
             # Re-build headers and retry once with the fresh clearance
             merged["User-Agent"] = self._user_agent

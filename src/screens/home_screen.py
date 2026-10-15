@@ -292,6 +292,8 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
         return None
     cards = []
     for record in list(entries.values())[:20]:
+        if not isinstance(record, dict) or not record.get("anime_session"):
+            continue
         poster = record.get("poster")
         total = record.get("total_episodes") or 0
         progress = f"Ep {record.get('episode_num', '?')}"
@@ -341,7 +343,9 @@ def _continue_watching_row(entries: dict, on_open) -> ft.Control | None:
                         overlay_alpha=0.18,
                     ),
                     animate_scale=card_focus_scale(1.03),
-                    on_click=lambda e, s=record["anime_session"]: on_open(s),
+                    on_click=lambda e, s=record.get("anime_session", ""): (
+                        on_open(s) if s else None
+                    ),
                 )
             )
         )
@@ -492,7 +496,7 @@ def HomeScreen() -> ft.Control:
     except Exception:
         page = None
 
-    if not state.latest_releases and not state.is_loading:
+    if not state.latest_releases and not state.is_loading and state.is_online and not state.cf_blocked:
         controller.load_latest()
 
     theme_icon, next_mode = _theme_cycle(page)
@@ -539,8 +543,12 @@ def HomeScreen() -> ft.Control:
     pager = ft_pager(
         page=state.latest_page,
         has_more=state.latest_has_more,
-        on_prev=lambda e: controller.load_latest(state.latest_page - 1),
-        on_next=lambda e: controller.load_latest(state.latest_page + 1),
+        on_prev=lambda e: controller.load_latest(state.latest_page - 1)
+        if not state.is_loading
+        else None,
+        on_next=lambda e: controller.load_latest(state.latest_page + 1)
+        if not state.is_loading
+        else None,
         is_loading=state.is_loading,
     )
 

@@ -27,7 +27,12 @@ class SharedServices:
         self.page = page
         self.launcher = ft.UrlLauncher()
         self.clipboard = ft.Clipboard()
-        page.services.extend([self.launcher, self.clipboard])
+        # In Flet 1.0.4, Service.__post_init__ auto-registers services
+        # when context.page is available. Guarding against duplicate
+        # entries ensures we never double-mount on page.services.
+        for s in (self.launcher, self.clipboard):
+            if s not in page.services:
+                page.services.append(s)
 
     async def launch_url(self, url: str, timeout: float = 1.0) -> bool:
         import asyncio
@@ -53,6 +58,22 @@ class SharedServices:
             logger.warning("clipboard set failed: %s", ex)
             return False
 
+    @property
+    def haptics(self) -> ft.HapticFeedback:
+        if not hasattr(self, "_haptics") or self._haptics is None:
+            self._haptics = ft.HapticFeedback()
+            if self._haptics not in self.page.services:
+                self.page.services.append(self._haptics)
+        return self._haptics
+
+    @property
+    def share(self) -> ft.Share:
+        if not hasattr(self, "_share") or self._share is None:
+            self._share = ft.Share()
+            if self._share not in self.page.services:
+                self.page.services.append(self._share)
+        return self._share
+
 
 def mount_shared_services(page: ft.Page) -> SharedServices:
     """Attach (once) and return the page's shared services."""
@@ -69,3 +90,19 @@ def get_shared_services(page: ft.Page) -> SharedServices:
     if page is None:
         raise ValueError("page is required")
     return mount_shared_services(page)
+
+
+def shared_launcher(page: ft.Page) -> ft.UrlLauncher:
+    return get_shared_services(page).launcher
+
+
+def shared_clipboard(page: ft.Page) -> ft.Clipboard:
+    return get_shared_services(page).clipboard
+
+
+def shared_haptics(page: ft.Page) -> ft.HapticFeedback:
+    return get_shared_services(page).haptics
+
+
+def shared_share(page: ft.Page) -> ft.Share:
+    return get_shared_services(page).share

@@ -46,7 +46,11 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
     # progress — and absent otherwise. An unknown length is indeterminate
     # rather than a lie at 0%.
     running = job_state in (STATE_DOWNLOADING, STATE_QUEUED)
-    bar_value = percent / 100.0 if isinstance(percent, (int, float)) else None
+    bar_value = (
+        min(max(float(percent), 0.0), 100.0) / 100.0
+        if isinstance(percent, (int, float))
+        else None
+    )
     if job_state == STATE_DOWNLOADING:
         status_text = (
             f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
@@ -181,7 +185,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
         # The actions live in `trailing` as focusable buttons; the row
         # itself is display-only (tap-through would double-fire with the
         # button on touch devices).
-        ink=True,
+        ink=False,
     )
 
 
@@ -226,7 +230,9 @@ def DownloadsScreen() -> ft.Control:
             group["rows"], key=lambda r: r[1].get("episode_num", 0), reverse=True
         )
         total_size = sum(
-            r[1].get("size_bytes", 0) for r in rows if r[1].get("state") == "complete"
+            (r[1].get("size_bytes") or 0)
+            for r in rows
+            if r[1].get("state") == "complete"
         )
         header = ft.Row(
             [

@@ -235,18 +235,22 @@ def test_the_providers_own_download_route_is_not_reresolved():
     controller.downloads = _Downloads()
     controller.store = _Store()
 
-    from core.state import state
+    from core.state import Source, state
+    from main import _source_choices
 
     state.starting_downloads = set()
     state.downloads = {}
-    choice = {
-        "label": "1080p",
-        "url": "https://kwik.si/e/abc",
-        "headers": {},
-        "download_url": "https://pahe.win/xyz",
-        "direct": True,
-    }
-    asyncio.run(controller._begin_download(choice, "s1", "e1", None, {}))
+    src = Source(
+        url="https://kwik.si/e/abc",
+        resolution=1080,
+        audio="jpn",
+        fansub="Sub",
+        download_url="https://pahe.win/xyz",
+    )
+    choices = _source_choices([src])
+    assert choices[0]["direct"] is True
+    assert choices[0]["download_url"] == "https://pahe.win/xyz"
+    asyncio.run(controller._begin_download(choices[0], "s1", "e1", None, {}))
     # the pahe.win URL went straight through, and the kwik URL never did
     assert resolves == []
     assert captured["url"] == "https://pahe.win/xyz"

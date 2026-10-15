@@ -2,11 +2,18 @@ import os
 import sys
 import json
 import asyncio
+import contextlib
 import logging
 import platform
 import flet as ft
 
 logger = logging.getLogger(__name__)
+
+# The child solver caps its own wait at ~2 minutes; this is the parent's
+# backstop for a wedged GUI thread. The mobile path gets its own budget
+# below.
+DESKTOP_SOLVER_TIMEOUT = 150.0
+MOBILE_SOLVER_TIMEOUT = 300.0
 
 
 def _get_python_executable() -> str:
@@ -43,6 +50,8 @@ class WebViewSolver:
         dir_path = os.path.dirname(os.path.abspath(__file__))
         solver_script = os.path.join(dir_path, "desktop_cf_solver.py")
 
+        from services.desktop_cf_solver import FALLBACK_UA
+
         # Show loading indicator in Flet app while solver runs
         loading_dlg = ft.AlertDialog(
             title=ft.Text("Cloudflare Security Challenge", weight=ft.FontWeight.BOLD),
@@ -77,7 +86,13 @@ class WebViewSolver:
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout_data, stderr_data = await proc.communicate()
+            # A timeout on the wait itself: the child caps at ~2 minutes,
+            # but a wedged GUI thread (no window station, a modal hang)
+            # must not pin the app forever. The child's own guard fires
+            # first in every normal case.
+            stdout_data, stderr_data = await asyncio.wait_for(
+                proc.communicate(), timeout=DESKTOP_SOLVER_TIMEOUT
+            )
 
             stderr_out = stderr_data.decode().strip()
             if stderr_out:
@@ -96,19 +111,21 @@ class WebViewSolver:
             # Find the JSON line in the stdout
             json_str = None
             for line in out.splitlines():
-                if line.startswith("{") and line.endswith("}"):
-                    json_str = line
+                stripped = line.strip()
+                if stripped.startswith("{") and stripped.endswith("}"):
+                    json_str = stripped
                     break
 
             if not json_str:
                 raise Exception("Verification was closed or failed.")
 
             data = json.loads(json_str)
+            # The child now exits non-zero with {"error": "closed"|"timeout"}
+            # — surface it verbatim instead of the generic message.
+            if data.get("error"):
+                raise Exception(f"Verification {data['error']}.")
             cookies = data.get("cookies") or ""
-            ua = (
-                data.get("user_agent")
-                or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+            ua = data.get("user_agent") or FALLBACK_UA
             return cookies, ua
         finally:
             try:
@@ -142,7 +159,11 @@ class WebViewSolver:
             if _cookie_manager is None:
                 return ""
             try:
-                return _cookie_manager.getCookie(current_url) or ""
+                # getCookie is a blocking JNI call — off the event loop it
+                # used to stall the app's frames for the call's duration.
+                return await asyncio.to_thread(
+                    _cookie_manager.getCookie, current_url
+                ) or ""
             except Exception as ex:
                 logger.error("CookieManager.getCookie error: %s", ex)
                 return ""
@@ -229,8 +250,16 @@ class WebViewSolver:
                 await _try_resolve(msg[7:].strip(), current_url=current_url)
 
         async def on_url_change(e):
-            # flet_webview 0.85.3 events carry payloads in .data, not .url.
-            current_url = e.data or "" if not isinstance(e.data, dict) else str(e.data)
+            # Events carry payloads in .data — dict-shaped data is a
+            # transport artifact, so read it defensively rather than
+            # str()-ing it.
+            raw = getattr(e, "data", None)
+            if isinstance(raw, str):
+                current_url = raw
+            elif isinstance(raw, dict):
+                current_url = str(raw.get("url") or "")
+            else:
+                current_url = ""
             logger.info("WebView page started: %s", current_url)
             # When we land on animepahe, try native cookie reader if challenge token is not present
             if (
@@ -260,18 +289,6 @@ class WebViewSolver:
             on_page_started=on_url_change,
             on_page_ended=on_page_ended,
         )
-        # 0.85.3's WebView rejects the old flet-webview-all constructor
-        # kwargs; javascript_mode and zoom have real methods instead.
-        try:
-            from flet_webview import JavaScriptMode
-
-            await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
-        except Exception as ex:
-            logger.warning("webview set_javascript_mode failed: %s", ex)
-        try:
-            await webview.disable_zoom()
-        except Exception as ex:
-            logger.warning("webview disable_zoom failed: %s", ex)
 
         async def poll_cookies():
             while not result_future.done():
@@ -361,6 +378,41 @@ class WebViewSolver:
         page.show_dialog(dlg)
         page.update()
 
+        # POST-MOUNT ONLY. Every WebView method needs self.page — called
+        # before show_dialog they raised RuntimeError and were swallowed,
+        # so the JS mode and zoom never actually applied. And on a device
+        # that reports PagePlatform.ANDROID_TV they are gated off
+        # entirely (flet_webview's allow-list is Android/iOS/macOS):
+        # detect that once here and use the desktop solver instead of
+        # spinning forever on FletUnsupportedPlatformException.
+        try:
+            await asyncio.wait_for(webview.get_current_url(), timeout=5.0)
+        except ft.FletUnsupportedPlatformException:
+            logger.warning(
+                "flet_webview is unsupported on this platform (Android TV?) "
+                "— falling back to the desktop solver"
+            )
+            with contextlib.suppress(Exception):
+                page.pop_dialog()
+            page.update()
+            polling_task.cancel()
+            with contextlib.suppress(BaseException):
+                await polling_task
+            return await WebViewSolver._solve_desktop(page, url)
+        except Exception:
+            pass  # a generic failure here is the poll loop's problem
+
+        try:
+            from flet_webview import JavaScriptMode
+
+            await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
+        except Exception as ex:
+            logger.warning("webview set_javascript_mode failed: %s", ex)
+        try:
+            await webview.disable_zoom()
+        except Exception as ex:
+            logger.warning("webview disable_zoom failed: %s", ex)
+
         original_on_keyboard = page.on_keyboard_event
         if is_tv:
 
@@ -385,10 +437,18 @@ class WebViewSolver:
             page.update()
 
         try:
-            cookies, ua = await result_future
+            # A bounded wait: the user who never solves AND never cancels
+            # must not pin the app open forever.
+            cookies, ua = await asyncio.wait_for(
+                result_future, timeout=MOBILE_SOLVER_TIMEOUT
+            )
             return cookies, ua
         finally:
+            # Await the cancelled poll task: dropping the reference left
+            # the loop to destroy it mid-call at shutdown.
             polling_task.cancel()
+            with contextlib.suppress(BaseException):
+                await polling_task
             if is_tv and original_on_keyboard is not None:
                 page.on_keyboard_event = original_on_keyboard
             elif is_tv:

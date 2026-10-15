@@ -1,6 +1,4 @@
-# App configuration - toggle these before release
-
-USE_EXTERNAL_PLAYER = True
+import os
 
 # Play Store URL for KTV Player
 KTV_PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=ng.kiri.ktvplayer"
@@ -10,16 +8,6 @@ KTV_UPTODOWN_URL = "https://ktv-player.uptodown.com/android"
 
 # Deep link scheme for KTV Player
 KTV_DEEP_LINK_SCHEME = "ktv://play?url="
-
-# Fake player names to show in dialog (all buttons go to KTV Player)
-EXTERNAL_PLAYER_NAMES = [
-    "KTV Player",
-    "MX Player",
-    "YTV Player",
-]
-
-# Cloudflare Worker for dynamic redirects and update checks
-WORKER_BASE_URL = "https://tv.kalerosemary7.workers.dev"
 
 # Support route (public issues tracker — no personal contact details ship
 # in the binary; see components/support_dialog.py)
@@ -41,15 +29,11 @@ CACHE_TTL_EPISODES = 3600
 ANIMEOUT_API = "https://animeout.xyz/wp-json/wp/v2"
 KUSONIME_API = "https://kusonime.com/wp-json/wp/v2"
 KUSONIME_BASE = "https://kusonime.com"
-BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
 
 # Kayoanime (WordPress + Google Drive). The Drive "web key" is Google's
 # own public client key (shipped inside drive.google.com's own app) with
 # its HTTP-referrer restriction — the documented keyless listing route.
 KAYOANIME_API = "https://kayoanime.com/wp-json/wp/v2"
 DRIVE_API = "https://www.googleapis.com/drive/v3"
-DRIVE_WEB_KEY = "AIzaSyC1qbk75NzWBvSaDh6KnsjjA9pIrP4lYIE"
+DRIVE_WEB_KEY = os.getenv("DRIVE_WEB_KEY", "AIzaSyC1qbk75NzWBvSaDh6KnsjjA9pIrP4lYIE")
 DRIVE_REFERER = "https://drive.google.com/"

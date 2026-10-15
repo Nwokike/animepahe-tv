@@ -245,12 +245,14 @@ def test_force_bypasses_open_circuit_for_explicit_user_retry():
             pass
     assert r.health()["p1"].state == "open"
     calls = len(p1.calls)
-    asyncio.run(
-        r.sources(
-            "p1:a1",
-            "e1",
-        )
-    )  # force? no — owner path
+    # The owner's circuit is open and the session names p1 alone: asking
+    # the others is meaningless (they cannot resolve "p1:a1"), so the
+    # honest answer is a fast RouterError.
+    try:
+        asyncio.run(r.sources("p1:a1", "e1"))
+        assert False, "expected RouterError for an open owner circuit"
+    except RouterError:
+        pass
     # the pin path: force the open provider explicitly
     asyncio.run(r._run("sources", "p1:a1", "e1", force=True))
     assert len(p1.calls) > calls
@@ -268,8 +270,38 @@ def test_session_owner_is_tried_first():
     assert p2.calls and not p1.calls  # owner first
     p2.fail_latest = 1
     r2 = _router(p1, p2)
-    eps, _ = asyncio.run(r2.episodes("p2:a1", 1))
-    assert eps[0].title == "Ep 1"  # owner down — others still answer
+    # A session that NAMES its provider is only asked of it: a foreign
+    # provider cannot resolve "p2:a1", and (the flet run log bug) one that
+    # returns unvalidated answers could WIN the race with garbage.
+    try:
+        asyncio.run(r2.episodes("p2:a1", 1))
+        assert False, "expected RouterError when the owner fails"
+    except RouterError:
+        pass
+    assert not p1.calls  # the non-owner was never asked
+
+
+def test_a_namespaced_session_is_never_raced_against_other_providers():
+    """The flet-run failure: kayoanime was pinned, got asked for a
+    kusonime session, and returned an UNVALIDATED stream (drive URL built
+    from "48025|1") that won the race over the real owner."""
+    kayo, kuso = FakeProvider("kayoanime"), FakeProvider("kusonime")
+    r = _router(kayo, kuso)
+    r.set_pin("kayoanime")  # the pin must NOT pull a foreign provider in
+    asyncio.run(r.sources("kusonime:48968", "48968|1"))
+    assert kayo.calls == []  # never asked
+    assert ("sources", "kusonime:48968", "48968|1") in kuso.calls
+
+
+def test_an_unknown_session_owner_fails_fast():
+    p1 = FakeProvider("p1")
+    r = _router(p1)
+    try:
+        asyncio.run(r.episodes("nosuchprovider:1", 1))
+        assert False, "expected RouterError"
+    except RouterError as ex:
+        assert "owns the session" in str(ex)
+    assert p1.calls == []
 
 
 def test_health_records_latency_and_errors():
@@ -296,6 +328,57 @@ def test_startup_probe_is_parallel_and_deadline_scoped():
     ok = asyncio.run(r.probe_all())
     assert ok["fast"] is True
     assert ok["slowdead"] is False
+
+
+def test_a_hanging_probe_times_out_without_killing_the_race(monkeypatch):
+    """The fail_after path: a provider that never answers must be recorded
+    as a timeout failure while the OTHER providers' probes still finish
+    (asyncio.wait_for's cancel would have raced the attribution)."""
+    from services import router as router_mod
+
+    monkeypatch.setattr(router_mod, "STARTUP_PROBE_TIMEOUT", 0.1)
+
+    class _Hanging(FakeProvider):
+        async def probe(self):
+            await asyncio.sleep(10.0)
+            return True
+
+    fast = FakeProvider("fast", probe_ok=True)
+    hang = _Hanging("hang")
+    r = _router(fast, hang)
+
+    async def scenario():
+        import time as _time
+
+        t0 = _time.monotonic()
+        ok = await r.probe_all()
+        elapsed = _time.monotonic() - t0
+        assert ok == {"fast": True, "hang": False}
+        assert elapsed < 2.0  # the race ended at the timeout, not the sleep
+        rec = r.health()["hang"]
+        assert rec.last_error == "timeout"
+
+    asyncio.run(scenario())
+
+
+def test_probe_answers_are_not_fabricated_by_the_budget(monkeypatch):
+    """A provider that the BUDGET cancelled before it answered is left out
+    of the result entirely — the pre-anyio code wrote False for every
+    provider, poisoning breaker health with spurious failures."""
+    from services import router as router_mod
+
+    monkeypatch.setattr(router_mod, "STARTUP_PROBE_BUDGET", 0.05)
+    monkeypatch.setattr(router_mod, "STARTUP_PROBE_TIMEOUT", 5.0)
+
+    class _SlowButAlive(FakeProvider):
+        async def probe(self):
+            await asyncio.sleep(2.0)
+            return True
+
+    slow = _SlowButAlive("slow")
+    r = _router(slow)
+    ok = asyncio.run(r.probe_all())
+    assert ok == {}  # never answered → absent, not False
 
 
 def test_pin_sends_one_provider_first():

@@ -141,7 +141,13 @@ def SettingsScreen() -> ft.Control:
             page.update(log_text)
 
         def _close(e):
-            page.pop_dialog()
+            from core.dialogs import close_app_dialog
+
+            if page and not close_app_dialog(page):
+                try:
+                    page.pop_dialog()
+                except Exception:
+                    pass
 
         dlg = ft.AlertDialog(
             modal=False,
@@ -250,8 +256,9 @@ def SettingsScreen() -> ft.Control:
     _current_theme = token_for_mode(state.theme_mode)
 
     def _pick_theme(token, mode):
+        from core.tasks import spawn
 
-        controller_ref.save_theme_mode(mode)
+        spawn(controller_ref.save_theme_mode(mode), name="save-theme")
 
     theme_picker = ft.Row(
         [
@@ -309,9 +316,8 @@ def SettingsScreen() -> ft.Control:
     def _on_backend_change(e):
         name = e.control.value or "auto"
         set_backend(name)
-        from core.tasks import spawn
-
-        spawn(controller.set_backend_pin(name), name="save-backend-pin")
+        if hasattr(controller, "set_backend_pin"):
+            controller.set_backend_pin(name)
 
     provider_names = (
         controller_ref.router.provider_names if controller_ref else []

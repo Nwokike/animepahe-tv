@@ -15,6 +15,7 @@ unit must not spin forever), and a successful load is left alone. The
 rebuild goes through the same builder so the caller needs no logic.
 """
 
+import logging
 import flet as ft
 
 try:
@@ -25,12 +26,15 @@ except ImportError:
     fya = None
     _HAS_ADS = False
 
+logger = logging.getLogger(__name__)
 
-# Demo unit — replace per platform in production.
-AD_BANNER_UNIT_ID = "demo-banner-yandex"
+from services.ads import AD_UNITS
+
+AD_BANNER_UNIT_ID = AD_UNITS.get("banner", "demo-banner-yandex")
 
 _STICKY_WIDTH = 320
 _STICKY_HEIGHT = 50
+_INLINE_MAX_HEIGHT = 100
 # One rebuild attempt, after this delay. Yandex's own guidance is to let
 # the next refresh handle it; this is that refresh, once.
 _RELOAD_DELAY_SECONDS = 30.0
@@ -66,9 +70,20 @@ def build_banner_ad(page=None, inline: bool = False) -> ft.Control:
                 size_type=fya.BannerSizeType.INLINE
                 if inline
                 else fya.BannerSizeType.STICKY,
+                max_height=_INLINE_MAX_HEIGHT if inline else None,
                 on_load=lambda e: None,
-                on_load_failed=lambda e: _reload(),
-                on_click=lambda e: None,
+                on_load_failed=lambda e: (
+                    logger.info(
+                        "Banner load failed: %s - %s",
+                        getattr(e, "code", ""),
+                        getattr(e, "description", ""),
+                    ),
+                    _reload(),
+                ),
+                on_click=lambda e: logger.debug("Banner clicked"),
+                on_impression=lambda e: logger.debug(
+                    "Banner impression: %s", getattr(e, "impression_data", "")
+                ),
             )
         except Exception:
             return ft.Container(width=0, height=0, visible=False)

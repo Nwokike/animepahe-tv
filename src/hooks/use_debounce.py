@@ -32,5 +32,5 @@ def use_debounce(value, delay_ms: int = 250):
         if old is not None and not old.done():
             old.cancel()
 
-    ft.use_effect(_cancel_and_schedule, [value], cleanup=_cleanup)
+    ft.use_effect(_cancel_and_schedule, [value, delay_ms], cleanup=_cleanup)
     return debounced

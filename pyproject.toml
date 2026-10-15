@@ -45,4 +45,24 @@ dev = [
     "pyqt6-webengine>=6.11.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_test_loop_scope = "function"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "asyncio: run the test in an asyncio event loop (pytest-asyncio, strict mode)",
+]
+filterwarnings = [
+    "error::pytest.PytestDeprecationWarning",
+]
+log_cli = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+ignore = ["E501"]
+
 

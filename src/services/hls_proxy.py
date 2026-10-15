@@ -39,6 +39,27 @@ _ATTR_PATTERN = re.compile(r'([A-Z0-9\-]+)=("([^"]*)"|[^,]*)')
 
 MEDIA_URI_PATTERN = re.compile(r"""(URI=)["']([^"']+)["']""")
 
+# Local reason table for the hand-rolled status lines. primp 2.0.1 exposes no
+# response.reason_phrase, so upstream phrases cannot be forwarded verbatim —
+# strict players reject "Unknown", which is why 429/418 (what CDNs answer
+# with) are named here.
+REASON_PHRASES = {
+    200: "OK",
+    206: "Partial Content",
+    301: "Moved Permanently",
+    302: "Found",
+    400: "Bad Request",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    416: "Range Not Satisfiable",
+    418: "I'm a Teapot",
+    429: "Too Many Requests",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+}
+
 
 class PlaylistFetchError(Exception):
     """Upstream playlist fetch failed (network or non-200)."""
@@ -190,8 +211,9 @@ class HLSProxy:
             )
         except BaseException:
             # Socket bind failed: close the client we already created, or it
-            # leaks for the process.
-            await self._http_client.aclose()
+            # leaks for the process. primp 2.0.1's AsyncClient has no
+            # aclose() — the context-manager protocol is the only release.
+            await self._http_client.__aexit__(None, None, None)
             self._http_client = None
             raise
 
@@ -211,34 +233,31 @@ class HLSProxy:
     async def stop(self):
         """Stop the proxy server cleanly."""
         was_running = self._started or self._server is not None
-        for task in list(self._handlers):
-            task.cancel()
-        if self._handlers:
-            await asyncio.gather(*self._handlers, return_exceptions=True)
-            self._handlers.clear()
-        if self._server:
-            self._server.close()
-            try:
-                await asyncio.wait_for(self._server.wait_closed(), timeout=2.0)
-            except TimeoutError:
-                logger.debug("Proxy server still draining after 2s — continuing")
-            except asyncio.CancelledError:
-                self._server = None
-                self.port = None
-                raise
+        try:
+            for task in list(self._handlers):
+                task.cancel()
+            if self._handlers:
+                await asyncio.gather(*self._handlers, return_exceptions=True)
+                self._handlers.clear()
+            if self._server:
+                self._server.close()
+                try:
+                    await asyncio.wait_for(self._server.wait_closed(), timeout=2.0)
+                except TimeoutError:
+                    logger.debug("Proxy server still draining after 2s — continuing")
+                except asyncio.CancelledError:
+                    raise
+        finally:
             self._server = None
-
-        if self._http_client:
-            await self._http_client.aclose()
-            self._http_client = None
-
-        # A stale port would keep handing out URLs for a dead proxy.
-        self.port = None
-        self._started = False
-        self._master_cache.clear()
-
-        if was_running:
-            logger.info("HLSProxy stopped")
+            if self._http_client:
+                with contextlib.suppress(Exception):
+                    await self._http_client.__aexit__(None, None, None)
+                self._http_client = None
+            self.port = None
+            self._started = False
+            self._master_cache.clear()
+            if was_running:
+                logger.info("HLSProxy stopped")
 
     def get_proxy_url(
         self,
@@ -282,10 +301,9 @@ class HLSProxy:
         self, target_url: str, headers: dict[str, str] | None = None
     ):
         """Fetch a playlist for inspection. Returns (content_type, text)."""
-        # time.monotonic: get_event_loop() is deprecated outside a running
-        # loop; only the elapsed delta matters here.
         now = time.monotonic()
-        cached = self._master_cache.get(target_url)
+        cache_key = f"{target_url}_{json.dumps(headers or {}, sort_keys=True)}"
+        cached = self._master_cache.get(cache_key)
         if cached and now - cached[0] < self._master_ttl:
             return cached[1], cached[2]
         if not self._http_client:
@@ -302,9 +320,20 @@ class HLSProxy:
             raise PlaylistFetchError(target_url, ex) from ex
         if resp.status_code != 200:
             raise PlaylistFetchError(target_url, f"upstream status {resp.status_code}")
-        content_type = resp.headers.get("content-type", "")
+        content_type = next(
+            (v for k, v in resp.headers.items() if k.lower() == "content-type"), ""
+        )
         text = resp.text
-        self._master_cache[target_url] = (now, content_type, text)
+        # Cap master cache size to 50 entries
+        if len(self._master_cache) >= 50:
+            expired = [k for k, v in self._master_cache.items() if now - v[0] >= self._master_ttl]
+            for k in expired:
+                self._master_cache.pop(k, None)
+            if len(self._master_cache) >= 50:
+                oldest = sorted(self._master_cache.items(), key=lambda kv: kv[1][0])
+                for k, _ in oldest[: len(self._master_cache) - 49]:
+                    self._master_cache.pop(k, None)
+        self._master_cache[cache_key] = (now, content_type, text)
         return content_type, text
 
     async def fetch_variants(
@@ -525,9 +554,11 @@ class HLSProxy:
             )
             return
 
-        content_type = resp.headers.get("content-type", "")
+        content_type = next(
+            (v for k, v in resp.headers.items() if k.lower() == "content-type"), ""
+        )
         playlist_text = resp.text
-        if "#EXTM3U" not in playlist_text[:1024] and "mpegurl" not in content_type:
+        if "#EXTM3U" not in playlist_text[:1024] and "mpegurl" not in content_type.lower():
             # Not actually a playlist (extension-less segment misrouted here
             # by the rewrite heuristic, or an error page): stream the bytes
             # instead of serving garbage as application/vnd.apple.mpegurl.
@@ -725,7 +756,10 @@ class HLSProxy:
             return
 
         try:
-            status_line = f"HTTP/1.1 {resp.status_code} {resp.reason_phrase}\r\n"
+            status_line = (
+                f"HTTP/1.1 {resp.status_code} "
+                f"{REASON_PHRASES.get(resp.status_code, 'Unknown')}\r\n"
+            )
             writer.write(status_line.encode("latin1"))
 
             for k, v in resp.headers.items():
@@ -739,7 +773,8 @@ class HLSProxy:
                     "last-modified",
                     "cache-control",
                 ):
-                    writer.write(f"{k}: {v}\r\n".encode("latin1"))
+                    clean_v = str(v).replace("\r", "").replace("\n", "")
+                    writer.write(f"{k}: {clean_v}\r\n".encode("latin1"))
 
             writer.write(b"Connection: close\r\n\r\n")
             await writer.drain()
@@ -783,24 +818,8 @@ class HLSProxy:
         status_code: int,
         content_type: str,
         body: bytes,
-        reason_phrase: str | None = None,
     ):
-        reasons = {
-            200: "OK",
-            206: "Partial Content",
-            301: "Moved Permanently",
-            302: "Found",
-            400: "Bad Request",
-            403: "Forbidden",
-            404: "Not Found",
-            405: "Method Not Allowed",
-            416: "Range Not Satisfiable",
-            500: "Internal Server Error",
-            502: "Bad Gateway",
-            503: "Service Unavailable",
-        }
-        # Prefer the upstream's own phrase when forwarding over our table.
-        reason = reason_phrase or reasons.get(status_code, "Unknown")
+        reason = REASON_PHRASES.get(status_code, "Unknown")
 
         headers = (
             f"HTTP/1.1 {status_code} {reason}\r\n"
