@@ -58,11 +58,3 @@ def test_consumers_share_the_same_layout(monkeypatch, tmp_path):
     assert JsonStore(filename="x.json").path == os.path.join(namespace, "x.json")
     assert Cache(filename="t.json").path == os.path.join(namespace, "t.json")
     assert DownloadManager._default_dir() == os.path.join(namespace, "downloads")
-
-
-def test_store_seam_still_honours_a_monkeypatched_data_dir(monkeypatch, tmp_path):
-    """test_theme_adaptive-style seam: patching services.store._data_dir works."""
-    import services.store as store_module
-
-    monkeypatch.setattr(store_module, "_data_dir", lambda: str(tmp_path / "seam"))
-    assert JsonStore(filename="x.json").path == str(tmp_path / "seam" / "x.json")

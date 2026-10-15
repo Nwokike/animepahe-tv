@@ -18,17 +18,13 @@ import os
 import tempfile
 import time
 
+from core.artwork import LANDSCAPE, PORTRAIT, artwork_default_key
 from core.storage import app_data_dir
 
 logger = logging.getLogger(__name__)
 
 SEARCH_HISTORY_LIMIT = 20
 CONTINUE_WATCHING_LIMIT = 20
-
-
-def _data_dir() -> str:
-    """Thin seam — tests monkeypatch this name; the tier logic lives in core.storage."""
-    return app_data_dir()
 
 
 _default_store: "JsonStore | None" = None
@@ -60,7 +56,7 @@ class JsonStore:
     """A single JSON document with typed sections and atomic writes."""
 
     def __init__(self, filename: str = "app-state.json"):
-        self.path = os.path.join(_data_dir(), filename)
+        self.path = os.path.join(app_data_dir(), filename)
         self._data: dict = {}
         self._lock = asyncio.Lock()
         self._dirty = False
@@ -525,3 +521,24 @@ class JsonStore:
 
     async def save_backend(self, name: str) -> None:
         await self.put_section("backend", str(name or "auto"))
+
+    async def get_artwork_defaults(self) -> dict:
+        """Learned shape per backend+surface — what the next launch paints
+        before any probe lands. A corrupt value reads as {}."""
+        value = await self.section("artwork_defaults", {})
+        return value if isinstance(value, dict) else {}
+
+    async def save_artwork_default(self, provider: str, surface: str, mode: str) -> None:
+        """Remember what a backend's lists actually detected as.
+
+        Only landscape/portrait are stored; anything else is ignored so a
+        bad caller can never poison the first-paint defaults.
+        """
+        if mode not in (LANDSCAPE, PORTRAIT):
+            return
+        current = await self.get_artwork_defaults()
+        key = artwork_default_key(provider, surface)
+        if current.get(key) == mode:
+            return
+        current[key] = mode
+        await self.put_section("artwork_defaults", current)

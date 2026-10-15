@@ -58,11 +58,8 @@ def test_themes_differ_on_surface_and_on_surface():
     assert dark.on_surface != light.on_surface
 
 
-def test_theme_mode_round_trip(tmp_path, monkeypatch):
+def test_theme_mode_round_trip(tmp_path):
     store = JsonStore(filename=str(tmp_path / "app-state.json"))
-    monkeypatch.setattr(
-        "services.store._data_dir", lambda: str(tmp_path), raising=False
-    )
 
     async def _run():
         assert await store.get_theme_mode() is None

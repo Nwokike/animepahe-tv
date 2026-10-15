@@ -1333,7 +1333,7 @@ class AppController:
         from core import notifications
         from core.tasks import spawn
 
-        cache_dir = self._poster_cache_dir()
+        cache_dir = app_cache_dir("posters")
         path = os.path.join(
             cache_dir, notifications.stable_filename(anime_session)
         )
@@ -1352,20 +1352,14 @@ class AppController:
         spawn(_fetch(), name="cache-notify-poster")
         return path if os.path.exists(path) else None
 
-    def _poster_cache_dir(self) -> str:
-        """The regenerable tier, so a purge costs a re-fetch."""
-        return app_cache_dir("posters")
-
     def _trim_poster_cache(self, keep: int = 50) -> None:
         """Bounded, oldest-first: the one directory the app grows without
         a cap. Fifty posters is a few MB and covers any realistic follow
         list; the rest re-fetch on their next notification."""
         try:
+            root = app_cache_dir("posters")
             entries = sorted(
-                (
-                    os.path.join(self._poster_cache_dir(), name)
-                    for name in os.listdir(self._poster_cache_dir())
-                ),
+                (os.path.join(root, name) for name in os.listdir(root)),
                 key=os.path.getmtime,
             )
             for stale in entries[:-keep] if len(entries) > keep else []:

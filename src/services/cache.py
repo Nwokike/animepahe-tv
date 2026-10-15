@@ -23,11 +23,6 @@ from core.storage import app_cache_dir
 logger = logging.getLogger(__name__)
 
 
-def _cache_dir() -> str:
-    """Thin seam — the tier logic lives in core.storage."""
-    return app_cache_dir()
-
-
 def _atomic_write_json(path: str, payload: dict) -> None:
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
     try:
@@ -44,7 +39,7 @@ def _atomic_write_json(path: str, payload: dict) -> None:
 
 class Cache:
     def __init__(self, filename: str = "ttl-cache.json"):
-        self.path = os.path.join(_cache_dir(), filename)
+        self.path = os.path.join(app_cache_dir(), filename)
         self._data: dict[str, dict] = {}
         self._lock = asyncio.Lock()
         self._sweep_task: asyncio.Task | None = None
