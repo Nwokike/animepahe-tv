@@ -110,3 +110,60 @@ lever is capturing the iframe's real network call (performance resource log).
   cleared the file host answers a plain **nginx 403** — files are unplayable
   today. The desktop solver now fails fast with
   `Verification not-a-challenge (403 Forbidden)` instead of sitting 120 s.
+
+## 2026-10-15 — Phase 3 closes the three items above
+
+### 1. Images: closed by the loopback `/image` route
+The HLS proxy gained `GET /image?url=<b64>&referer=<b64>`: primp-chrome
+upstream fetch, content-type forward (non-image → octet-stream), 8 MB cap,
+900 s / 128-entry memory cache, and `Access-Control-Allow-Origin: *` — the
+header the web renderer needs. The display decision (`image_url()`) lives at
+the display edge: **web wraps every image** (CORS); native wraps only
+guarded hosts; `data:` URIs (animepahe's) pass through. Provider data and
+everything persisted stay raw, so no store row can ever carry a loopback
+port.
+
+Host probe (live, 2026-10-15, primp chrome): `cdn.anipixcdn.co`,
+`kusonime.com/wp-content`, `kayoanime.com/wp-content` all answer **200 both
+bare and with their referer**; `www.animeout.xyz/wp-content` answers a
+Cloudflare **"Just a moment" 403 either way** — same wall family as its
+files, which is why its host is the first member of `GUARDED_IMAGE_HOSTS`.
+AnimeOut's artwork therefore improves only when that wall does; the route is
+the one place its clearance (or a future solve) can be attached.
+
+### 2. "0 episodes": closed — absent counts stay absent
+No card ever printed `0` in the current UI (the search row shows no count at
+all); the honest-counts sweep found and fixed the two real leaks:
+- AnimeOut's `Episodes: N` now parses from `excerpt.rendered` (probe: 220 /
+  24 / 4 / 1 on regular and ongoing posts; empty/absent on mega-posts → stays
+  0 and renders nothing).
+- The quality/choice labels no longer print `0p` (AniKato's master-only
+  sources are 0 by design), and the series-download dialog says "No episodes
+  in this range" instead of "0 episodes".
+
+### 3. 170 episodes at once: closed — 24 per page
+The protocol's `episodes(session, page)` is honored by all five providers
+now: anikato/animeout/kusonime/kayoanime slice their cached full list at
+`EPISODES_PER_PAGE = 24` (ktv-player's documented `PAGE_SIZE`; nkiri-tv
+renders everything and its pager is vestigial — studied on disk), animepahe
+keeps its server pages. The existing pager (Prev · Page N · Next) drives it.
+The lookups that need the whole list (title failover, the new-episode
+checker) walk pages via `base.all_episodes` — page 1 would otherwise cap
+them at 24 and misreport the newest episode.
+
+### The owner's matrix run (the live acceptance sweep)
+Run it per backend after this lands; each row is a different app:
+
+| Screen | What to check |
+|---|---|
+| Home / latest | Grid matches the art shape (landscape/portrait); artwork loads; no "Episode 0" |
+| Search | Results grid + art; suggestions; pager |
+| Detail | Backdrop/poster load; metadata row shows a count only when the source publishes one; episodes page 24 with Prev/Next (Next disabled on the last page); no "0p" in any label |
+| Play | One rendition → straight into the player (no dialog); 2+ → the dialog shows distinct rows only; subtitles/quality chips appear when the stream has them |
+| Downloads | Single rendition starts without a dialog; the kayoanime download saves the real filename (usercontent route) |
+| Discover | Only on sources that browse (Phase 2 rule); art + pager |
+| Specials | Schedule appears only on anikato (Phase 2 rule) |
+
+Parked during this sweep: re-observe the AniKato content question (app vs
+the site's own iframe) — the next lever if it still differs is capturing the
+iframe's own network call (browser resource log).

@@ -64,34 +64,39 @@ swarm audit, and `docs/reference/`.
 - Step 8 (cca5aee + d941a02): exit gate — suite under `-W error`, F-clean;
   the docs caught up (README to the hybrid app, reference version stamps).
 
-## Phase 3 — every screen × every backend (in progress — plan approved 2026-10-15)
+## Phase 3 — every screen × every backend (complete)
 
 The completeness pass: each source behaves like a complete app on every
-screen. Five threads, five steps (each with its own regression tests and
-commit):
+screen. Five threads, five commits — 156a044 (episode paging 24/page in
+the four all-at-once providers + the `all_episodes` walk for the lookups
+and checker), d00accf (count honesty: AnimeOut's excerpt count, no "0"s),
+d984d97 (one rendition → one choice; kayoanime collapsed to one Source;
+no "0p"), 52e67dc (the `/image` route: web CORS + guarded hosts, wrapped
+at the display edge only), and the exit gate below. 491 passing under
+`-W error`, F-clean; the live acceptance runbook (screen × backend matrix)
+lives at the end of docs/testing-findings.md.
 
 1. **Episode paging.** 24 per page, rendered with the existing pager
    (Prev · Page N · Next). The four providers that return everything at once
-   (anikato, animeout, kusonime, kayoanime) implement the protocol's `page`
-   by slicing their already-cached full list; animepahe keeps its server
-   pages (its own shape). Fixes the 170-episode dump and kusonime's
-   1000+-episode lists.
-2. **Count honesty.** Unknown counts render as nothing — never "0". AnimeOut's
-   `Episodes:` count is parsed from the post excerpt only if a read-only probe
-   holds; the series-download dialog's count gets a 0 guard.
+   (anikato, animeout, kusonime, kayoanime) slice their cached full list;
+   animepahe keeps its server pages (its own shape). Fixes the 170-episode
+   dump and kusonime's 1000+-episode lists.
+2. **Count honesty.** Unknown counts render as nothing — never "0"/"0p".
+   AnimeOut's `Episodes:` parses from the post excerpt (probe: 220/24/4/1;
+   mega-posts empty → hidden); the series-download dialog's zero guard.
 3. **One rendition, one choice.** No picker when a source offers a single
-   logical rendition — play, external, and download all auto-start. Kayoanime
-   collapses to one Source (`url` = playback route, `download_url` = the
-   usercontent download route); `_source_choices` dedupes logical renditions
-   and stops printing "0p" for unknown resolutions (AniKato's master-only
-   sources).
-4. **The image route.** The loopback proxy gains `GET /image` (b64 url +
-   referer, content-type forward, 8 MB cap, small mem cache, CORS header) —
-   fixes web-renderer CORS and hotlink-guarded hosts (AnimeOut's artwork).
-   The controller stamps artwork at the data boundary; stores keep raw URLs.
-5. **Exit gate.** Suite 0 fail/0 warn under `-W error`; F-clean; docs
-   updated (testing-findings items 1–3 closed, image-host probe table) and
-   the owner runbook: the screen × backend matrix to sweep live.
+   logical rendition — play, external, and download all auto-start.
+   Kayoanime is one Source (`url` = playback route, `download_url` = the
+   usercontent download route); `_source_choices` dedupes logical
+   renditions and stops printing "0p".
+4. **The image route.** The loopback proxy's `GET /image` (b64 url +
+   referer, content-type forward, 8 MB cap, mem cache, CORS header). Web
+   wraps every image; native wraps only the guarded host (animeout's
+   CF-challenged wp-content — probe evidence in testing-findings). Stores
+   keep raw URLs.
+5. **Exit gate.** Suite 0 fail/0 warn under `-W error`; F-clean; testing
+   findings items 1–3 closed with evidence; the owner's matrix runbook
+   documented.
 
 ## Phase 4 — player & downloads depth (pending)
 
