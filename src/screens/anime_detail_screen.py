@@ -750,7 +750,9 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
 
     count = len([e for e in episodes if lo <= e.episode <= hi and e.session not in done])
     sizes = [float(getattr(e, "size", "") or 0) for e in episodes if getattr(e, "size", "")]
-    summary = f"{count} episodes"
+    # Never "0 episodes": an empty range (or an episode list that failed to
+    # load) says so honestly instead of printing a zero.
+    summary = f"{count} episodes" if count else "No episodes in this range"
     if sizes:
         summary += f" · ~{sum(sizes) / 1024:.0f}MB"
 

@@ -287,13 +287,19 @@ class AnimeOutProvider:
         if not native.isdigit():
             return None
         resp = await self._client.get(
-            f"{ANIMEOUT_API}/posts/{native}", params={"_fields": "id,title"}
+            f"{ANIMEOUT_API}/posts/{native}", params={"_fields": "id,title,excerpt"}
         )
         if resp.status_code != 200:
             return None
         post = resp.json()
         results = await self._posts_to_anime([post])
-        return results[0] if results else None
+        if not results:
+            return None
+        # The excerpt's metadata block is the only count the API exposes.
+        # Empty on the mega-posts (verified live 2026-10-15) — leave 0,
+        # the metadata row hides absent counts rather than printing 0.
+        results[0].episodes = _episodes_from_excerpt(post)
+        return results[0]
 
     # ------------------------------------------------------------------
     # Episodes + files (the two-hop resolve)
@@ -408,6 +414,17 @@ class AnimeOutProvider:
 
     async def close(self):
         await close_client(self._client)
+
+
+def _episodes_from_excerpt(post: dict) -> int:
+    """The `Episodes: N` count from excerpt.rendered — the only count the
+    WP API exposes. Digits-only: the mega-posts carry an empty value and
+    the field is absent on some eras (verified live 2026-10-15), and both
+    stay 0 so the UI hides the count instead of printing a fabricated 0."""
+    excerpt = (post.get("excerpt") or {}).get("rendered") or ""
+    text = re.sub(r"<[^>]+>", " ", excerpt)
+    m = re.search(r"Episodes?\s*:\s*(\d+)", text, re.I)
+    return int(m.group(1)) if m else 0
 
 
 def _episode_number(filename: str) -> int:
