@@ -758,7 +758,17 @@ class AniKatoProvider:
             return []  # genuinely no servers for this episode — a result
         servers = await self._server_links(ids_token)
         results: list[Source] = []
+        seen_audio: set[str] = set()
         for kind, link_id in servers:
+            # The site lists each real stream 3-4 times (tcdn / bare /
+            # videojs / bcdn are MIRRORS of one rendition, same content).
+            # That is not a quality choice — collapse to one source per
+            # audio track, so the picker shows what this backend actually
+            # has: Japanese (Sub) and English (Dub). Mirrors stay as the
+            # failure fallback: a kind only counts as served once its
+            # first working link produced a Source.
+            if kind in seen_audio:
+                continue
             resolved = await self._resolve_link(link_id)
             if not resolved:
                 continue
@@ -794,6 +804,7 @@ class AniKatoProvider:
                     skip=skip,
                 )
             )
+            seen_audio.add(kind)
         return results
 
     async def episodes_for_title(self, title: str) -> list[Episode]:

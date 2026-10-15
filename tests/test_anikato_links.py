@@ -68,3 +68,48 @@ def test_repeated_resolve_of_the_same_link_hits_the_cache():
     second = asyncio.run(provider._resolve_link(link))
     assert first == second
     assert len(calls) == 1
+
+
+def test_sources_collapse_mirror_flavors_to_one_per_audio_track():
+    """Live picker showed six identical entries ("3 eng 0p and 3 jpn 0p"):
+    tcdn/bare/videojs/bcdn are mirrors of ONE stream, not qualities.
+    AniKato genuinely has Sub and Dub — the picker must show exactly those."""
+    provider = _provider_with_recording_resolver()
+    if isinstance(provider, tuple):
+        provider, _calls = provider
+
+    async def fake_watch(_slug):
+        return {"anime_id": 1, "poster": ""}
+
+    async def fake_entries(_anime_id):
+        return [(3, "tok3", False, False, 0)]
+
+    mirrors = [
+        ("sub", "MTF1dkFtaW9BRTZPbzJJRElFZUZrOWdjeldj-sub-tcdn"),
+        ("sub", "MTF1dkFtaW9BRTZPbzJJRElFZUZrOWdjeldj-sub-bare"),
+        ("sub", "MTF1dkFtaW9BRTZPbzJJRElFZUZrOWdjeldj-sub-videojs"),
+        ("dub", "MTF1dkFtaW9BRTZPbzJJRElFZUZrOWdjeldj-dub-tcdn"),
+    ]
+    resolved = []
+
+    async def fake_server_links(_token):
+        return mirrors
+
+    async def fake_resolve(link_id):
+        resolved.append(link_id)
+        tail = link_id.rsplit("-", 1)[-1]
+        return (f"90{len(resolved)}", "sub" if "-sub-" in link_id else "dub", "tcdn", {})
+
+    async def fake_manifest(realid, kind, s):
+        return (f"https://cdn/{realid}/master.m3u8", [], {})
+
+    provider._watch_page = fake_watch
+    provider._episode_entries = fake_entries
+    provider._server_links = fake_server_links
+    provider._resolve_link = fake_resolve
+    provider._manifest_for = fake_manifest
+
+    sources = asyncio.run(provider.sources("anikato:x", "x|3"))
+    assert len(sources) == 2, "one source per audio track, not one per mirror"
+    assert {s.audio for s in sources} == {"jpn", "eng"}
+    assert len(resolved) == 2, "only the first working mirror of each kind resolves"
