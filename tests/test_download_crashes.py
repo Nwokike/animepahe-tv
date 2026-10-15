@@ -260,18 +260,24 @@ def test_pause_actually_stops_the_task():
         await mgr.start_direct("ep1", "https://x/file.mkv", {}, {"filename": "file.mkv"})
         task = mgr._tasks["ep1"]
 
-        await asyncio.sleep(0.02)  # let the first chunk land
+        # Bounded waits, not fixed sleeps: a fixed 20ms raced the writer
+        # under machine load (observed flake) and proved nothing.
+        async def _until(predicate, timeout=2.0):
+            async with asyncio.timeout(timeout):
+                while not predicate():
+                    await asyncio.sleep(0.01)
+
         job_dir = mgr._job_dir("unknown", "ep1")
         part_path = os.path.join(job_dir, "file.mkv.part")
-        assert os.path.exists(part_path)
+        await _until(lambda: os.path.exists(part_path))
 
         assert mgr.pause("ep1") is True
-        await asyncio.sleep(0.02)
         # The writer must actually STOP — not run on in the background.
-        assert task.cancelled() or task.done()
+        await _until(lambda: task.cancelled() or task.done())
         assert mgr.active_jobs == []
         # Release the stall: a still-running writer would now write the
-        # second chunk after the pause (the duplicate-writer bug).
+        # second chunk after the pause (the duplicate-writer bug). The
+        # bounded pause below gives a would-be writer its chance to act.
         release.set()
         await asyncio.sleep(0.05)
         assert os.path.getsize(part_path) == 4096
