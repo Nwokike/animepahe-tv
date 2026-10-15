@@ -800,9 +800,3 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
         ],
         actions_alignment=ft.MainAxisAlignment.END,
     )
-
-
-def _known_downloads() -> dict:
-    from state.app_state import state
-
-    return state.downloads or {}

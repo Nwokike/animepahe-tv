@@ -34,7 +34,6 @@ logger = logging.getLogger("animepahe.provider.kusonime")
 # Anything else on the page is ignored — no fragile leecher resolvers.
 # Hosts with a verified public direct route: pixeldrain (its /api/file
 # route, 206-verified) and Google Drive (usercontent, 206-verified).
-_SUPPORTED_HOSTS = ("pixeldrain.com",)
 _SUPPORTED_DRIVE = ("drive.usercontent.google.com", "drive.google.com/uc")
 
 

@@ -73,11 +73,6 @@ def _source_choices(sources) -> list[dict]:
     return choices
 
 
-# Quality presets for the download flow: the provider's own list stays the
-# explicit choice, and these three sit on top of it.
-QUALITY_PRESETS = ("highest", "lowest", "as-served")
-
-
 def _preset_choice(choices: list[dict], preset: str) -> dict:
     """Which rendition a preset picks from an episode's choice list.
 

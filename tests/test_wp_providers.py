@@ -92,16 +92,6 @@ function start() {
 </script>
 """
 
-KUSONIME_SEARCH = [
-    {
-        "id": 5789,
-        "title": {
-            "rendered": "Sousou no Frieren Season 2 BD Batch Subtitle Indonesia | Kusonime"
-        },
-        "featured_media": 5790,
-        "link": "https://kusonime.com/frieren-batch-subtitle-indonesia/",
-    }
-]
 KUSONIME_PAGE = """
 <div id="dl">
 <div class="smokeurlrh"><strong>360P</strong>

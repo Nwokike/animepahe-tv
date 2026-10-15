@@ -28,8 +28,6 @@ from services.providers.base import (
 
 logger = logging.getLogger("animepahe.provider.animeout")
 
-_DDL_LANDING = "https://ddl.animeout.com/index.php"
-_DDL_PUBLIC = "https://ddl.animeout.com/public.php"
 _FILE_HOST = "public.animeout.xyz"
 
 

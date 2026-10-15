@@ -87,10 +87,6 @@ class _PrimpLikeClient:
             return self._payload
 
 
-def _posts_response(posts):
-    return _PrimpLikeClient._Resp(200, posts)
-
-
 def test_search_ranks_posts_by_title_coverage():
     import asyncio
 

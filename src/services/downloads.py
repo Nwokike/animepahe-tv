@@ -52,21 +52,16 @@ PLAYLIST_TIMEOUT = 15
 FILE_TIMEOUT = 600
 # Concurrent jobs across BOTH paths — the rest queue on the limiter, in
 # start order (Media3's maxParallelDownloads, which defaults to 3 there).
-MAX_FILE_DOWNLOADS = 2
 MAX_PARALLEL_DOWNLOADS = 3
 
-_ERR_THREAD = None
 # Job states (Media3's set — the persisted vocabulary in manifest.json).
 STATE_QUEUED = "queued"
 STATE_DOWNLOADING = "downloading"
 STATE_STOPPED = "stopped"        # paused by the user; partials kept
 STATE_COMPLETED = "completed"
 STATE_FAILED = "failed"
-STATE_REMOVING = "removing"
-STATE_RESTARTING = "restarting"
 # The store row's two words — what the screens already speak. A row's
 # state maps to a job state, never the other way round.
-ROW_PARTIAL = "partial"
 ROW_COMPLETE = "complete"
 
 
@@ -210,8 +205,8 @@ def _scan_segments(
     """One directory listing answers both the resume count and the queue.
 
     The per-URI probes did N blocking listdir calls on the event loop;
-    this runs once, in a worker thread. Matching mirrors
-    ``_segment_complete`` exactly (name suffix)."""
+    this runs once, in a worker thread. Matching is by name suffix — the
+    same rule resume has always used."""
     present: list[str] = []
     if os.path.isdir(segs_dir):
         present = os.listdir(segs_dir)
@@ -269,9 +264,6 @@ class DownloadManager:
     @property
     def active_jobs(self) -> list[str]:
         return list(self._tasks.keys())
-
-    def get_progress(self, episode_session: str) -> dict | None:
-        return self._progress.get(episode_session)
 
     async def start(
         self,
@@ -457,13 +449,6 @@ class DownloadManager:
         return self._job_dir(
             metadata.get("anime_session", "unknown"), episode_session
         )
-
-    def job_state(self, anime_session: str, episode_session: str) -> str:
-        """The persisted state of a job ('' when there is none)."""
-        manifest = self._read_manifest(
-            os.path.join(self._job_dir(anime_session, episode_session), "manifest.json")
-        )
-        return str(manifest.get("state") or "")
 
     @staticmethod
     def _job_has_final_file(job_dir: str) -> bool:
@@ -1041,14 +1026,6 @@ class DownloadManager:
     # ------------------------------------------------------------------
     # Filesystem helpers
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _segment_complete(segs_dir: str, uri: str) -> bool:
-        name = "-" + os.path.basename(uri.split("?")[0])
-        for candidate in os.listdir(segs_dir) if os.path.isdir(segs_dir) else []:
-            if candidate.endswith(name):
-                return True
-        return False
 
     @staticmethod
     def _read_manifest(path: str) -> dict:

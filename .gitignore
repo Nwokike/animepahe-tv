@@ -22,3 +22,5 @@ keys/
 # Signing — never commit keystores
 *.jks
 *.keystore
+
+.zcode/

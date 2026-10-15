@@ -14,14 +14,6 @@ from core.shared_services import get_shared_services
 from core.state import AppState
 
 
-class _FakeLauncher:
-    def __init__(self):
-        self.calls = []
-
-    async def launch_url(self, url, **kwargs):
-        self.calls.append(url)
-
-
 class _FakeClipboard:
     def __init__(self):
         self.values = []

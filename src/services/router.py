@@ -125,11 +125,6 @@ class ProviderRouter:
     # Wiring
     # ------------------------------------------------------------------
 
-    def add_provider(self, provider: Provider) -> None:
-        self._providers.append(provider)
-        self._breakers[provider.name] = _Breaker(self._clock)
-        self._health[provider.name] = ProviderHealth()
-
     def get(self, name: str) -> Provider | None:
         for provider in self._providers:
             if provider.name == name:

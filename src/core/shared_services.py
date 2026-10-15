@@ -90,19 +90,3 @@ def get_shared_services(page: ft.Page) -> SharedServices:
     if page is None:
         raise ValueError("page is required")
     return mount_shared_services(page)
-
-
-def shared_launcher(page: ft.Page) -> ft.UrlLauncher:
-    return get_shared_services(page).launcher
-
-
-def shared_clipboard(page: ft.Page) -> ft.Clipboard:
-    return get_shared_services(page).clipboard
-
-
-def shared_haptics(page: ft.Page) -> ft.HapticFeedback:
-    return get_shared_services(page).haptics
-
-
-def shared_share(page: ft.Page) -> ft.Share:
-    return get_shared_services(page).share

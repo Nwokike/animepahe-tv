@@ -21,11 +21,6 @@ import pytest  # noqa: E402
 from services.animeout_solver import AnimeOutSolver  # noqa: E402
 from services.store import JsonStore  # noqa: E402
 
-_CF_PAGE = (
-    "<html><head><title>Just a moment...</title></head><body>"
-    "<script>window._cf_chl_opt={};</script></body></html>"
-)
-
 
 class _Resp:
     def __init__(self, status_code: int, text: str):
