@@ -61,7 +61,13 @@ class AnimeOutSolver:
         try:
             from services.webview_solver import WebViewSolver
 
-            cookies, user_agent = await WebViewSolver.solve_challenge(page, BASE_URL)
+            stored = (
+                await self._store.get_clearance(_HOST) if self._store else None
+            )
+            prior_ua = (stored or {}).get("user_agent") or None
+            cookies, user_agent = await WebViewSolver.solve_challenge(
+                page, BASE_URL, user_agent=prior_ua
+            )
         except Exception as ex:
             logger.info("animeout solve failed: %s", ex)
             return None

@@ -13,6 +13,7 @@ Each test kills one defect from the swarm audit:
 """
 
 import asyncio
+import json
 import os
 import sys
 
@@ -44,11 +45,19 @@ class _Events:
         self.closed = closed
 
 
+class _FakeWebview:
+    """Stands in for the pywebview module: only `renderer` matters to the
+    Chromium guard (the real attribute is set once start() picks one)."""
+
+    def __init__(self, renderer="edgechromium"):
+        self.renderer = renderer
+
+
 class _SolverExited(Exception):
     """Mirrors os._exit: the real _fail never returns."""
 
 
-def test_desktop_solver_exits_when_the_user_closes_the_window():
+def test_desktop_solver_exits_when_the_user_closes_the_window(monkeypatch):
     """The hang: the 120×1s poll kept calling get_cookies() on a dead
     window and the parent's communicate() never returned."""
     import services.desktop_cf_solver as dcs
@@ -66,7 +75,8 @@ def test_desktop_solver_exits_when_the_user_closes_the_window():
         calls.append(reason)
         raise _SolverExited(reason)
 
-    dcs._fail = _fail  # type: ignore[assignment]
+    monkeypatch.setattr(dcs, "webview", _FakeWebview())
+    monkeypatch.setattr(dcs, "_fail", _fail)
     with pytest.raises(_SolverExited):
         dcs.check_cookies(_Window())
     assert calls == ["closed"]
@@ -85,6 +95,7 @@ def test_desktop_solver_timeout_reports_an_error(monkeypatch):
         def destroy(self):
             pass
 
+    monkeypatch.setattr(dcs, "webview", _FakeWebview())
     monkeypatch.setattr(dcs.time, "sleep", lambda _s: None)  # instant loop
     calls = []
 
@@ -172,7 +183,7 @@ def test_tv_platform_falls_back_to_the_desktop_solver(monkeypatch):
     monkeypatch.setattr(
         wvs.WebViewSolver,
         "_solve_desktop",
-        staticmethod(lambda page, url: _recorder(fell_back, page, url)),
+        staticmethod(lambda page, url, user_agent=None: _recorder(fell_back, page, url)),
     )
 
     async def _recorder(fell_back, page, url):
@@ -370,3 +381,209 @@ def test_desktop_solver_bails_on_a_403_nginx_page_too():
             return "403 Forbidden"
 
     assert served_a_plain_page(_Win()) == "403 Forbidden"
+
+
+# ---------------------------------------------------------------------------
+# desktop_cf_solver & webview_solver — Phase 2 Step 7: the UA pin, the
+# renderer guard, and the loaded-page fast path
+# ---------------------------------------------------------------------------
+
+
+class _DesktopPlatform:
+    """Any platform whose is_mobile() is False sends solve_challenge down
+    the desktop path — no enum guessing needed."""
+
+    def is_mobile(self):
+        return False
+
+
+class _DesktopPage:
+    platform = _DesktopPlatform()
+
+
+class _Morsel:
+    def __init__(self, value):
+        self.value = value
+
+
+class _Loaded:
+    def __init__(self):
+        self.callbacks = []
+
+    def __iadd__(self, callback):
+        self.callbacks.append(callback)
+        return self
+
+
+class _RunWindow:
+    def __init__(self):
+        self.events = type("_Ev", (), {"loaded": _Loaded()})()
+        self.destroyed = False
+
+    def destroy(self):
+        self.destroyed = True
+
+
+class _RunWebview:
+    """The pywebview module surface run() touches."""
+
+    def __init__(self, renderer="edgechromium"):
+        self.renderer = renderer
+        self.created = None
+        self.started = None
+
+    def create_window(self, title, url, **kwargs):
+        self.created = (title, url, kwargs)
+        return _RunWindow()
+
+    def start(self, func, window, **kwargs):
+        self.started = (func, window, kwargs)
+
+
+def test_desktop_argv_carries_the_pinned_user_agent():
+    """cf_clearance is bound to the UA that solved it, so the child must
+    present the stored string, not the system default."""
+    from services.webview_solver import _desktop_argv
+
+    assert _desktop_argv("py", "solver.py", "https://x/", None) == [
+        "py",
+        "solver.py",
+        "https://x/",
+    ]
+    assert _desktop_argv("py", "solver.py", "https://x/", "UA/7") == [
+        "py",
+        "solver.py",
+        "https://x/",
+        "UA/7",
+    ]
+
+
+def test_solve_challenge_forwards_the_pinned_ua_to_the_subprocess(monkeypatch):
+    import services.webview_solver as wvs
+
+    seen = {}
+
+    async def _recorder(page, url, user_agent=None):
+        seen["url"] = url
+        seen["ua"] = user_agent
+        return ("cookies", "ua")
+
+    monkeypatch.setattr(wvs.WebViewSolver, "_solve_desktop", staticmethod(_recorder))
+    asyncio.run(
+        wvs.WebViewSolver.solve_challenge(
+            _DesktopPage(), "https://animepahe.com/", user_agent="UA/9"
+        )
+    )
+    assert seen == {"url": "https://animepahe.com/", "ua": "UA/9"}
+
+
+def test_desktop_run_pins_the_stored_ua_into_the_window(monkeypatch):
+    """A re-solve must present the same UA the clearance is bound to — and
+    the child must carry that UA home even if the page never reports one."""
+    import services.desktop_cf_solver as dcs
+
+    fake = _RunWebview()
+    monkeypatch.setattr(dcs, "webview", fake)
+    monkeypatch.setattr(dcs, "captured_ua", dcs.FALLBACK_UA)
+    dcs.run("https://animepahe.com/", "UA/stored")
+    func, window, kwargs = fake.started
+    assert func is dcs.check_cookies
+    assert window is dcs.window
+    assert kwargs == {"user_agent": "UA/stored"}
+    assert dcs.captured_ua == "UA/stored"
+    assert fake.created[1] == "https://animepahe.com/"
+
+
+def test_desktop_solver_refuses_a_non_chromium_renderer(monkeypatch):
+    """MSHTML (or a missing WebView2 runtime) has no get_cookies() — the old
+    code spun the full two minutes for it."""
+    import services.desktop_cf_solver as dcs
+
+    class _Win:
+        def __init__(self):
+            self.events = _Events(_NotClosedEvent())
+            self.destroyed = False
+
+        def get_cookies(self):
+            raise AssertionError("must not poll with no cookie support")
+
+        def destroy(self):
+            self.destroyed = True
+
+    win = _Win()
+    monkeypatch.setattr(dcs, "webview", _FakeWebview("mshtml"))
+    calls = []
+
+    def _fail(reason):
+        calls.append(reason)
+        raise _SolverExited(reason)
+
+    monkeypatch.setattr(dcs, "_fail", _fail)
+    with pytest.raises(_SolverExited):
+        dcs.check_cookies(win)
+    assert win.destroyed
+    assert calls == ["unsupported-renderer (mshtml) — install the WebView2 Runtime"]
+
+
+def test_desktop_solver_emits_success_the_moment_a_solved_page_loads(
+    monkeypatch, capsys
+):
+    """A page that already carries the clearance (a returning user whose
+    cookie survived) is judged on load, not after the first 1 s tick."""
+    import services.desktop_cf_solver as dcs
+
+    class _Win:
+        def __init__(self):
+            self.destroyed = False
+
+        def evaluate_js(self, expr):
+            return "UA/live" if expr == "navigator.userAgent" else "AnimePahe"
+
+        def get_cookies(self):
+            return [
+                {
+                    "cf_clearance": _Morsel("abc"),
+                    "animepahe_session": _Morsel("s1"),
+                }
+            ]
+
+        def destroy(self):
+            self.destroyed = True
+
+    win = _Win()
+    monkeypatch.setattr(dcs, "window", win)
+    monkeypatch.setattr(dcs, "_done", False)
+    monkeypatch.setattr(dcs, "captured_ua", dcs.FALLBACK_UA)
+    monkeypatch.setattr(dcs, "page_loaded_once", False)
+
+    dcs.on_loaded()
+    assert win.destroyed
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload == {
+        "cookies": "cf_clearance=abc; animepahe_session=s1",
+        "user_agent": "UA/live",
+    }
+    # the latch: a second loaded event must not re-emit
+    dcs.on_loaded()
+    assert capsys.readouterr().out == ""
+
+
+def test_desktop_solver_stays_quiet_while_the_challenge_runs(monkeypatch, capsys):
+    import services.desktop_cf_solver as dcs
+
+    class _Win:
+        def evaluate_js(self, expr):
+            return "UA"
+
+        def get_cookies(self):
+            return [{"__cf_bm": _Morsel("x")}]
+
+        def destroy(self):
+            raise AssertionError("must not destroy while challenging")
+
+    monkeypatch.setattr(dcs, "window", _Win())
+    monkeypatch.setattr(dcs, "_done", False)
+    monkeypatch.setattr(dcs, "page_loaded_once", False)
+    dcs.on_loaded()
+    assert capsys.readouterr().out == ""
+    assert dcs._done is False

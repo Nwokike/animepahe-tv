@@ -16,6 +16,18 @@ DESKTOP_SOLVER_TIMEOUT = 150.0
 MOBILE_SOLVER_TIMEOUT = 300.0
 
 
+def _desktop_argv(
+    python: str, script: str, url: str, user_agent: str | None
+) -> list[str]:
+    """The subprocess argv. The UA rides argv[2] when one is pinned — the
+    clearance cookie is bound to the UA that solved the challenge, so the
+    solve must present the same string the later API calls will."""
+    argv = [python, script, url]
+    if user_agent:
+        argv.append(user_agent)
+    return argv
+
+
 def _get_python_executable() -> str:
     cwd = os.getcwd()
     if platform.system() == "Windows":
@@ -30,7 +42,12 @@ def _get_python_executable() -> str:
 
 class WebViewSolver:
     @staticmethod
-    async def solve_challenge(page: ft.Page, url: str) -> tuple[str, str]:
+    async def solve_challenge(
+        page: ft.Page, url: str, user_agent: str | None = None
+    ) -> tuple[str, str]:
+        """Open the challenge and return (cookies, ua). ``user_agent`` pins
+        the window to a stored UA when one exists: cf_clearance is bound to
+        the string that solved it, so a re-solve must present the same."""
         # flet-webview-all renders on Android (and Android TV, which Flutter
         # reports as TargetPlatform.android); desktop dev uses the pywebview
         # subprocess because third-party extension controls do not render
@@ -40,12 +57,14 @@ class WebViewSolver:
         )
         if is_mobile_family:
             logger.info("WebViewSolver using flet_webview WebView (mobile/TV)")
-            return await WebViewSolver._solve_mobile(page, url)
+            return await WebViewSolver._solve_mobile(page, url, user_agent)
         logger.info("WebViewSolver using pywebview subprocess (Desktop dev)")
-        return await WebViewSolver._solve_desktop(page, url)
+        return await WebViewSolver._solve_desktop(page, url, user_agent)
 
     @staticmethod
-    async def _solve_desktop(page: ft.Page, url: str) -> tuple[str, str]:
+    async def _solve_desktop(
+        page: ft.Page, url: str, user_agent: str | None = None
+    ) -> tuple[str, str]:
         # Path to the desktop solver script
         dir_path = os.path.dirname(os.path.abspath(__file__))
         solver_script = os.path.join(dir_path, "desktop_cf_solver.py")
@@ -79,9 +98,7 @@ class WebViewSolver:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                _get_python_executable(),
-                solver_script,
-                url,
+                *_desktop_argv(_get_python_executable(), solver_script, url, user_agent),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -135,7 +152,9 @@ class WebViewSolver:
             page.update()
 
     @staticmethod
-    async def _solve_mobile(page: ft.Page, url: str) -> tuple[str, str]:
+    async def _solve_mobile(
+        page: ft.Page, url: str, user_agent: str | None = None
+    ) -> tuple[str, str]:
         from flet_webview import WebView, WebViewConsoleMessageEvent
 
         # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
@@ -398,7 +417,7 @@ class WebViewSolver:
             polling_task.cancel()
             with contextlib.suppress(BaseException):
                 await polling_task
-            return await WebViewSolver._solve_desktop(page, url)
+            return await WebViewSolver._solve_desktop(page, url, user_agent)
         except Exception:
             pass  # a generic failure here is the poll loop's problem
 

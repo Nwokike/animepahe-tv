@@ -156,8 +156,14 @@ class DDoSSolver:
             )
             return False
 
+        stored = (
+            await self._store.get_clearance() if self._store is not None else None
+        )
+        prior_ua = (stored or {}).get("user_agent") or self._user_agent or None
         try:
-            cookies, ua = await WebViewSolver.solve_challenge(page, self._base_url)
+            cookies, ua = await WebViewSolver.solve_challenge(
+                page, self._base_url, user_agent=prior_ua
+            )
             self._cookies_str = cookies
             self._user_agent = ua
             self._solved = True
