@@ -357,3 +357,16 @@ def test_desktop_solver_bails_on_plain_server_pages():
     assert served_a_plain_page(_Win("Just a moment...")) is None
     assert served_a_plain_page(_Win("AnimePahe")) is None
     assert served_a_plain_page(_Win("")) is None
+
+
+def test_desktop_solver_bails_on_a_403_nginx_page_too():
+    """The owner's latest run: the animeout file host answered a plain
+    nginx 403 (not a Cloudflare challenge) and the solver sat on it. 403
+    must be in the fail-fast set as well as the welcome page."""
+    from services.desktop_cf_solver import served_a_plain_page
+
+    class _Win:
+        def evaluate_js(self, _expr):
+            return "403 Forbidden"
+
+    assert served_a_plain_page(_Win()) == "403 Forbidden"

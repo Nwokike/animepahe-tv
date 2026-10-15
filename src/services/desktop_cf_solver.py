@@ -19,10 +19,12 @@ _NOT_A_CHALLENGE_MARKERS = (
     "index of /",
     "apache2",
     "it works!",
+    "401 unauthorized",
+    "403 forbidden",
+    "404 not found",
     "502 bad gateway",
     "503 service",
     "504 gateway",
-    "404 not found",
 )
 
 

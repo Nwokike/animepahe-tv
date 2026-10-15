@@ -97,7 +97,6 @@ def test_sources_collapse_mirror_flavors_to_one_per_audio_track():
 
     async def fake_resolve(link_id):
         resolved.append(link_id)
-        tail = link_id.rsplit("-", 1)[-1]
         return (f"90{len(resolved)}", "sub" if "-sub-" in link_id else "dub", "tcdn", {})
 
     async def fake_manifest(realid, kind, s):
