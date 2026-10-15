@@ -1,5 +1,9 @@
 # dep: flet-yandex-ads — complete API reference
 
+> **Version note (2026-10-15):** version 0.1.0 is still current; the flet version quoted in §1
+> is now 1.0.4 (Python 3.14.7). Install source wins where they disagree.
+
+
 > Installed package under study: `C:\Users\nwoki\ad-extensions\sources\animepahe-tv\.venv\Lib\site-packages\flet_yandex_ads\`
 > Our usage: `src/services/ads.py` (SDK init + interstitial/rewarded/app-open),
 > `src/components/banner_ad.py` (banner builder).

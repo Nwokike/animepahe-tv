@@ -6,14 +6,17 @@
 <h1 align="center">AnimePahe TV</h1>
 
 <p align="center">
-  A high-performance, client-side anime streaming application with TV-optimized navigation, multi-quality stream resolution, and a responsive glassmorphic UI. Built with Python and Flet.
+  A high-performance, client-side anime streaming application with TV-optimized navigation,
+  multi-quality stream resolution, and a responsive glassmorphic UI — a hybrid of independent
+  sources, one chosen at startup and treated as the whole app.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows11&logoColor=white" alt="Windows" />
   <img src="https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android" />
   <br>
-  <img src="https://img.shields.io/badge/Built%20with-Flet%200.85-00B0FF?style=flat-square" alt="Built with Flet" />
+  <img src="https://img.shields.io/badge/Built%20with-Flet%201.0.4-00B0FF?style=flat-square" alt="Built with Flet 1.0.4" />
+  <img src="https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.14" />
 </p>
 
 ---
@@ -39,17 +42,36 @@ Get the latest version of AnimePahe TV. If you aren't sure which Android version
 
 ## Features
 
-- **Browse & Search** — Submit-driven search with debounced recent-search suggestions, paginated results, and real empty/error states.
-- **Continue Watching** — A shelf on Home that picks up exactly where you stopped; positions persist across launches.
-- **In-app Player** — `flet-video` (mpv) with a quality selector when the master playlist offers variants, resume from your saved position, next/previous episode buttons, and a 10s-network-timeout watchdog so a dead stream fails into Retry instead of hanging.
-- **Offline Downloads** — Save any episode (or a whole series) for offline: parallel segments, `Range`-resumable, cancel-safe, grouped by series with progress and sizes. Downloaded episodes play from the same player with resume intact.
-- **All four ad formats** — inline + sticky banners, interstitial between episodes, rewarded early access, and app-open on cold start, on phone and Android TV.
-- **Live Activity Terminal** — Settings → Open Terminal: the last 500 engine/network/UI log lines with telemetry, for diagnosing Cloudflare/kwik/download issues.
-- **TV Remote Navigation** — Left navigation rail on TV and wide screens, bottom bar on phones, D-pad focus order with an autofocus back handler; no primary nav at the bottom on TV.
-- **Adaptive Scraper Waterfall** — Multi-strategy resolution: JSON API → HTML parsing (stdlib) → regex extraction → Dean Edwards JS unpack, each layer with tested fallbacks.
-- **Persistent Cloudflare session** — the clearance cookie is stored durably and reused, so returning boots skip the Turnstile webview.
+- **Independent sources, one at a time** — five backends (AniKato, AnimeOut, Kusonime, Kayoanime,
+  AnimePahe), each with its own catalog, artwork, playback and Cloudflare story. The app resolves
+  one source behind a startup splash (a stored pin, or an automatic race of the open sources) and
+  then *is* that source: nothing else is consulted, and switching re-runs the whole gate.
+- **The art decides the layout** — the screen sniffs the shape of the artwork the active source
+  serves and paints itself in landscape or portrait automatically: grids, shelves and cards all
+  swap. There is no layout setting, by design.
+- **Browse & Search** — submit-driven search with debounced recent-search suggestions, paginated
+  results, and real empty/error states.
+- **Continue Watching** — a shelf on Home that picks up exactly where you stopped; positions
+  persist across launches.
+- **In-app Player** — `flet-video` (mpv) with a quality selector when the master playlist offers
+  variants, resume from your saved position, next/previous episode buttons, and a 10s-network-timeout
+  watchdog so a dead stream fails into Retry instead of hanging.
+- **Offline Downloads** — save any episode (or a whole series) for offline: parallel segments,
+  `Range`-resumable, cancel-safe, grouped by series with progress and sizes. Downloaded episodes
+  play from the same player with resume intact.
+- **All four ad formats** — inline + sticky banners, interstitial between episodes, rewarded early
+  access, and app-open on cold start, on phone and Android TV.
+- **Live Activity Terminal** — Settings → Open Terminal: the last 500 engine/network/UI log lines
+  with telemetry, for diagnosing Cloudflare/CDN/download issues.
+- **TV Remote Navigation** — D-pad focus with per-state focus rings, one focus manager routing
+  Back/Escape; navigation rail on TV and wide screens, bottom bar on phones.
+- **Persistent Cloudflare sessions** — a solved clearance is stored durably per host and re-probed
+  before use, so returning boots skip the verification window; AnimePahe's turnstile appears only
+  when AnimePahe is the chosen source.
 - **System Theme Awareness** — Dark → Light → System cycling.
-- **Adaptive Layout** — Rail on wide/TV, bottom bar on phones; glass cards with focus-ring reserves that never shift layout.
+- **Storage done by tier** — durable data, regenerable cache and throwaway temp resolve through one
+  module (`core/storage.py`) against `FLET_APP_STORAGE_*`, matching how a packaged app behaves on a
+  device.
 
 ## Architecture
 
@@ -57,10 +79,12 @@ Get the latest version of AnimePahe TV. If you aren't sure which Android version
 |-------|-----------|
 | Frontend | Flet 1.0.4 (Python → Flutter), `@ft.component` screens |
 | Video Engine | `flet-video` 1.0.4 (mpv backend) |
-| Network | `primp` (async, Chrome impersonation for Cloudflare, `Range`-capable streaming) |
-| Cloudflare | `flet-webview-all` on Android/iOS/TV; pywebview subprocess for desktop dev |
-| Durable state | JSON store in `FLET_APP_STORAGE_DATA` (history, continue watching, positions, clearance, downloads) |
-| Stream Resolver | Dean Edwards JS unpack + regex + stdlib HTML parsing |
+| Network | `primp` 2.0.1 (async, Chrome impersonation for Cloudflare, `Range`-capable streaming) |
+| Sources | Provider protocol + `ProviderRouter` (breaker per provider, owner-scoped catalog ops, health in Settings) |
+| Cloudflare | `flet-webview-all` on Android/iOS/TV; pywebview subprocess for desktop dev (UA-pinned, renderer-guarded) |
+| Durable state | Atomic JSON in the data tier (`FLET_APP_STORAGE_DATA`): history, continue watching, positions, clearance, downloads, artwork defaults |
+| Stream resolution | Per-source: AniKato's encrypted MegaPlay manifests, AnimePahe's Kwik unpack, Kusonime's pixeldrain, Kayoanime's Drive, AnimeOut's DDL chain |
+| Artwork | `core/artwork.py` (byte sniffing) + `services/artwork_probe.py` (cache-first range probes) |
 | Ads | `flet-yandex-ads` (banner, interstitial, rewarded, app open) |
 | State Management | `@observable` AppState + context providers + a controller bridge |
 | Navigation | Component-state branches (tabs / detail / player), rail/bar adaptive |
@@ -71,98 +95,91 @@ Get the latest version of AnimePahe TV. If you aren't sure which Android version
 
 ```text
 src/
-├── main.py                    # AppController (services + data actions) + entry
-├── app_shell.py               # Adaptive shell: rail/bottom nav, tab + detail + player branches
+├── main.py                    # AppController (services + data actions + startup resolve) + entry
+├── app_shell.py               # Adaptive shell: rail/bottom nav, splash, tab + detail + player branches
 ├── state/
 │   ├── app_state.py           # AppStateCtx = ft.create_context(state)
 │   └── controller_ctx.py      # ControllerMethods bridge
 ├── screens/
 │   ├── home_screen.py         # Promo hero, continue watching, latest grid, banners
 │   ├── search_screen.py       # Submit-driven search + suggestions + pager
+│   ├── discover_screen.py     # Filtered browse for sources that serve one
 │   ├── anime_detail_screen.py # Backdrop, poster, metadata, episode grid, download buttons
 │   ├── downloads_screen.py    # Series-grouped offline episodes
-│   └── settings_screen.py     # Activity terminal + about
+│   └── settings_screen.py     # Source picker + health, Activity terminal + about
 ├── components/
+│   ├── artwork_card.py        # One frame, two shapes (landscape/portrait), frosted fill
+│   ├── result_card.py         # Search/discover result card
 │   ├── banner_ad.py           # Canonical build_banner_ad()
+│   ├── pagination.py          # Focus-ring pager
 │   ├── cross_promo.py         # Hero + 'more from us' cross-promo
 │   └── player/
 │       └── immersive_player.py # ImmersivePlayer: mpv props, overlay, watchdog, resume
 ├── hooks/
 │   ├── use_debounce.py        # Debounced value hook
-│   └── use_focus_scope.py     # Back/Escape with autofocus (TV remotes)
+│   ├── use_focus_scope.py     # Back/Escape with autofocus (TV remotes)
+│   └── use_grid_mode.py       # The automatic orientation decision (learned + probed + seeded)
 ├── services/
-│   ├── animepahe.py           # Scraper (API → HTML → regex → unpack)
-│   ├── ddos_solver.py         # Cloudflare session + durable clearance
-│   ├── webview_solver.py      # WebView solver (mobile: flet-webview-all; desktop: pywebview)
-│   ├── desktop_cf_solver.py   # Desktop pywebview subprocess
-│   ├── kwik_resolver.py       # kwik m3u8 resolution with referer + clearance
+│   ├── router.py              # ProviderRouter: breakers, owner-scoped ops, startup race
+│   ├── providers/             # anikato, animeout, kusonime, kayoanime, animepahe_provider
+│   ├── animepahe.py           # AnimePahe scraper (API → HTML → regex → unpack) behind its provider
+│   ├── kwik_resolver.py       # Kwik m3u8 resolution with referer + clearance
+│   ├── ddos_solver.py         # AnimePahe Cloudflare session + durable clearance
+│   ├── animeout_solver.py     # AnimeOut file-host clearance (same shape, per-host keys)
+│   ├── webview_solver.py      # WebView solver (mobile: flet-webview-all; desktop: pywebview subprocess)
+│   ├── desktop_cf_solver.py   # Desktop pywebview subprocess (UA pin, renderer guard, fast path)
+│   ├── hls_proxy.py           # Loopback HLS proxy (primp, TLS impersonation for CDNs)
+│   ├── artwork_probe.py       # Cache-first artwork shape probes
+│   ├── downloads.py           # DownloadManager: queued/stopped/resumable, manifest-gated
+│   ├── store.py               # Durable JSON store (history/resume/clearance/downloads/artwork defaults)
 │   ├── cache.py               # TTL JSON cache (regenerable tier)
-│   ├── store.py              # Durable JSON store (search/continue/positions/clearance/downloads)
-│   ├── downloads.py           # DownloadManager: parallel, resumable, manifest-gated
 │   ├── ads.py                 # Yandex ad service + interstitial/rewarded/app-open
+│   ├── external_player.py     # ktv:// handoff
 │   └── update_service.py      # Worker-based update check
 └── core/
-    ├── state.py               # @observable AppState
+    ├── state.py               # @observable AppState (incl. startup_ready/startup_stage)
+    ├── artwork.py             # Byte-level dimension sniffing + shape classification
+    ├── storage.py             # data / cache / temp tier resolution in one place
     ├── theme.py               # Palette + glass helpers
     ├── constants.py           # Labels, app name/version
+    ├── dialogs.py             # App-dialog registry (top-of-stack Back handling)
+    ├── focus_manager.py       # One Back/Escape handler, chained installers
     ├── logger_handler.py      # Ring-buffer logging for the terminal
-    └── tasks.py               # spawn() task helper
-├── services/
-│   ├── animepahe.py        # Multi-strategy scraper (API → HTML → regex)
-│   ├── kwik_resolver.py    # Dean Edwards JS unpacker + m3u8 extractor
-│   ├── ddos_solver.py      # Cloudflare challenge bypass
-│   └── cache.py            # Async SQLite cache with TTL
-└── components/
-    └── player/
-
-
+    ├── notifications.py       # OS notifications adapter (degrades quietly)
+    ├── notify.py              # Snackbars + fullscreen-dual dispatch
+    ├── shared_services.py     # Mount-once Clipboard + UrlLauncher
+    ├── tasks.py               # spawn() task helper
+    ├── tokens.py              # Spacing/radius/typography scales
+    └── html_extract.py        # stdlib HTML parsing helpers
 ```
 
-### Stream Resolution Pipeline
+### The source pipeline
 
 ```text
-User clicks episode
-    │
-    ▼
-scraper.sources() ─────────────────────────────────┐
-    │                                               │
-    ├── _sources_data_src()  ← parse data-src attrs │
-    │                                               │
-    └── _sources_regex()     ← regex kwik URLs     │
-                                                    │
-                                                    ▼
-best = max(sources, key=resolution)                 │
-    │                                               │
-    ▼                                               │
-kwik.resolve() ─────────────────────────────────────┤
-    │                                               │
-    ├── _resolve_dean()   ← unpack JS, find m3u8   │
-    │                                               │
-    └── _resolve_direct() ← regex scan HTML         │
-                                                    │
-                                                    ▼
-video.playlist = [VideoMedia(m3u8, headers)] ───────┘
+Boot:
+  stored pin? → that source
+  "auto"?     → health race the open sources (never AnimePahe; a pin is the
+                 owner's act and brings its Cloudflare flow with it)
+  → splash until the first home fetch resolves
 
+While open, the chosen source IS the app (no cross-source borrowing):
+  search / latest / discover  →  episodes()  →  sources()
+      (each provider resolves its own host: MegaPlay decrypt, Kwik unpack,
+       pixeldrain, Drive, or the DDL chain — with per-source headers)
+  → best source → ImmersivePlayer (mpv)   [loopback HLS proxy when the CDN
+       fingerprints TLS or needs per-segment headers]
 ```
 
 ### D-Pad Navigation Model
 
-Every interactive element is assigned a sequential `tab_index` so Android's `FocusFinder` can navigate with arrow keys:
-
-```text
-Home:    Search(1) → Theme(2) → Cards(3..N) → Prev(N+1) → Next(N+2)
-Search:  Back(1) → Cards(2..N)
-Detail:  Back(1) → Episodes(2..N) → Prev(N+1) → Next(N+2)
-Player:  Back(1)
-
-```
-
-Focus highlights are applied via `on_focus`/`on_blur` callbacks that animate scale, shadow, and border color.
+Every interactive card is a focusable control (`FilledButton` family) with a per-state focus ring
+and a micro-zoom; Back/Escape route through one focus manager with a top-of-stack dialog check.
+The shell keeps a navigation rail on TV/wide screens and a bottom bar on phones.
 
 ## Development
 
 ```bash
-# Clone and set up
+# Clone and set up (Python 3.14+)
 git clone [https://github.com/Nwokike/animepahe-tv.git](https://github.com/Nwokike/animepahe-tv.git)
 cd animepahe-tv
 uv sync
@@ -176,8 +193,14 @@ flet build apk --release
 # Build for Windows
 flet build windows --release
 
+# Tests (462 passing; the F-category ruff gate is clean)
+python -m pytest tests/ -q
+python -m ruff check --select F src/ tests/
 ```
 
 ## Legal Disclaimer
 
-AnimePahe TV is a media player and network utility. It does not host, store, or distribute any copyrighted content. The app interfaces with publicly available APIs and web pages. Users are solely responsible for ensuring compliance with applicable laws and terms of service in their jurisdiction.
+AnimePahe TV is a media player and network utility. It does not host, store, or distribute any
+copyrighted content. The app interfaces with publicly available APIs and web pages. Users are
+solely responsible for ensuring compliance with applicable laws and terms of service in their
+jurisdiction.

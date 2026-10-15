@@ -1,5 +1,10 @@
 # oauthlib 3.3.1 — public API reference (installed venv build)
 
+> **Version note (2026-10-15):** compiled against 3.3.1; installed is **oauthlib 4.0.0**
+> (transitive via flet). The verdict stands — the app never enters the OAuth path, so the major
+> bump is flet's business.
+
+
 > Reference compiled from the installed package
 > (`.venv/Lib/site-packages/oauthlib/`, pure Python, `Requires-Python: >=3.8`,
 > BSD-3-Clause). Transitive dependency only — **not** in the app's

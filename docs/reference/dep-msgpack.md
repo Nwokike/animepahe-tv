@@ -1,5 +1,9 @@
 # msgpack 1.2.1 — public API reference (installed venv build)
 
+> **Version note (2026-10-15):** compiled against 1.2.1; installed is **msgpack 1.2.3**.
+> The verdicts below (nothing significant for the app today) are unaffected.
+
+
 > Compiled from the installed package
 > (`.venv/Lib/site-packages/msgpack/`, version `1.2.1`, `Requires-Python: >=3.10`,
 > Apache-2.0). Package ships a C extension (`_cmsgpack.cp313-win_amd64.pyd`) plus a

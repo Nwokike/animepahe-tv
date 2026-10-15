@@ -1,5 +1,9 @@
 # pytest/tooling micro-deps — combined reference (installed venv builds)
 
+> **Version note (2026-10-15):** pluggy is now **1.7.0** (was 1.6.0); the other five unchanged.
+> Verdicts unaffected.
+
+
 > Six small packages in `.venv/Lib/site-packages/`: `colorama` 0.4.6,
 > `iniconfig` 2.3.1, `pluggy` 1.6.0, `packaging` 26.3, `pygments` 2.21.0,
 > `typing-extensions` 4.16.0. All six are **transitives of the dev group**

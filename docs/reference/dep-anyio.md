@@ -1,5 +1,9 @@
 # anyio 4.14.1 — complete public API for asyncio apps (installed venv build)
 
+> **Version note (2026-10-15):** compiled against 4.14.1; installed is **anyio 4.15.1**.
+> Install source wins; full refresh in hybrid Phase 5.
+
+
 > Reference compiled from the installed package
 > (`.venv/Lib/site-packages/anyio/`, `anyio-4.14.1.dist-info/METADATA`) —
 > every statement verified against the installed source. Backend covered is

@@ -1,5 +1,11 @@
 # flet-webview 0.85.3 — complete API reference (installed venv build)
 
+> **Version note (2026-10-15):** compiled against 0.85.3; installed is **flet-webview 1.0.4**.
+> The four §7 API bugs listed below describe the OLD version — all four are fixed in the
+> installed line (swarm audit §1.9). The Android-TV platform-gate note still applies.
+> Install source wins; full refresh in hybrid Phase 5.
+
+
 > Reference compiled from the installed package
 > (`.venv/Lib/site-packages/flet_webview/` — 3 files: `__init__.py`, `types.py`,
 > `webview.py`). Every signature below was verified live via `uv run python`

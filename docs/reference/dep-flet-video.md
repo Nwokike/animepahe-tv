@@ -1,5 +1,11 @@
 # dep-flet-video — flet-video 0.85.3 API reference (installed package)
 
+> **Version note (2026-10-15):** compiled against 0.85.3; installed is **flet-video 1.0.4**.
+> The API surface below was re-checked against 1.0.4 on 2026-10-13 (swarm audit §3: the
+> `controls` dict form, `on_track_change`, `VideoSubtitleTrack.none()/auto()` are all present).
+> Install source wins; full refresh in hybrid Phase 5.
+
+
 > Source of truth: `C:\Users\nwoki\ad-extensions\sources\animepahe-tv\.venv\Lib\site-packages\flet_video\`
 > Three files only: `video.py` (393 lines), `types.py` (1034 lines), `__init__.py` (48 lines).
 > Verified live via `uv run python` from `C:\Users\nwoki\ad-extensions\sources\animepahe-tv`:

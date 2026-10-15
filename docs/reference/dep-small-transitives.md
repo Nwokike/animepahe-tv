@@ -1,5 +1,9 @@
 # Small transitive deps — repath / six / certifi / idna (installed venv build)
 
+> **Version note (2026-10-15):** certifi is now **2026.7.22** (was 2026.6.17) and idna **3.20**
+> (was 3.18); repath/six unchanged. The verdicts below are unaffected.
+
+
 > Reference compiled from the installed package (`.venv/Lib/site-packages/`,
 > `*.dist-info/METADATA`, `uv.lock`) — every statement verified against the
 > installed source plus `grep` over dependents' source plus live introspection

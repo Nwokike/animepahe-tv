@@ -1,5 +1,13 @@
 # dep-flet — flet 0.85.3 API reference (installed package)
 
+> **Version note (2026-10-15):** This reference was compiled against flet 0.85.3 on
+> Python 3.13. The installed package is now **flet 1.0.4 on Python 3.14.7** — install source
+> wins. Known deltas (docs/swarm-audit-2026-10-13.md §1.9/§3): `ft.OutlineInputBorder` exists;
+> `ft.InputBorder.OUTLINE` is deprecated; services auto-register (no manual
+> `page.services.extend`); `ft.DropdownOption` replaces the 0.x `ft.dropdown.Option`. A full
+> re-verification is the hybrid era's Phase 5.
+
+
 > Source of truth: `C:\Users\nwoki\ad-extensions\sources\animepahe-tv\.venv\Lib\site-packages\flet\`
 > Verified live via `uv run python` from `C:\Users\nwoki\ad-extensions\sources\animepahe-tv`
 > (`inspect.signature`, `dataclasses.fields`, `dir(ft)`), plus direct reads of the `.py` sources.

@@ -1,5 +1,13 @@
 # primp 1.3.1 — complete public API (installed venv build)
 
+> **Version note (2026-10-15):** compiled against primp 1.3.1; installed is **primp 2.0.1** —
+> install source wins, and the deltas are load-bearing: `AsyncClient` has **no** `aclose`/
+> `close`/`is_closed` (cleanup is the context manager only), and `Response` has **no**
+> `reason_phrase`/`history`. The swarm audit counted ~8 criticals across 5 files from trusting
+> this doc's old surface (docs/swarm-audit-2026-10-13.md §1.1, §6). Full refresh in hybrid
+> Phase 5.
+
+
 > Reference compiled from the installed package (`.venv/Lib/site-packages/primp/`,
 > `primp.pyd` ~9.8 MB Rust extension, maturin 1.13.3) — every signature verified
 > live against the loaded module.

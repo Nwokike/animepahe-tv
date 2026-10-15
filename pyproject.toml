@@ -1,7 +1,7 @@
 [project]
 name = "animepahe-tv"
 version = "1.0.9"
-description = "Lightweight client-side Android TV / mobile / desktop app for streaming anime from AnimePahe."
+description = "Multi-source client-side Android TV / mobile / desktop app for streaming anime — independent backends, one chosen at startup."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -60,7 +60,7 @@ log_cli = false
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 ignore = ["E501"]

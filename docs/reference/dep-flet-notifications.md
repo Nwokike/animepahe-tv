@@ -1,5 +1,9 @@
 # dep: flet-notifications — complete API reference
 
+> **Version note (2026-10-15):** compiled against 0.1.3; installed is
+> **flet-notifications 0.1.4**. Install source wins; full refresh in hybrid Phase 5.
+
+
 > Installed package under study: `C:\Users\nwoki\ad-extensions\sources\animepahe-tv\.venv\Lib\site-packages\flet_notifications\`
 > Version **0.1.3** (`__version__ = "0.1.3"` in `__init__.py:53`; `Name: flet-notifications / Version: 0.1.3` in `flet_notifications-0.1.3.dist-info/METADATA`).
 > Dependency: only `flet` (`Requires-Dist: flet`, `Requires-Python: >=3.10`). Verified in this venv against Flet 0.85.3 (`uv run python -c "import flet"` reports `0.85.3`).

@@ -8,6 +8,16 @@ source: everything animepahe-tv v1 did — search, browse, details, episodes,
 streaming, downloads, continue-watching. Above the floor: each source's own
 extras, used to the fullest.
 
+> **Reality check (2026-10-15):** this numbered list is the pre-hybrid plan.
+> Phases 2–5 shipped in substance (their audited defects were fixed in the
+> 7.5/7.6 passes below); Phase 1's biggest item — full AniKato parity — and
+> Phase 6's remainders moved into the hybrid-era phases at the end of this
+> file (hybrid Phase 3 = every screen × every backend incl. the image route;
+> hybrid Phase 4 = player & downloads depth incl. AniKato's subtitles and
+> skip-data; hybrid Phases 5/6 = dependency close-out and publication).
+> Phase 7 complete; Phase 7.5/7.6 complete; Phase 8 (downloads) complete.
+> Git history carries the per-step commits.
+
 ## Phase 1 — AniKato to full source parity (strongest source first)
 The map (backend-anikato.md) shows what our provider drops today:
 1. **Subtitles**: resolve the 9 WebVTT tracks from getSources (they need
@@ -96,7 +106,14 @@ From the three app studies, ranked and evidence-backed:
 Excluded with reasons: UMP consent, Sherlock-domain features, TLS
 exemptions, the playlist extension heuristic, preloaded interstitials.
 
-## Phase 8 — Test hardening + release
+## Phase 8 (original numbering) — Test hardening + release — partially applied
+
+> Status (2026-10-15): the pytest ini block landed in `pyproject.toml`; the
+> F821s are gone and the F-category gate is clean; the expanded-default ruff
+> findings (~449 non-F) moved to the hybrid era's Phase 5 along with the
+> `select` pin; the release ritual moved to hybrid Phase 6. The downloads work
+> below took the Phase 8 number in the current era.
+
 pyproject pytest ini block, F821 triage, ruff pass (29 errors, 36 files
 unformatted — dep-test-stack), nightly canary CI, then the release ritual.
 
@@ -133,7 +150,11 @@ app does not have and inventing one is a product call. `flet_yandex_ads`
 0.1.0 is installed and its test unit ids are used by the interstitial,
 app-open and banner formats.
 
-## Phase 7.5 addendum — the audit's own catches
+## Phase 7.6 — the audit's own catches (complete)
+
+_(the git commits label this phase 7.6; this doc first called it the 7.5
+addendum)_
+
 Two independent audit passes over this phase's work found four defects in
 it (all fixed) and, more importantly, three more of the same bug family
 the phase was opened for — code calling an API that does not exist:
@@ -160,7 +181,7 @@ leaked their files on delete.
 walk is deliberately NOT part of it: Flet accepts many kwargs through its
 own machinery, so a signature check reports false positives.
 
-### Step 4 addendum — the two extras that do NOT fit (verdicts, not silence)
+### Phase 7.6 Step 4 addendum — the two extras that do NOT fit (verdicts, not silence)
 - **Comments read**: the map documents the write path as login-only
   (`ajax/comment/add` → "You must be logged in to comment"), and no
   anonymous read endpoint is documented for it. A comments UI with nothing

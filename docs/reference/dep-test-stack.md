@@ -1,5 +1,12 @@
 # Test + dev-tooling stack — complete API reference (installed venv builds)
 
+> **Version note (2026-10-15):** ruff is now **0.17.0** (was 0.15.20; its expanded default rule
+> set leaves ~449 non-F findings open while the F-category gate is clean) and the suite is now
+> **462 passing** (was 112). `pyproject.toml` now HAS the `[tool.pytest.ini_options]` block
+> recommended in §5 and a `[tool.ruff]` section. The pytest / pytest-asyncio / Qt / QtPy
+> sections remain accurate.
+
+
 > Compiled from the installed packages in `.venv/Lib/site-packages/` and the
 > repo's own `tests/` + `pyproject.toml`. Every signature below was read from
 > the installed source or verified live with `uv run python` from the repo
