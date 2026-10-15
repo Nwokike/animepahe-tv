@@ -164,11 +164,16 @@ async def test_no_page_means_no_clearance_not_a_crash(monkeypatch):
 def test_file_headers_carry_the_clearance_when_present():
     solver = AnimeOutSolver()
     empty = solver.file_headers(None)
-    assert empty == {"Referer": "https://animeout.xyz/"}
+    assert empty == {"Referer": "https://ddl.animeout.com/"}
     headers = solver.file_headers({"cookies": "cf=abc", "user_agent": "UA/1"})
     assert headers["Cookie"] == "cf=abc"
     assert headers["User-Agent"] == "UA/1"
-    assert headers["Referer"] == "https://animeout.xyz/"
+    assert headers["Referer"] == "https://ddl.animeout.com/"
+    # Custom public.php page referer from the download chain
+    custom = solver.file_headers(
+        {"cookies": "cf=abc"}, referer="https://ddl.animeout.com/public.php?url=foo"
+    )
+    assert custom["Referer"] == "https://ddl.animeout.com/public.php?url=foo"
 
 
 def test_has_clearance_follows_the_in_memory_copy():
@@ -191,10 +196,10 @@ class _FakeProviderSolver:
     async def clearance(self):
         return self._clearance
 
-    def file_headers(self, clearance):
+    def file_headers(self, clearance, referer=None):
         from services.animeout_solver import AnimeOutSolver
 
-        return AnimeOutSolver().file_headers(clearance)
+        return AnimeOutSolver().file_headers(clearance, referer=referer)
 
 
 @pytest.mark.asyncio
@@ -228,6 +233,7 @@ async def test_sources_carry_the_clearance_headers_once_solved():
     # the clearance rides the source, so the download can use it
     assert sources[0].headers["Cookie"] == "cf=ok; __cf_bm=1"
     assert sources[0].headers["User-Agent"] == "UA/1"
+    assert sources[0].headers["Referer"] == "https://ddl.animeout.com/"
 
 
 @pytest.mark.asyncio

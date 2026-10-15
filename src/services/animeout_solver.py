@@ -104,11 +104,13 @@ class AnimeOutSolver:
 
         return not _looks_like_cf_challenge(resp.text or "", resp.status_code)
 
-    def file_headers(self, clearance: dict | None) -> dict:
-        """Headers for the walled host: the site's own referer plus the
+    def file_headers(
+        self, clearance: dict | None, referer: str | None = None
+    ) -> dict:
+        """Headers for the walled host: the DDL public page referer plus the
         clearance when there is one. An empty dict means no clearance, and
         the caller must treat the file as unavailable."""
-        headers = {"Referer": "https://animeout.xyz/"}
+        headers = {"Referer": referer or "https://ddl.animeout.com/"}
         if clearance:
             cookies = clearance.get("cookies")
             if cookies:

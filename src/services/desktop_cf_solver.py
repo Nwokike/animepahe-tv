@@ -75,12 +75,15 @@ def is_challenge_complete(window, cookie_keys: set[str]) -> bool:
     if "cf_clearance" not in cookie_keys:
         return False
 
-    # Target site cookies indicate that the challenge finished and redirected to Animepahe
-    target_markers = {"animepahe_session", "serverid", "xsrf-token", "latest"}
-    if any(k.lower() in target_markers for k in cookie_keys):
-        return True
+    # Check URL for challenge tokens
+    try:
+        curr_url = (window.get_current_url() or "").lower()
+        if "__cf_chl" in curr_url:
+            return False
+    except Exception:
+        pass
 
-    # Check page title
+    # Check page title for active challenge indicators
     try:
         title = window.evaluate_js("document.title") or ""
         title_lower = title.lower()
@@ -94,20 +97,12 @@ def is_challenge_complete(window, cookie_keys: set[str]) -> bool:
             ]
         ):
             return False
-        if "animepahe" in title_lower or "anime" in title_lower:
-            return True
     except Exception:
         pass
 
-    # Check URL for challenge tokens
-    try:
-        curr_url = (window.get_current_url() or "").lower()
-        if "__cf_chl" in curr_url:
-            return False
-    except Exception:
-        pass
-
-    return False
+    # When cf_clearance is present and challenge markers are absent,
+    # the challenge has successfully completed on this host.
+    return True
 
 
 def _split_cookies(cookies) -> tuple[set[str], list[str]]:
@@ -189,6 +184,16 @@ def check_cookies(window):
             print("[DEBUG] Window closed by the user", file=sys.stderr)
             _fail("closed")
         time.sleep(1.0)
+        try:
+            cookies = window.get_cookies()
+            print(f"[DEBUG] Cookie jar has {len(cookies)} entries", file=sys.stderr)
+            cookie_keys, cookie_strs = _split_cookies(cookies)
+            if is_challenge_complete(window, cookie_keys):
+                _emit_success(cookie_strs, window)
+                return
+        except Exception as e:
+            print(f"[DEBUG] Error reading cookies: {e}", file=sys.stderr)
+
         if page_loaded_once:
             plain = served_a_plain_page(window)
             if plain:
@@ -201,15 +206,6 @@ def check_cookies(window):
                 except Exception:
                     pass
                 _fail(f"not-a-challenge ({plain[:60]})")
-        try:
-            cookies = window.get_cookies()
-            print(f"[DEBUG] Cookie jar has {len(cookies)} entries", file=sys.stderr)
-            cookie_keys, cookie_strs = _split_cookies(cookies)
-            if is_challenge_complete(window, cookie_keys):
-                _emit_success(cookie_strs, window)
-                return
-        except Exception as e:
-            print(f"[DEBUG] Error reading cookies: {e}", file=sys.stderr)
 
     # Timeout: an explicit error line and a NON-ZERO exit, so the parent
     # can tell "never finished" from "user closed it" from "solved".

@@ -125,6 +125,32 @@ def test_is_challenge_complete_matches_target_cookies_case_insensitively():
     )
 
 
+def test_is_challenge_complete_succeeds_on_generic_hosts_once_cleared():
+    """For public.animeout.xyz, the landing after solving CF is an nginx root
+    with title '403 Forbidden' and no animepahe cookies. With cf_clearance
+    in the jar and challenge markers gone, it must be recognized as complete."""
+    from services.desktop_cf_solver import is_challenge_complete
+
+    class _Window:
+        def evaluate_js(self, script):
+            return "403 Forbidden"
+
+        def get_current_url(self):
+            return "https://public.animeout.xyz/"
+
+    assert is_challenge_complete(_Window(), {"cf_clearance"}) is True
+    # Still on challenge -> False
+    class _ChallengeWin:
+        def evaluate_js(self, script):
+            return "Just a moment..."
+
+        def get_current_url(self):
+            return "https://public.animeout.xyz/"
+
+    assert is_challenge_complete(_ChallengeWin(), {"cf_clearance"}) is False
+
+
+
 # ---------------------------------------------------------------------------
 # webview_solver — TV platform fallback
 # ---------------------------------------------------------------------------

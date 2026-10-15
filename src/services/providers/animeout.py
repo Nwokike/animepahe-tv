@@ -32,6 +32,11 @@ logger = logging.getLogger("animepahe.provider.animeout")
 
 _FILE_HOST = "public.animeout.xyz"
 
+# Map from resolved public.animeout.xyz target URLs to their exact
+# ddl.animeout.com/public.php?url=... page referer. The browser sends this exact
+# referer when downloading the file after Cloudflare challenge is solved.
+_public_referers: dict[str, str] = {}
+
 
 def _clean_title(raw: str) -> tuple[str, int, str]:
     text = re.sub(r"<[^>]+>", "", raw or "")
@@ -386,15 +391,16 @@ class AnimeOutProvider:
             if not url.startswith("http"):
                 continue
             resolution, audio, fansub = _parse_filename(url)
+            referer = _public_referers.get(url) or "https://ddl.animeout.com/"
             sources.append(
                 Source(
                     url=url,
                     resolution=resolution,
                     audio=audio,
                     fansub=fansub,
-                    headers=self._solver.file_headers(clearance)
+                    headers=self._solver.file_headers(clearance, referer=referer)
                     if self._solver
-                    else {},
+                    else {"Referer": referer},
                 )
             )
         return sources
@@ -563,9 +569,14 @@ async def _resolve_direct_url(episode_url: str, client=None) -> str:
         )
         if not public:
             return ""
-        page = await client.get(public.group(1).replace("&amp;", "&"))
+        public_url = public.group(1).replace("&amp;", "&")
+        page = await client.get(public_url)
         target = re.search(r'var\s+url\s*=\s*"([^"]+)"', page.text)
-        return target.group(1) if target else ""
+        if target:
+            target_url = target.group(1)
+            _public_referers[target_url] = public_url
+            return target_url
+        return ""
     except Exception as ex:
         logger.debug("animeout resolve failed: %s", ex)
         return ""
