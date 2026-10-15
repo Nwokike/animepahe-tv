@@ -595,7 +595,11 @@ class AniKatoProvider:
     # ------------------------------------------------------------------
 
     async def _server_links(self, ids_token: str) -> list[tuple[str, str]]:
-        key = f"servers_{ids_token[:40]}"
+        # FULL token, never a prefix: these base64 link ids share long
+        # common prefixes across episodes (verified live), so a
+        # ``link_id[:40]`` key served episode N's cached stream to every
+        # later episode — the owner's "it plays something else" bug.
+        key = f"servers_{ids_token}"
         cached = self._cache_get(key)
         if cached is not None:
             return cached
@@ -675,7 +679,7 @@ class AniKatoProvider:
     async def _resolve_link(self, link_id: str) -> tuple[str, str, str, dict] | None:
         """link-id -> megaplay embed -> (realid, type, s, skip_data). The
         per-episode skip windows ride the same response."""
-        key = f"link_{link_id[:40]}"
+        key = f"link_{link_id}"
         cached = self._cache_get(key)
         if cached is not None:
             return cached
