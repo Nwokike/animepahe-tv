@@ -75,3 +75,38 @@ detection remembers the failure. The home screen renders correctly after
 it. A built app (which ships the Dart half) doesn't hit it; if it still
 annoys during testing, the fix is to construct the service lazily inside
 the first guarded call rather than at detect() time.
+
+## 2026-10-15 — AniKato CDN "doors" (ad-stub playlists, fixed) + AnimeOut's current wall
+
+### AniKato: one realid, several CDN doors — and one serves decoys
+Verified live against `black-clover-g7tjy` (ep 3, `anikato:black-clover-g7tjy|3`):
+
+- The episode resolves (site chain, byte-faithful, `27376 + N`) to MegaPlay realid
+  27379; the site's own watch page embeds the same realid in its player iframe.
+- That realid has several "doors" (the site's HD-1 / Vidstream-2 / Vidstream-1
+  buttons collapse to one realid, different flavors):
+  - `s=tcdn` -> `megap.shiora.top` -> media playlist = **66/66 TikTok ad-stub
+    segments** (`p19/p16-ad-site-sign-sg.tiktokcdn.com/...image`); each one is a
+    1x1 transparent PNG — zero video.
+  - `s=` (bare) / `bcdn` -> `fetch.nexabloom.top` -> **66/66
+    `phantomharbor.space` segments** — real video bytes.
+- Without a Referer the CDN answers 403; with `Referer: https://megaplay.buzz/`
+  both doors answer 200.
+- **Fix shipped**: `is_ad_stub_playlist()` classifies a media playlist and
+  `sources()` tries the doors in site order, keeping the first that serves real
+  video; all-stub -> honest "no stream" (a stub is never handed to the player).
+  Adjacent: the `mbedtls_ssl_handshake returned -0x7280` in the player log was
+  mpv's TLS against the shiora door.
+
+Open item: owner side-by-side for ep 3 (app vs the in-app browser). If the
+nexabloom/phantomharbor content differs from the site's own player, the next
+lever is capturing the iframe's real network call (performance resource log).
+
+### AnimeOut: episodes list works; art and files are walled
+- Search + episode lists work.
+- **No banners anywhere**: every `wp-content/uploads/...` image 403s (its host
+  hotlink-blocks the renderer); the Phase 3 image-route decision covers it.
+- Playback: the solver opens a **legit Cloudflare challenge**; after it is
+  cleared the file host answers a plain **nginx 403** — files are unplayable
+  today. The desktop solver now fails fast with
+  `Verification not-a-challenge (403 Forbidden)` instead of sitting 120 s.

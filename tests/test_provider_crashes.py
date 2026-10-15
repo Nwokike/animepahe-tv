@@ -45,11 +45,15 @@ def test_anikato_sources_resolves_without_the_unpack_crash():
     async def fake_manifest(realid, kind, s):
         return ("https://megaplay.buzz/stream/index.m3u8", [], {"intro": {}, "outro": {}})
 
+    async def fake_serves_video(manifest):
+        return True  # this test is about the unpack crash, not door health
+
     provider._watch_page = fake_watch
     provider._episode_entries = fake_entries
     provider._server_links = fake_servers
     provider._resolve_link = fake_resolve
     provider._manifest_for = fake_manifest
+    provider._door_serves_video = fake_serves_video
 
     sources = asyncio.run(provider.sources("anikato:naruto-eybxz", "naruto-eybxz|220"))
     assert len(sources) == 1

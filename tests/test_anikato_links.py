@@ -108,7 +108,116 @@ def test_sources_collapse_mirror_flavors_to_one_per_audio_track():
     provider._resolve_link = fake_resolve
     provider._manifest_for = fake_manifest
 
+    async def fake_serves_video(_manifest):
+        return True  # this test is about collapsing, not door health
+
+    provider._door_serves_video = fake_serves_video
+
     sources = asyncio.run(provider.sources("anikato:x", "x|3"))
     assert len(sources) == 2, "one source per audio track, not one per mirror"
     assert {s.audio for s in sources} == {"jpn", "eng"}
     assert len(resolved) == 2, "only the first working mirror of each kind resolves"
+
+
+# ---------------------------------------------------------------------------
+# CDN doors: an ad-stub playlist must be skipped, the next door tried
+# ---------------------------------------------------------------------------
+
+_STUB_PLAYLIST = "\n".join(
+    ["#EXTM3U", "#EXT-X-TARGETDURATION:10", "#EXT-X-PLAYLIST-TYPE:VOD"]
+    + [
+        "#EXTINF:3.0,\n"
+        f"https://p19-ad-site-sign-sg.tiktokcdn.com/ad-site-i18n-sg/x{i}.image?lk3s=6d71dd51"
+        for i in range(4)
+    ]
+)
+_REAL_PLAYLIST = "\n".join(
+    ["#EXTM3U"]
+    + [
+        f"#EXTINF:10.0,\nhttps://9lc74.phantomharbor.space/anime/a/b/seg-{i}-f1-v1-a1.jpg"
+        for i in range(4)
+    ]
+)
+
+
+def test_is_ad_stub_playlist_detects_only_all_tiktok_playlists():
+    from services.providers.anikato import is_ad_stub_playlist
+
+    assert is_ad_stub_playlist(_STUB_PLAYLIST) is True
+    assert is_ad_stub_playlist(_REAL_PLAYLIST) is False
+    first_url = (
+        "https://p19-ad-site-sign-sg.tiktokcdn.com/ad-site-i18n-sg/x0.image?lk3s=6d71dd51"
+    )
+    mixed = _STUB_PLAYLIST.replace(
+        first_url, "https://9lc74.phantomharbor.space/x/seg-0.jpg", 1
+    )
+    assert is_ad_stub_playlist(mixed) is False
+    too_short = "\n".join(
+        ["#EXTM3U"]
+        + ["#EXTINF:3.0,\nhttps://p19-ad-site-sign-sg.tiktokcdn.com/a.image" for _ in range(2)]
+    )
+    assert is_ad_stub_playlist(too_short) is False
+    assert is_ad_stub_playlist("#EXTM3U\n") is False
+
+
+def _door_fixture():
+    provider, _calls = _provider_with_recording_resolver()
+    doors_seen = []
+
+    async def fake_watch(_slug):
+        return {"anime_id": 1, "poster": ""}
+
+    async def fake_entries(_anime_id):
+        return [(3, "tok3", False, False, 0)]
+
+    async def fake_server_links(_token):
+        return [("sub", "L1"), ("sub", "L2"), ("dub", "L3"), ("dub", "L4")]
+
+    by_link = {
+        "L1": ("27379", "sub", "tcdn", {}),
+        "L2": ("27379", "sub", "", {}),
+        "L3": ("27379", "dub", "tcdn", {}),
+        "L4": ("27379", "dub", "", {}),
+    }
+
+    async def fake_resolve(link_id):
+        return by_link[link_id]
+
+    async def fake_manifest(realid, kind, s):
+        doors_seen.append((kind, s))
+        return (f"master://{kind}/{s or 'bare'}", [], {})
+
+    provider._watch_page = fake_watch
+    provider._episode_entries = fake_entries
+    provider._server_links = fake_server_links
+    provider._resolve_link = fake_resolve
+    provider._manifest_for = fake_manifest
+    return provider, doors_seen
+
+
+def test_sources_skips_the_stub_door_and_keeps_the_real_one():
+    from services.providers.anikato import is_ad_stub_playlist  # noqa: F401
+
+    provider, doors_seen = _door_fixture()
+
+    async def fake_serves_video(manifest):
+        return "/tcdn" not in manifest  # the tcdn door is the stub
+
+    provider._door_serves_video = fake_serves_video
+
+    sources = asyncio.run(provider.sources("anikato:x", "x|3"))
+    assert [(s.audio, s.url) for s in sources] == [
+        ("jpn", "master://sub/bare"),
+        ("eng", "master://dub/bare"),
+    ]
+    assert doors_seen == [("sub", "tcdn"), ("sub", ""), ("dub", "tcdn"), ("dub", "")]
+
+
+def test_all_stub_doors_yield_no_stream_not_a_stub():
+    provider, _doors_seen = _door_fixture()
+
+    async def everything_is_stub(_manifest):
+        return False
+
+    provider._door_serves_video = everything_is_stub
+    assert asyncio.run(provider.sources("anikato:x", "x|3")) == []

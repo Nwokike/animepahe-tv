@@ -39,6 +39,27 @@ MEGAPLAY_REFERER = "https://megaplay.buzz/"
 _AES_KEY = b"i?LMTAx0Q6,:}50U".ljust(32, b"\x00")
 _AES_IV = b"W0;27ToaUpl_P%'c"
 
+# The CDN's doors rotate what they serve. One door (s=tcdn ->
+# megap.shiora.top) has served a 66-segment playlist whose every entry was
+# a ``p19/p16-ad-site-sign-sg.tiktokcdn.com`` creative — each one actually a
+# 1x1 transparent PNG, live-verified 2026-10-15. A door in that state must
+# never reach the player; the next door is tried instead.
+AD_STUB_HOST_SUFFIXES = ("tiktokcdn.com",)
+AD_STUB_MIN_SEGMENTS = 3
+
+
+def is_ad_stub_playlist(text: str) -> bool:
+    """True when EVERY media segment comes from the ad-stub host family."""
+    segments = [
+        line.strip() for line in text.splitlines() if line.strip().startswith("http")
+    ]
+    if len(segments) < AD_STUB_MIN_SEGMENTS:
+        return False
+    return all(
+        any(suffix in segment for suffix in AD_STUB_HOST_SUFFIXES)
+        for segment in segments
+    )
+
 
 def _vrf(value) -> str:
     """The site's VRF: base64(RC4("simple-hash", str(value)))."""
@@ -743,6 +764,38 @@ class AniKatoProvider:
         self._cache_put(key, result, CACHE_TTL_EPISODES)
         return result
 
+    async def _door_serves_video(self, manifest: str) -> bool:
+        """Whether this door's first variant is real video, not an ad-stub.
+
+        Fetches the master, then its first variant, and judges the media
+        playlist. Doors rotate what they serve, so this is judged fresh on
+        every play — a bad verdict is never cached.
+        """
+        try:
+            resp = await self._client.get(
+                manifest, headers={"Referer": MEGAPLAY_REFERER}
+            )
+            if resp.status_code != 200:
+                return False
+            lines = [
+                line.strip()
+                for line in resp.text.splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+            if not lines:
+                return False
+            variant = lines[0]
+            if not variant.startswith("http"):
+                variant = manifest.rsplit("/", 1)[0] + "/" + variant
+            media = await self._client.get(
+                variant, headers={"Referer": MEGAPLAY_REFERER}
+            )
+            if media.status_code != 200:
+                return False
+            return not is_ad_stub_playlist(media.text)
+        except (primp.PrimpError, OSError, ValueError, KeyError):
+            return False
+
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
         _, slug = split_session(anime_session)
         _, _, num_s = episode_session.rpartition("|")
@@ -759,20 +812,24 @@ class AniKatoProvider:
         servers = await self._server_links(ids_token)
         results: list[Source] = []
         seen_audio: set[str] = set()
+        tried_doors: set[tuple[str, str]] = set()
         for kind, link_id in servers:
-            # The site lists each real stream 3-4 times (tcdn / bare /
-            # videojs / bcdn are MIRRORS of one rendition, same content).
-            # That is not a quality choice — collapse to one source per
-            # audio track, so the picker shows what this backend actually
-            # has: Japanese (Sub) and English (Dub). Mirrors stay as the
-            # failure fallback: a kind only counts as served once its
-            # first working link produced a Source.
+            # The site lists each stream on several doors (tcdn / bare /
+            # videojs / bcdn — one realid, different CDN fronts). That is
+            # not a quality choice, so the picker stays one entry per audio
+            # track — but the doors do NOT share one fate: one has served a
+            # decoy ad-stub playlist (live-verified 2026-10-15). Try them
+            # in site order and keep the first door that serves real video.
             if kind in seen_audio:
                 continue
             resolved = await self._resolve_link(link_id)
             if not resolved:
                 continue
             realid, megaplay_kind, s, ep_skip = resolved
+            door = (megaplay_kind, s)
+            if door in tried_doors:
+                continue  # videojs shares the bare door's shape in our params
+            tried_doors.add(door)
             try:
                 manifest, tracks, windows = await self._manifest_for(
                     realid, megaplay_kind, s
@@ -783,6 +840,13 @@ class AniKatoProvider:
                 )
                 continue
             if not manifest:
+                continue
+            if not await self._door_serves_video(manifest):
+                logger.info(
+                    "anikato: door %s/%s served no video (ad-stub or broken) — trying the next",
+                    megaplay_kind,
+                    s or "bare",
+                )
                 continue
             # Both skip levels travel: the getSources object form is what
             # the player prefers, the per-episode arrays stay as fallback —
