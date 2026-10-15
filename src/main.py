@@ -551,7 +551,11 @@ class AppController:
         if "/snapshots/" not in poster:
             return
         try:
-            results, _ = await self.router.search(anime.get("title") or "", 1)
+            # Owner-scoped: the heal is this backend's own errand, never a
+            # reason to query another one.
+            results, _ = await self.router.search(
+                anime.get("title") or "", 1, owner=self._owner_of(anime_session)
+            )
         except Exception as ex:
             logger.debug("poster heal search failed: %s", ex)
             return
@@ -2033,7 +2037,11 @@ class AppController:
         if not title_guess:
             return None
         try:
-            results, _ = await self.router.search(title_guess, 1)
+            # Owner-scoped: the cold-open self-heal belongs to this
+            # session's own backend.
+            results, _ = await self.router.search(
+                title_guess, 1, owner=self._owner_of(anime_session)
+            )
         except Exception as ex:
             logger.warning("anime self-heal search failed: %s", ex)
             return None

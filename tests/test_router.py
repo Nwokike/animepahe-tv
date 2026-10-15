@@ -387,6 +387,31 @@ def test_pin_sends_one_provider_first():
     r.set_pin("p2")
     asyncio.run(r.latest_releases(1))
     assert r.last_winner == "p2"
+    assert p1.calls == [], "the pin is the app now: nothing else is asked"
+
+
+def test_a_pinned_catalog_asks_only_the_pin_owner():
+    """Phase 2 doctrine: once a backend is chosen, the catalog never
+    silently comes from another source."""
+    p1, p2 = FakeProvider("p1"), FakeProvider("p2")
+    r = _router(p1, p2)
+    r.set_pin("p2")
+    asyncio.run(r.search("black clover", 1))
+    assert p1.calls == []
+    assert [c for c in p2.calls if c[0] == "search"]
+
+
+def test_a_pinned_catalog_fails_honestly_when_the_owner_is_down():
+    p1, p2 = FakeProvider("p1"), FakeProvider("p2")
+    p2.fail_latest = 1
+    r = _router(p1, p2)
+    r.set_pin("p2")
+    try:
+        asyncio.run(r.latest_releases(1))
+        assert False, "expected RouterError"
+    except RouterError:
+        pass
+    assert p1.calls == [], "no silent catalog from another backend"
 
 
 def test_empty_router_is_inert_not_fatal():

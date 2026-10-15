@@ -207,8 +207,10 @@ class ProviderRouter:
         timeouts, so a walled provider no longer sits at the front of
         the wait. The first ANSWER (non-empty) cancels the rest.
 
-        session_owned: the op takes a session string that NAMES its
-        provider — only that provider is asked. Racing the others was
+        session_owned: only the NAMED owner is asked. Session-string ops
+        pass the owner's namespace; the catalog ops (latest_releases /
+        search) pass the pin — once a backend is chosen, the app is that
+        backend and nothing else is consulted. Racing the others was
         wasted work AND dangerous (flet run log, 2026-10-15): a provider
         that returns unvalidated URLs (kayoanime probes nothing) won the
         race with a stream built from another provider's session string,
@@ -299,11 +301,23 @@ class ProviderRouter:
     # Public API — the router IS the app's data layer
     # ------------------------------------------------------------------
 
-    async def latest_releases(self, page: int) -> tuple[list, bool]:
-        return await self._run("latest_releases", page)
+    async def latest_releases(
+        self, page: int, *, owner: str | None = None
+    ) -> tuple[list, bool]:
+        """Owner-only once a backend is chosen (the startup gate pins one):
+        the app IS that backend, so its catalog never silently comes from
+        another. With no pin (pre-resolve) the editorial race governs."""
+        return await self._run(
+            "latest_releases", page, owner=owner or self._pin, session_owned=True
+        )
 
-    async def search(self, query: str, page: int) -> tuple[list, bool]:
-        return await self._run("search", query, page)
+    async def search(
+        self, query: str, page: int, *, owner: str | None = None
+    ) -> tuple[list, bool]:
+        """Owner-only once a backend is chosen (see latest_releases)."""
+        return await self._run(
+            "search", query, page, owner=owner or self._pin, session_owned=True
+        )
 
     async def episodes(self, session: str, page: int) -> tuple[list, bool]:
         return await self._run(
