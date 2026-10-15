@@ -740,7 +740,7 @@ def _build_backend_picker(state, controller) -> ft.Control:
                             ft.Text("Automatic", size=13, weight=ft.FontWeight.W_600),
                             ft.Container(expand=True),
                             ft.Text(
-                                "any healthy source, in order",
+                                "picks one open source at launch",
                                 size=11,
                                 color=ft.Colors.ON_SURFACE_VARIANT,
                             ),
@@ -763,7 +763,7 @@ def _build_backend_picker(state, controller) -> ft.Control:
                 ),
                 *[_row(name) for name in providers],
                 ft.Text(
-                    "A pinned source still fails over — the pin only changes who goes first.",
+                    "What you choose is the app — nothing else is consulted.",
                     size=11,
                     color=ft.Colors.ON_SURFACE_VARIANT,
                 ),

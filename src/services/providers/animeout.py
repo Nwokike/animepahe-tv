@@ -340,8 +340,9 @@ class AnimeOutProvider:
 
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
         """Every quality of one episode through the link-page chain.
-        Raises on transport failure (the router then fails over); an
-        empty list means the chain resolved but delivered nothing."""
+        Raises on transport failure — the caller treats it as no stream
+        (a chosen source is the app; nothing fails over behind the scenes).
+        An empty list means the chain resolved but delivered nothing."""
         _, native = split_session(anime_session)
         # The episode number is in the link's own filename, so the sibling
         # qualities of the same episode are found by number.

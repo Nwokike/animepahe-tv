@@ -292,8 +292,8 @@ def SettingsScreen() -> ft.Control:
 
     # ------------------------------------------------------------------
     # Content source — auto (recommended) vs pinned provider, with live
-    # per-provider status. The router still fails over when a pinned
-    # source is down; the pin only changes who goes first.
+    # per-provider status. Once chosen, that source is the app:
+    # every catalogue op asks it alone (the startup gate picks at launch).
     # ------------------------------------------------------------------
     controller_ref = getattr(controller, "_app_controller", None) or controller
     _ = state.sources_test_version
@@ -324,7 +324,7 @@ def SettingsScreen() -> ft.Control:
     ) or []
     backend_dropdown = ft.Dropdown(
         value=backend,
-        options=[ft.dropdown.Option("auto", "Automatic (recommended)")]
+        options=[ft.dropdown.Option("auto", "Automatic (picks at launch)")]
         + [ft.dropdown.Option(name, name.capitalize()) for name in provider_names],
         # 0.85.3's Dropdown has no on_change — on_select fires when the
         # user picks an option (on_text_change is the editable case).
@@ -335,7 +335,7 @@ def SettingsScreen() -> ft.Control:
     backend_row = _setting_row(
         ft.Icons.LAYERS_ROUNDED,
         "Content source",
-        "Automatic tries every source in order and never locks. Pinning only changes who goes first.",
+        "Automatic picks one source at launch. What you choose is the app — nothing else is consulted.",
         trailing=backend_dropdown,
     )
 
