@@ -5,9 +5,9 @@ Per the storage contract (see `.flet/README.md`), durable data lives in
 the OS, unlike the regenerable cache tier. That is exactly what history
 and resume positions need.
 
-Writes are atomic and coalesced: a temp file beside the target, then
-`os.replace` (renaming across directories can fail across filesystems),
-with a short debounce so bursts of writes flush once.
+Writes are atomic and durable: a temp file beside the target, f.flush()
+and os.fsync(f.fileno()) to ensure bits reach disk, then `os.replace`
+(renaming across directories can fail across filesystems).
 """
 
 import asyncio
@@ -18,19 +18,17 @@ import os
 import tempfile
 import time
 
-logger = logging.getLogger(__name__)
+from core.storage import app_data_dir
 
-_DATA_ENV = "FLET_APP_STORAGE_DATA"
+logger = logging.getLogger(__name__)
 
 SEARCH_HISTORY_LIMIT = 20
 CONTINUE_WATCHING_LIMIT = 20
 
 
 def _data_dir() -> str:
-    base = os.getenv(_DATA_ENV)
-    path = os.path.join(base, "animepahe") if base else os.path.join("storage", "data")
-    os.makedirs(path, exist_ok=True)
-    return path
+    """Thin seam — tests monkeypatch this name; the tier logic lives in core.storage."""
+    return app_data_dir()
 
 
 _default_store: "JsonStore | None" = None
@@ -49,6 +47,8 @@ def _atomic_write_json(path: str, payload: dict) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -232,7 +232,9 @@ class JsonStore:
         entries = dict(
             sorted(
                 entries.items(),
-                key=lambda kv: kv[1].get("timestamp", 0),
+                key=lambda kv: kv[1].get("timestamp", 0)
+                if isinstance(kv[1], dict)
+                else 0,
                 reverse=True,
             )
         )
@@ -411,20 +413,21 @@ class JsonStore:
     async def get_follows(self) -> dict:
         """Follows (was FAVORITES — the 1.0.4 file's section is migrated
         on read so nobody's library is lost)."""
-        await self._ensure_loaded()
-        entries = self._data.get("follows")
-        if entries is None:
-            legacy = self._data.get("favorites")
-            if isinstance(legacy, dict):
-                # One-time migration: the 1.0.4 file's section becomes
-                # follows and the old name is retired on disk.
-                self._data["follows"] = legacy
-                self._data.pop("favorites", None)
-                self._dirty = True
-                await self._flush()
-                return legacy
-            return {}
-        return entries if isinstance(entries, dict) else {}
+        async with self._lock:
+            await self._ensure_loaded()
+            entries = self._data.get("follows")
+            if entries is None:
+                legacy = self._data.get("favorites")
+                if isinstance(legacy, dict):
+                    # One-time migration: the 1.0.4 file's section becomes
+                    # follows and the old name is retired on disk.
+                    self._data["follows"] = legacy
+                    self._data.pop("favorites", None)
+                    self._dirty = True
+                    await self._flush()
+                    return dict(legacy)
+                return {}
+            return dict(entries) if isinstance(entries, dict) else {}
 
     async def is_following(self, anime_session: str) -> bool:
         if not anime_session:
@@ -464,7 +467,12 @@ class JsonStore:
         entry["added_at"] = time.time()
         follows[anime_session] = entry
         if len(follows) > self.FOLLOWS_LIMIT:
-            oldest = sorted(follows.items(), key=lambda kv: kv[1].get("added_at", 0))
+            oldest = sorted(
+                follows.items(),
+                key=lambda kv: kv[1].get("added_at", 0)
+                if isinstance(kv[1], dict)
+                else 0,
+            )
             for session, _ in oldest[: len(follows) - self.FOLLOWS_LIMIT]:
                 follows.pop(session, None)
         await self.put_section("follows", follows)

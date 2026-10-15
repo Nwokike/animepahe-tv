@@ -25,6 +25,7 @@ start time, so a whole-series batch is a queue, not a burst.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -34,9 +35,14 @@ import time
 import anyio
 import primp
 
+from core.storage import app_data_dir
+
 logger = logging.getLogger(__name__)
 
 PARALLEL_SEGMENTS = 6
+# Per-segment retry cap inside one job: a segment that keeps failing
+# (404) fails the job instead of re-queueing forever.
+MAX_SEGMENT_ATTEMPTS = 3
 
 SEGMENT_TIMEOUT = 30
 PLAYLIST_TIMEOUT = 15
@@ -83,7 +89,6 @@ def rewrite_playlist(text: str, segment_dir_name: str = "segs") -> tuple[str, in
     lines = text.splitlines()
     out = []
     count = 0
-    pending_key = False
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("#EXT-X-KEY") and "URI=" in stripped:
@@ -95,20 +100,14 @@ def rewrite_playlist(text: str, segment_dir_name: str = "segs") -> tuple[str, in
                     r'URI="[^"]+"', f'URI="{segment_dir_name}/{key_name}"', stripped
                 )
                 out.append(rewritten)
-                pending_key = True
                 continue
-        if (
-            stripped
-            and not stripped.startswith("#")
-            and (pending_key or count == 0 or True)
-        ):
+        if stripped and not stripped.startswith("#"):
             # A media segment line: last non-comment line wins.
             uri = stripped.split("?")[0]
             name = os.path.basename(uri)
             if name and re.search(r"\.(ts|aac|mp4|m4s|vtt)(\.|$)", name, re.IGNORECASE):
                 out.append(f"{segment_dir_name}/{name}")
                 count += 1
-                pending_key = False
                 continue
         out.append(line)
     return "\n".join(out) + "\n", count
@@ -194,6 +193,39 @@ def _safe_filename(name) -> str | None:
     return cleaned
 
 
+def _calculate_dir_size(directory: str) -> int:
+    """Calculate total size of segment files off the event loop."""
+    if not os.path.isdir(directory):
+        return 0
+    return sum(
+        os.path.getsize(os.path.join(directory, f))
+        for f in os.listdir(directory)
+        if os.path.isfile(os.path.join(directory, f))
+    )
+
+
+def _scan_segments(
+    segs_dir: str, uris: list[str]
+) -> tuple[int, list[tuple[int, str]]]:
+    """One directory listing answers both the resume count and the queue.
+
+    The per-URI probes did N blocking listdir calls on the event loop;
+    this runs once, in a worker thread. Matching mirrors
+    ``_segment_complete`` exactly (name suffix)."""
+    present: list[str] = []
+    if os.path.isdir(segs_dir):
+        present = os.listdir(segs_dir)
+    done = 0
+    queue: list[tuple[int, str]] = []
+    for index, uri in enumerate(uris):
+        suffix = "-" + os.path.basename(uri.split("?")[0])
+        if any(candidate.endswith(suffix) for candidate in present):
+            done += 1
+        else:
+            queue.append((index, uri))
+    return done, queue
+
+
 class DownloadManager:
     """Owns download jobs: one asyncio task per episode, shared primp client."""
 
@@ -221,14 +253,7 @@ class DownloadManager:
 
     @staticmethod
     def _default_dir() -> str:
-        base = os.getenv("FLET_APP_STORAGE_DATA")
-        root = (
-            os.path.join(base, "animepahe", "downloads")
-            if base
-            else os.path.join("storage", "data", "animepahe", "downloads")
-        )
-        os.makedirs(root, exist_ok=True)
-        return root
+        return app_data_dir("downloads")
 
     def _get_client(self) -> primp.AsyncClient:
         if self._client is None:
@@ -266,7 +291,7 @@ class DownloadManager:
         os.makedirs(job_dir, exist_ok=True)
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
-        if manifest.get("state") == STATE_COMPLETED:
+        if self._manifest_is_complete(job_dir, manifest):
             return
         manifest.update(
             {
@@ -355,7 +380,7 @@ class DownloadManager:
         os.makedirs(job_dir, exist_ok=True)
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
-        if manifest.get("state") == STATE_COMPLETED:
+        if self._manifest_is_complete(job_dir, manifest):
             return
         manifest.update(
             {
@@ -440,6 +465,27 @@ class DownloadManager:
         )
         return str(manifest.get("state") or "")
 
+    @staticmethod
+    def _job_has_final_file(job_dir: str) -> bool:
+        """A COMPLETED manifest is trusted only when the artifact is
+        really there: a stale manifest (segments deleted, direct file
+        removed) otherwise short-circuited the job into a permanently
+        unplayable 'complete' row."""
+        if not os.path.isdir(job_dir):
+            return False
+        for root, _dirs, files in os.walk(job_dir):
+            for name in files:
+                if name == "manifest.json" or name.endswith(".part"):
+                    continue
+                return True
+        return False
+
+    def _manifest_is_complete(self, job_dir: str, manifest: dict) -> bool:
+        """COMPLETED means done AND present."""
+        return manifest.get("state") == STATE_COMPLETED and self._job_has_final_file(
+            job_dir
+        )
+
     def pause(self, episode_session: str) -> bool:
         """Stop a running job and KEEP its partials. False when the job
         isn't running (nothing to pause)."""
@@ -449,8 +495,13 @@ class DownloadManager:
         cancel = self._cancel.get(episode_session)
         if cancel is not None:
             cancel.set()
-        self._tasks.pop(episode_session, None)
+        task = self._tasks.pop(episode_session, None)
         self._cancel.pop(episode_session, None)
+        if task is not None:
+            # The task must actually STOP: popping it without cancelling
+            # left the writer running, and a later start() (its guard now
+            # passes) spawned a SECOND writer on the same directory.
+            task.cancel()
         job = self._jobs.get(episode_session)
         if job is not None:
             manifest = self._read_manifest(job["manifest"])
@@ -470,7 +521,7 @@ class DownloadManager:
         )
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
-        if manifest.get("state") == STATE_COMPLETED:
+        if self._manifest_is_complete(job_dir, manifest):
             return False
         self._stop_reason.pop(episode_session, None)
         if manifest.get("m3u8_url") or url.endswith(".m3u8"):
@@ -478,7 +529,11 @@ class DownloadManager:
                 episode_session, manifest.get("m3u8_url") or url, headers, metadata
             )
         else:
-            await self.start_direct(episode_session, url, headers, metadata)
+            # The manifest's stored URL wins: resuming with the passed URL
+            # appended a different file's bytes to the existing .part.
+            await self.start_direct(
+                episode_session, manifest.get("url") or url, headers, metadata
+            )
         return True
 
     async def retry(self, episode_session: str) -> bool:
@@ -488,7 +543,11 @@ class DownloadManager:
         if job is None:
             return False
         manifest = self._read_manifest(job["manifest"])
-        if manifest.get("state") not in (STATE_FAILED, STATE_STOPPED):
+        # A stale COMPLETED (manifest says done, files gone) is retryable
+        # too — otherwise the row is permanently unplayable.
+        if self._manifest_is_complete(job["dir"], manifest):
+            return False
+        if manifest.get("state") not in (STATE_FAILED, STATE_STOPPED, STATE_COMPLETED):
             return False
         self._stop_reason.pop(episode_session, None)
         if manifest.get("m3u8_url"):
@@ -700,7 +759,9 @@ class DownloadManager:
                 if not os.path.exists(key_path):
                     body = await self._get_bytes(key_uri, headers)
                     if body is not None:
-                        self._atomic_write(key_path, body)
+                        await anyio.to_thread.run_sync(
+                            self._atomic_write, key_path, body
+                        )
 
             # 3. Download segments (resume-aware).
             base_url = media_url.rsplit("/", 1)[0]
@@ -709,14 +770,10 @@ class DownloadManager:
             progress = self._progress[episode_session]
             progress["total"] = total
 
-            done = sum(1 for u in uris if self._segment_complete(segs_dir, u))
+            done, queue = await anyio.to_thread.run_sync(
+                _scan_segments, segs_dir, uris
+            )
             progress["done"] = done
-
-            queue = [
-                (index, u)
-                for index, u in enumerate(uris)
-                if not self._segment_complete(segs_dir, u)
-            ]
             workers = [
                 asyncio.create_task(
                     self._worker(
@@ -727,11 +784,21 @@ class DownloadManager:
                         progress,
                         episode_session,
                         cancel,
-                    )
+                    ),
+                    name=f"segment-worker-{episode_session}-{i}",
                 )
-                for _ in range(min(PARALLEL_SEGMENTS, max(1, len(queue))))
+                for i in range(min(PARALLEL_SEGMENTS, max(1, len(queue))))
             ]
-            await asyncio.gather(*workers)
+            try:
+                await asyncio.gather(*workers)
+            except Exception:
+                # A worker that exhausted its retries raises: tear down its
+                # siblings so the job fails cleanly instead of leaving
+                # orphaned writers on the same directory.
+                for w in workers:
+                    w.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
+                raise
             if cancel.is_set():
                 return
             if progress["done"] < total:
@@ -753,15 +820,14 @@ class DownloadManager:
             self._write_manifest(manifest_path, manifest)
             if self._store is not None:
                 row = dict(manifest.get("metadata") or metadata)
+                size_bytes = await anyio.to_thread.run_sync(
+                    _calculate_dir_size, segs_dir
+                )
                 row.update(
                     {
                         "state": ROW_COMPLETE,
                         "playlist": index_path,
-                        "size_bytes": sum(
-                            os.path.getsize(os.path.join(segs_dir, f))
-                            for f in os.listdir(segs_dir)
-                            if os.path.isfile(os.path.join(segs_dir, f))
-                        ),
+                        "size_bytes": size_bytes,
                         "completed_at": time.time(),
                     }
                 )
@@ -801,28 +867,49 @@ class DownloadManager:
         episode_session: str,
         cancel: asyncio.Event,
     ):
-        while queue and not cancel.is_set():
-            try:
-                index, uri = queue.pop(0)
-            except IndexError:
-                return
-            segment_url = uri if uri.startswith("http") else f"{base_url}/{uri}"
-            name = f"{index:05d}-" + os.path.basename(uri.split("?")[0])
-            part_path = os.path.join(segs_dir, name + ".part")
-            final_path = os.path.join(segs_dir, name)
-            try:
-                await self._download_file(segment_url, headers, part_path, final_path)
-            except Exception as ex:
-                logger.warning("segment %s failed: %s", name, ex)
-                # Put it back for the next pass; a later retry can pick it up.
-                queue.append((index, uri))
-                continue
-            progress["done"] += 1
-            if self.on_progress is not None:
+        # HLS jobs run one worker per segment PARALLEL to the cross-job
+        # limiter: without this, N queued episodes fetched N×6 segments
+        # concurrently and bounded nothing.
+        async with self._job_limiter:
+            # One permanently-failing segment (404) used to be re-queued
+            # forever — the job livelocked and never failed. Bounded now.
+            attempts: dict[str, int] = {}
+            while queue and not cancel.is_set():
                 try:
-                    self.on_progress(episode_session, dict(progress))
-                except Exception:
-                    pass
+                    index, uri = queue.pop(0)
+                except IndexError:
+                    return
+                segment_url = uri if uri.startswith("http") else f"{base_url}/{uri}"
+                name = f"{index:05d}-" + os.path.basename(uri.split("?")[0])
+                part_path = os.path.join(segs_dir, name + ".part")
+                final_path = os.path.join(segs_dir, name)
+                try:
+                    await self._download_file(segment_url, headers, part_path, final_path)
+                except Exception as ex:
+                    tries = attempts.get(uri, 0) + 1
+                    attempts[uri] = tries
+                    if tries >= MAX_SEGMENT_ATTEMPTS:
+                        # Fail the job: _run's except records the error and
+                        # the row becomes retryable, not permanently stuck.
+                        raise RuntimeError(
+                            f"segment {name} failed {tries} times: {ex}"
+                        ) from ex
+                    logger.warning(
+                        "segment %s failed (attempt %d/%d): %s",
+                        name,
+                        tries,
+                        MAX_SEGMENT_ATTEMPTS,
+                        ex,
+                    )
+                    # Put it back for the next pass; a later retry can pick it up.
+                    queue.append((index, uri))
+                    continue
+                progress["done"] += 1
+                if self.on_progress is not None:
+                    try:
+                        self.on_progress(episode_session, dict(progress))
+                    except Exception:
+                        pass
 
     async def _resolve_playlist(self, url: str, headers: dict) -> tuple[str, str]:
         """Return the media playlist URL + body (top variant for a master)."""
@@ -831,16 +918,41 @@ class DownloadManager:
             return url, ""
         if "#EXT-X-STREAM-INF" not in body:
             return url, body
-        variants = []
-        for line in body.splitlines():
-            if line and not line.startswith("#"):
-                variants.append(line)
+        variants = self._parse_variants(body)
         if not variants:
             return url, body
-        top = variants[-1]
+        # Highest bandwidth wins. The old code took the LAST line, which is
+        # just the master's listing order — an out-of-order playlist
+        # silently pinned the slowest rendition.
+        top = max(variants, key=lambda v: v.get("bandwidth", 0)).get("uri", "")
+        if not top:
+            return url, body
         top_url = top if top.startswith("http") else url.rsplit("/", 1)[0] + "/" + top
         media = await self._get_text(top_url, headers)
         return top_url, media or ""
+
+    @staticmethod
+    def _parse_variants(body: str) -> list[dict]:
+        """The variant URIs of a master playlist with their BANDWIDTH, in
+        listing order."""
+        variants: list[dict] = []
+        pending: dict | None = None
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#EXT-X-STREAM-INF:"):
+                attrs = stripped[len("#EXT-X-STREAM-INF:") :]
+                bandwidth = 0
+                m = re.search(r"BANDWIDTH=(\d+)", attrs)
+                if m:
+                    bandwidth = int(m.group(1))
+                pending = {"uri": "", "bandwidth": bandwidth}
+            elif not stripped.startswith("#") and pending is not None:
+                pending["uri"] = stripped
+                variants.append(pending)
+                pending = None
+        return [v for v in variants if v["uri"]]
 
     # ------------------------------------------------------------------
     # HTTP helpers
@@ -892,8 +1004,18 @@ class DownloadManager:
             stream=True,
             timeout=FILE_TIMEOUT if timeout is None else timeout,
         )
+        if resp.status_code not in (200, 206):
+            # A 404/410/451 segment used to fall through with an empty
+            # body and crash later at os.replace (WinError 2). Raising
+            # routes it into the worker's retry-with-cap path instead.
+            with contextlib.suppress(Exception):
+                await resp.aclose()
+            raise RuntimeError(f"HTTP {resp.status_code} for {url}")
         mode = "ab" if have and resp.status_code == 206 else "wb"
-        done = have
+        # When the server ignores Range and answers 200 we TRUNCATE — so
+        # the byte counter starts at 0 too, or it counts the discarded
+        # prefix on top of the body.
+        done = have if mode == "ab" else 0
 
         def _write(chunk: bytes) -> None:
             # Off-loop: a per-chunk disk write competes with the UI's
@@ -909,6 +1031,10 @@ class DownloadManager:
             done += len(chunk)
             if on_progress is not None:
                 on_progress(len(chunk))
+        if not os.path.exists(part_path):
+            # A 200 with an empty body (some CDNs answer the segment URL
+            # with a zero-byte page): nothing to publish.
+            raise RuntimeError(f"nothing downloaded from {url}")
         await anyio.to_thread.run_sync(os.replace, part_path, final_path)
         return True
 

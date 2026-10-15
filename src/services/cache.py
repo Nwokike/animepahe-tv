@@ -18,16 +18,14 @@ import os
 import tempfile
 import time
 
-logger = logging.getLogger(__name__)
+from core.storage import app_cache_dir
 
-_DATA_ENV = "FLET_APP_STORAGE_CACHE"
+logger = logging.getLogger(__name__)
 
 
 def _cache_dir() -> str:
-    base = os.getenv(_DATA_ENV)
-    path = os.path.join(base, "ttl-cache") if base else os.path.join("storage", "cache")
-    os.makedirs(path, exist_ok=True)
-    return path
+    """Thin seam — the tier logic lives in core.storage."""
+    return app_cache_dir()
 
 
 def _atomic_write_json(path: str, payload: dict) -> None:
@@ -35,6 +33,8 @@ def _atomic_write_json(path: str, payload: dict) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
@@ -68,6 +68,7 @@ class Cache:
     async def _flush(self) -> None:
         if not self._dirty:
             return
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         _atomic_write_json(self.path, self._data)
         self._dirty = False
 
@@ -75,11 +76,12 @@ class Cache:
         async with self._lock:
             await self._ensure_loaded()
             entry = self._data.get(key)
-            if entry is None:
+            if entry is None or not isinstance(entry, dict):
                 return None
             if entry.get("expires", 0) <= time.time():
                 self._data.pop(key, None)
                 self._dirty = True
+                await self._flush()
                 return None
             value = entry.get("value")
             return value if value is None else str(value)
@@ -101,7 +103,11 @@ class Cache:
         async with self._lock:
             await self._ensure_loaded()
             now = time.time()
-            expired = [k for k, v in self._data.items() if v.get("expires", 0) <= now]
+            expired = [
+                k
+                for k, v in self._data.items()
+                if not isinstance(v, dict) or v.get("expires", 0) <= now
+            ]
             for key in expired:
                 self._data.pop(key, None)
             if expired:
@@ -109,6 +115,11 @@ class Cache:
                 await self._flush()
 
     async def start_sweep(self, interval: int = 300):
+        if self._sweep_task and not self._sweep_task.done():
+            self._sweep_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._sweep_task
+
         async def _sweep_loop():
             while True:
                 await asyncio.sleep(interval)

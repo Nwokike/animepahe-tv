@@ -20,6 +20,7 @@ from core.constants import APP_NAME
 # so every service constructed below logs where it can be seen.
 from core.logger_handler import in_memory_log_handler  # noqa: F401
 from core.notify import show_snack
+from core.storage import app_cache_dir
 from core.tasks import spawn
 from core.theme import AppColors, AppTheme, mode_for_token, token_for_mode
 from services.animepahe import AnimePaheScraper
@@ -65,6 +66,8 @@ def _source_choices(sources) -> list[dict]:
                 "headers": src.headers,
                 "subtitles": src.subtitles,
                 "skip": src.skip,
+                "download_url": getattr(src, "download_url", "") or "",
+                "direct": bool(getattr(src, "download_url", "")),
             }
         )
     return choices
@@ -483,6 +486,12 @@ class AppController:
         gen = self._episodes_gen
 
         async with lock:
+            if state.current_anime_session != anime_session:
+                # Defense in depth for direct callers: a session switch
+                # never leaves the previous anime's rows clickable under
+                # the new session (see load_anime for the full story).
+                state.episodes = []
+                state.episodes_has_more = True
             state.is_loading = True
             state.current_anime_session = anime_session
             state.episodes_page = page_num
@@ -785,7 +794,16 @@ class AppController:
         self, m3u8: str, headers: dict | None = None
     ) -> list[dict]:
         """Master-playlist variants through the proxy (correct headers),
-        falling back to a direct fetch when the proxy isn't running."""
+        falling back to a direct fetch when the proxy isn't running.
+
+        Only HLS playlists are probed. A DIRECT file source (kayoanime's
+        Drive MKV, a pixeldrain batch) has no variants, and fetching it
+        here read the ENTIRE video body as text — the flet run log showed
+        a play-episode task dying on primp.TimeoutError for a Drive file,
+        with the player never opening.
+        """
+        if ".m3u8" not in (m3u8 or "").split("?")[0].lower():
+            return []
         from components.player.immersive_player import KWIK_USER_AGENT
 
         headers = headers or {
@@ -803,7 +821,8 @@ class AppController:
             client = self.kwik._get_client()
             resp = await client.get(m3u8, headers=headers)
             if resp.status_code == 200 and resp.text:
-                return _stream_variants(resp.text)
+                # The master's own URL resolves the relative variants.
+                return _stream_variants(resp.text, m3u8)
         except Exception as ex:
             logger.warning("variant fetch failed: %s", ex)
         return []
@@ -1311,11 +1330,12 @@ class AppController:
         """
         if not poster_url or not poster_url.startswith("http"):
             return None
+        from core import notifications
         from core.tasks import spawn
 
         cache_dir = self._poster_cache_dir()
         path = os.path.join(
-            cache_dir, f"notify-{notifications_stable(anime_session)}.img"
+            cache_dir, notifications.stable_filename(anime_session)
         )
 
         async def _fetch():
@@ -1334,12 +1354,7 @@ class AppController:
 
     def _poster_cache_dir(self) -> str:
         """The regenerable tier, so a purge costs a re-fetch."""
-        base = os.getenv("FLET_APP_STORAGE_CACHE")
-        root = os.path.join(base, "animepahe", "posters") if base else os.path.join(
-            "storage", "cache", "animepahe", "posters"
-        )
-        os.makedirs(root, exist_ok=True)
-        return root
+        return app_cache_dir("posters")
 
     def _trim_poster_cache(self, keep: int = 50) -> None:
         """Bounded, oldest-first: the one directory the app grows without
@@ -1984,6 +1999,14 @@ class AppController:
 
     async def load_anime(self, anime_session: str):
         """Open the detail screen: resolve the header, then load episodes."""
+        if state.current_anime_session != anime_session:
+            # The new session must land with an EMPTY episode list in the
+            # SAME render. The previous anime's rows used to stay clickable
+            # while the new load ran (resolve + CF retries take seconds),
+            # so a tap paired the NEW anime with the OLD anime's episode
+            # session — "player opening for kusonime:48968 / 48025|1".
+            state.episodes = []
+            state.episodes_has_more = True
         state.current_anime_session = anime_session
         state.episodes_version += 1
         anime = await self._resolve_anime(anime_session)
@@ -2192,6 +2215,12 @@ async def main(page: ft.Page):
     methods.sources_status = controller.sources_status
     methods.set_backend_pin = lambda name: spawn(
         controller.set_backend_pin(name), name="set-backend-pin"
+    )
+    methods.open_backend_picker = lambda: spawn(
+        controller.open_backend_picker(), name="open-backend-picker"
+    )
+    methods.pin_backend = lambda name: spawn(
+        controller.pin_backend(name), name="pin-backend"
     )
     methods._app_controller = controller
     controller.shell = methods
