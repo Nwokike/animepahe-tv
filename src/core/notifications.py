@@ -92,7 +92,7 @@ def _permission_guard() -> asyncio.Lock:
     lock = getattr(loop, "_animepahe_permission_lock", None)
     if lock is None:
         lock = asyncio.Lock()
-        loop._animepahe_permission_lock = lock  # noqa: SLF001 — loop-scoped state
+        loop._animepahe_permission_lock = lock  # loop-scoped state
     return lock
 
 
