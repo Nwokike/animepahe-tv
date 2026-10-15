@@ -430,6 +430,7 @@ class AppController:
                 )
                 state.latest_releases = results
                 state.latest_has_more = has_more
+                state.latest_source = self.router.last_winner or ""
                 if page_num == 1 and results:
                     state.cf_blocked = False
             except Exception as ex:
@@ -2025,6 +2026,7 @@ class AppController:
                     return
                 state.search_results = results
                 state.search_has_more = has_more
+                state.search_source = self.router.last_winner or ""
                 if page == 1:
                     state.cf_blocked = False
                     await self.store.add_search(query)

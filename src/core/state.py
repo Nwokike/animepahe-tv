@@ -123,6 +123,10 @@ class AppState:
     selected_anime: dict | None = None
     selected_source: object | None = None
     current_source_name: str = ""
+    # Which provider served each list — the artwork defaults are learned per
+    # provider+surface, so every list carries the name it painted from.
+    latest_source: str = ""
+    search_source: str = ""
     # Dev-test panel (Settings): rows from "Test all sources".
     source_test_results: list = []
     sources_test_version: int = 0
