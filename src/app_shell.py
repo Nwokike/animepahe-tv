@@ -53,6 +53,34 @@ def _use_rail(page) -> bool:
     return width >= _RAIL_MIN_WIDTH
 
 
+def _startup_splash(state) -> ft.Control:
+    """The startup gate: brand mark, spinner, and the stage line
+    ("Finding a source…", "Loading releases…"). CollabShell's shape —
+    a full-screen column on the app background."""
+    return ft.Container(
+        content=ft.Column(
+            [
+                ft.Image(src="icon.png", width=140, height=140, fit=ft.BoxFit.CONTAIN),
+                ft.Container(height=24),
+                ft.ProgressRing(
+                    width=40, height=40, stroke_width=3, color=ft.Colors.PRIMARY
+                ),
+                ft.Container(height=10),
+                ft.Text(
+                    state.startup_stage or "",
+                    size=12,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=0,
+        ),
+        alignment=ft.Alignment.CENTER,
+        expand=True,
+    )
+
+
 @ft.component
 def AppShell() -> ft.Control:
     controller = ft.use_context(ControllerMethodsCtx)
@@ -61,6 +89,8 @@ def AppShell() -> ft.Control:
     active_view, set_active_view = ft.use_state("tabs")  # tabs | anime | player
     _ = state.episodes_version
     _ = state.player_open
+    _ = state.startup_ready  # the splash gate re-renders when it flips
+    _ = state.startup_stage
 
     from flet import context as flet_context
 
@@ -195,6 +225,14 @@ def AppShell() -> ft.Control:
     # acknowledged (KTV's rule: anything slower than a beat gets a spinner).
     _ = state.busy_version
     _use_resolve_overlay(state, controller)
+
+    # Startup gate (CollabShell's pattern): the shell shows the splash
+    # until the backend is resolved and the first home fetch has been
+    # attempted — so the first thing anyone sees is never a half-loaded
+    # app or a CF challenge window. Past all hooks, so hook order stays
+    # unconditional while the splash is up.
+    if not state.startup_ready:
+        return _startup_splash(state)
 
     if active_view == "anime":
         body = AnimeDetailScreen()
