@@ -194,6 +194,8 @@ class AppController:
         self.update_service = UpdateService()
         self._search_gen = 0
         self._resolved_m3u8: str | None = None
+        # Startup resolution is single-flight (boot + every manual switch).
+        self._startup_lock = asyncio.Lock()
         # The shell publishes what Back should do (dialog open? which view?
         # is the player up?) on every render; _handle_global_back reads it.
         self.ui_state = {"dialog_open": False, "view": "tabs"}
@@ -246,10 +248,11 @@ class AppController:
         # absent.
         await self._setup_notifications()
 
-        # Warm the health panel and the breakers before the first render:
-        # a dead provider then costs one cheap probe instead of the user's
-        # first tap. Deadline-capped and never blocking (probe_all).
-        spawn(self.router.probe_all(), name="startup-probe")
+        # Resolve the session's backend ONCE, then the first home fetch —
+        # all behind the shell's startup splash (Phase 2). Replaces the old
+        # fire-and-forget health probe: probe_all still runs inside, and its
+        # records still warm the health panel.
+        spawn(self.resolve_startup(), name="startup-resolve")
 
         spawn(self._check_for_updates_bg(), name="update-check")
         await self.start_episode_checker()
@@ -1394,12 +1397,54 @@ class AppController:
 
         spawn(_loop(), name="episode-checker")
 
+    async def resolve_startup(self):
+        """Pick the session's backend once, then load the first home page.
+
+        A stored preference pins directly; "auto" probes the four OPEN
+        backends in editorial order and pins the winner IN MEMORY ONLY (the
+        store keeps "auto", so the next launch resolves again). AnimePahe is
+        never auto-chosen — selecting it is the owner's pin, and its
+        Cloudflare flow appears exactly then. Single-flight via a lock; the
+        splash stays up (startup_ready False) for the whole flow, in a
+        finally so a failed fetch still lands on an honest home.
+        """
+        async with self._startup_lock:
+            state.startup_ready = False
+            state.startup_stage = "Finding a source…"
+            preference = await self.store.get_backend()
+            if preference and preference != "auto":
+                self.router.set_pin(preference)
+            else:
+                self.router.set_pin(await self._auto_backend())
+            state.startup_stage = "Loading releases…"
+            try:
+                await self.load_latest(1)
+            finally:
+                state.startup_stage = ""
+                state.startup_ready = True
+
+    async def _auto_backend(self) -> str | None:
+        """First healthy OPEN backend in editorial order, or the first open
+        backend when none answer (an honest failure beats no session)."""
+        health = await self.router.probe_all()
+        open_names = [
+            name
+            for name in self.router.provider_names
+            if name != self._default_owner
+        ]
+        for name in open_names:
+            if health.get(name):
+                return name
+        return open_names[0] if open_names else None
+
     async def set_backend_pin(self, name: str):
         """Settings: 'auto' or a provider name. Applies immediately and
-        persists — the router still fails over when the pin is down."""
+        persists, then every switch — manual or a re-pick of Automatic —
+        goes through the startup gate: splash → resolve → first fetch."""
         self.router.set_pin(name)
         await self.store.save_backend(name)
         logger.info("content source pinned to: %s", self.router.pin or "auto")
+        spawn(self.resolve_startup(), name="backend-switch")
 
     async def open_backend_picker(self) -> None:
         """The header badge's dialog: every provider with its live health,
