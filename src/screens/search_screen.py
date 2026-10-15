@@ -11,6 +11,7 @@ import flet as ft
 
 from components.banner_ad import build_banner_ad
 from components.empty_state import EmptyState
+from components.offline_state import empty_or_offline
 from components.focus_styles import (
     attach_focus_zoom,
     card_button_style,
@@ -370,10 +371,12 @@ def SearchScreen() -> ft.Control:
             expand=True,
         )
     elif state.search_query:
-        results = EmptyState(
-            f"No results found for '{state.search_query}'",
+        results = empty_or_offline(
+            state,
+            title=f"No results found for '{state.search_query}'",
             message="Check the spelling or try a different title.",
             icon=ft.Icons.SEARCH_OFF_ROUNDED,
+            on_retry=lambda e: controller.load_search(state.search_query, 1),
         )
     else:
         results = EmptyState(

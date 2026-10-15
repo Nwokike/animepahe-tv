@@ -13,7 +13,7 @@ import flet as ft
 
 from components.artwork_card import card_frame, card_media
 from components.banner_ad import build_banner_ad
-from components.empty_state import EmptyState
+from components.offline_state import empty_or_offline
 from components.focus_styles import attach_focus_zoom
 from components.pagination import pager as ft_pager
 from core.artwork import LANDSCAPE
@@ -211,10 +211,12 @@ def AnimeDetailScreen() -> ft.Control:
         )
 
     if not episodes:
-        return EmptyState(
-            "No episodes found",
+        return empty_or_offline(
+            state,
+            title="No episodes found",
             message="This series may have no releases yet — try again later.",
             icon=ft.Icons.MOVIE_FILTER_ROUNDED,
+            on_retry=lambda e: controller.load_anime(state.current_anime_session),
         )
 
     # The page's own cover when the source serves one, else the blurred

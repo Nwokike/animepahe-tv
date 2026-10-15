@@ -10,7 +10,7 @@ an empty spec and the screen says so — it never invents filters.
 import flet as ft
 
 from components.banner_ad import build_banner_ad
-from components.empty_state import EmptyState
+from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
 from hooks.use_grid_mode import grid_sources, use_grid_mode
@@ -113,12 +113,14 @@ def DiscoverScreen() -> ft.Control:
             [
                 header,
                 ft.Container(height=24),
-                EmptyState(
+                empty_or_offline(
+                    state,
                     icon=ft.Icons.EXPLORE_OFF_ROUNDED,
                     title="This source offers no discovery",
                     message="The chosen source exposes no filtered browse. "
                     "Pick another source (Settings → Content source) or "
                     "just search — nothing else is consulted on its behalf.",
+                    on_retry=lambda e: controller.load_discover_filters(),
                 ),
             ],
             spacing=0,
@@ -178,10 +180,14 @@ def DiscoverScreen() -> ft.Control:
         )
     else:
         body.append(
-            EmptyState(
+            empty_or_offline(
+                state,
                 icon=ft.Icons.SEARCH_OFF_ROUNDED,
                 title="Nothing matched",
                 message="Loosen a filter and try again.",
+                on_retry=lambda e: controller.load_discover(
+                    state.discover_selections, state.discover_page
+                ),
             )
         )
     return ft.Column(body, spacing=0, expand=True, scroll=ft.ScrollMode.AUTO)
