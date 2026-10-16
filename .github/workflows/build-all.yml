@@ -22,10 +22,6 @@ env:
   PYTHONUTF8: "1"
   FLET_CLI_NO_RICH_OUTPUT: "1"
   UV_PYTHON: "3.13"
-  # Optional: the public APK mirror's token. Empty when the secret is
-  # absent — every public step checks it and is skipped instead of
-  # failing the pipeline (2026-10-16: a missing token produced no APK).
-  RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
   # Tag pushes carry the version (v1.2.3 -> 1.2.3, build number = UTC date
   # stamp, monotonic without a counter to bump by hand); manual dispatches
   # keep their explicit inputs.
@@ -67,25 +63,24 @@ jobs:
             Automated multi-platform build generated from commit `${{ github.sha }}`.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create Public Release Placeholder
-        # The public mirror is OPTIONAL: when RELEASE_PAT is absent (or
-        # expired) the build and the private release must still run — a
-        # missing mirror token gated the whole pipeline on 2026-10-16 and
-        # no APK was produced. Add the secret to restore the mirror.
-        if: github.event_name != 'pull_request' && env.RELEASE_PAT != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: soco-live/animepahe-releases
-          token: ${{ env.RELEASE_PAT }}
-          tag_name: ${{ steps.tag_info.outputs.TAG_NAME }}
-          name: ${{ steps.tag_info.outputs.RELEASE_NAME }}
-          prerelease: ${{ steps.tag_info.outputs.IS_PRERELEASE }}
-          make_latest: true
-          body: |
-            Automated build from `soco-live/animepahe-tv@${{ github.sha }}`.
-            Keep source private — this repo only hosts public APKs.
+      - name: Create Public Release Placeholder (optional mirror)
+        # The public mirror needs its own PAT; without it the build and
+        # the private release must still run (2026-10-16: a missing
+        # token failed prepare-release and produced no APK at all).
+        # Add the RELEASE_PAT secret to restore the mirror.
+        if: github.event_name != 'pull_request'
         env:
-          GITHUB_TOKEN: ${{ env.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAG: ${{ steps.tag_info.outputs.TAG_NAME }}
+          NAME: ${{ steps.tag_info.outputs.RELEASE_NAME }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RELEASE_PAT is not set — skipping the public mirror."
+            exit 0
+          fi
+          gh release create "$TAG" --repo soco-live/animepahe-releases \
+            --title "$NAME" --notes "Automated build from $GITHUB_SHA" \
+            || gh release edit "$TAG" --repo soco-live/animepahe-releases --title "$NAME"
 
   # ─── 1. Android APK (universal) ───────────────────────────
   build-apk:
