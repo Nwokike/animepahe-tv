@@ -393,16 +393,22 @@ class ProviderRouter:
 
     def discover_provider(self, name: str | None = None) -> Provider | None:
         """The provider that serves Discover: the named one when it can
-        browse; when unpinned, Kayoanime serves as the primary backbone
-        for discovery, falling back to the first browse-capable provider.
+        browse; Kayoanime as the backbone otherwise (the owner's order,
+        restated 2026-10-16: a source with no browse surface must not leave
+        Discover saying "nothing" — KayoAnime has one, so it serves).
 
         A provider without a browse route (animepahe's catalog is the
         airing page) simply has no filters()/browse() — it is skipped,
-        never asked."""
+        never asked. The screen names whichever source ends up serving."""
         if name:
             provider = self.get(name)
             if provider is not None and hasattr(provider, "browse"):
                 return provider
+            # Pinned source cannot browse (animepahe): the Discover
+            # backbone takes over instead of an empty screen.
+            kayo = self.get("kayoanime")
+            if kayo is not None and hasattr(kayo, "browse"):
+                return kayo
             return None
         kayo = self.get("kayoanime")
         if kayo is not None and hasattr(kayo, "browse"):

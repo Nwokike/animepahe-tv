@@ -117,3 +117,39 @@ def test_dialog_slots_are_typed_noops_the_shell_then_assigns():
     shell_source = inspect.getsource(app_shell.AppShell)
     for name in ("open_sheet", "close_dialog"):
         assert f"controller.{name} =" in shell_source, f"the shell never assigns {name}"
+
+
+def test_discover_falls_back_to_kayoanime_when_the_pin_cannot_browse():
+    """The owner's rule, twice stated: a pinned source with no browse
+    surface (animepahe) must not leave Discover saying "nothing" —
+    KayoAnime is the Discover backbone and serves instead."""
+    from services.providers.base import PROVIDER_ORDER
+    from services.router import ProviderRouter
+
+    class _Provider:
+        def __init__(self, name, can_browse=True):
+            self.name = name
+            if can_browse:
+                self.browse = lambda *a, **k: None
+                self.filters = lambda: None
+
+        async def probe(self):
+            return True
+
+    class _NoBrowse:
+        name = "animepahe"
+
+    router = ProviderRouter(
+        [
+            _Provider("anikato"),
+            _NoBrowse(),
+            _Provider("kayoanime"),
+        ]
+    )
+    # Pinned to the browse-less source -> KayoAnime takes over.
+    assert router.discover_provider("animepahe") is not None
+    assert router.discover_provider("animepahe").name == "kayoanime"
+    # A browse-capable pin serves its own.
+    assert router.discover_provider("anikato").name == "anikato"
+    # The order still contains all four names (sanity on the import).
+    assert "kayoanime" in PROVIDER_ORDER

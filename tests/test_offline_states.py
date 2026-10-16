@@ -95,7 +95,17 @@ def test_online_returns_the_screens_own_empty_state():
     texts = _texts(control)
     assert "No episodes found" in texts and "release blurb" in texts
     assert "You're offline" not in texts
-    assert _buttons(control) == [], "no retry button on the honest empty"
+    # The caller's action now rides the online empty too (it is the only
+    # way a screen can offer something better than "nothing matched" —
+    # e.g. the detail screen's "Switch to Animepahe"). A caller with no
+    # action still gets a bare card.
+    buttons = _buttons(control)
+    assert len(buttons) == 1 and "Retry" in " ".join(_texts(buttons[0]))
+
+    bare = empty_or_offline(
+        _State(online=True), title="Nothing matched", message="loosen a filter"
+    )
+    assert _buttons(bare) == []
 
 
 def test_a_state_without_is_online_reads_as_online():

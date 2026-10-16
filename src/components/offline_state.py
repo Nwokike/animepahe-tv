@@ -20,10 +20,16 @@ def empty_or_offline(
     message: str = "",
     icon: ft.IconData | None = None,
     on_retry=None,
+    action_label: str | None = None,
 ) -> ft.Control:
     """The offline card when `state.is_online` is False, else the screen's
     own empty state. Missing `is_online` reads as online (a fake or a
-    light state object must never render an offline card by accident)."""
+    light state object must never render an offline card by accident).
+
+    ``action_label`` names a caller's own action (e.g. "Switch to
+    Animepahe"); without it a retry shows as "Retry", and no handler means
+    no button at all.
+    """
     if not getattr(state, "is_online", True):
         return EmptyState(
             "You're offline",
@@ -33,4 +39,12 @@ def empty_or_offline(
             icon=ft.Icons.CLOUD_OFF_ROUNDED,
             autofocus_action=True,
         )
-    return EmptyState(title, message=message, icon=icon)
+    label = action_label or ("Retry" if on_retry else None)
+    return EmptyState(
+        title,
+        message=message,
+        icon=icon,
+        action_label=label,
+        on_action=on_retry,
+        autofocus_action=bool(on_retry),
+    )

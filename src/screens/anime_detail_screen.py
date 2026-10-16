@@ -212,20 +212,60 @@ def AnimeDetailScreen() -> ft.Control:
     episode_sources = grid_sources(episodes, lambda e: e.snapshot)
     grid_mode = use_grid_mode("episodes", episode_sources, state.current_source_name, state)
 
-    if not episodes and state.is_loading:
-        return ft.Container(
-            content=ft.ProgressRing(color=AppColors.PRIMARY),
-            alignment=ft.Alignment.CENTER,
+    from components.app_header import app_header
+
+    def _titled(content: ft.Control) -> ft.Control:
+        """Every branch of this screen keeps the shared header on top —
+        the source pill/switcher must be visible even when the page has
+        nothing else to show (owner's order: all screens, detail too)."""
+        return ft.Column(
+            [app_header(state, page, controller, subtitle="Episodes"), content],
+            spacing=0,
             expand=True,
         )
 
+    if not episodes and state.is_loading:
+        return _titled(
+            ft.Container(
+                content=ft.ProgressRing(color=AppColors.PRIMARY),
+                alignment=ft.Alignment.CENTER,
+                expand=True,
+            )
+        )
+
+    # Whose anime is this? A Continue-Watching row (or a stale link) can
+    # point at a session owned by a DIFFERENT backend than the pinned one —
+    # its fetches then hit that source's wall while the pin is elsewhere,
+    # and the screen showed a bare "no episodes" (owner's log, 2026-10-16).
+    # The switcher below turns that dead end into one tap.
+    pinned = (state.current_source_name or "").strip()
+    owner = owner_of(anime_session or "")
+    owner_mismatch = bool(pinned and owner and owner != pinned)
+
+    def _switch_to_owner(e=None):
+        controller.set_backend_pin(owner or pinned)
+
     if not episodes:
-        return empty_or_offline(
-            state,
-            title="No episodes found",
-            message="This series may have no releases yet — try again later.",
-            icon=ft.Icons.MOVIE_FILTER_ROUNDED,
-            on_retry=lambda e: controller.load_anime(state.current_anime_session),
+        if owner_mismatch:
+            return _titled(empty_or_offline(
+                state,
+                title=f"This anime belongs to {owner.capitalize()}",
+                message=(
+                    f"{pinned.capitalize()} is the current source, so its catalogue "
+                    f"is what loads. Switch to {owner.capitalize()} to open this series."
+                ),
+                icon=ft.Icons.SWAP_HORIZ_ROUNDED,
+                action_label=f"Switch to {owner.capitalize()}",
+                on_retry=_switch_to_owner,
+            ))
+        return _titled(
+            empty_or_offline(
+                state,
+                title="No episodes found",
+                message="This series may have no releases yet — try again later.",
+                icon=ft.Icons.MOVIE_FILTER_ROUNDED,
+                on_retry=lambda e: controller.load_anime(state.current_anime_session),
+            )
         )
 
     # The page's own cover when the source serves one, else the blurred
@@ -601,7 +641,7 @@ def AnimeDetailScreen() -> ft.Control:
             )
         return ft.Column(children, tight=True, spacing=0)
 
-    return ft.Stack(
+    return _titled(ft.Stack(
         [
             backdrop,
             ft.Container(
@@ -684,7 +724,7 @@ def AnimeDetailScreen() -> ft.Control:
             ),
         ],
         expand=True,
-    )
+    ))
 
 
 def _fmt_air_date(ts: int) -> str:
@@ -703,9 +743,12 @@ def _report_issues() -> tuple[tuple[str, str], ...]:
     one that works anonymously). Discovered, not hardcoded."""
     global _REPORT_ISSUES
     if not _REPORT_ISSUES:
-        from services.providers.anikato import REPORT_ISSUES
+        # REPORT_ISSUES is a CLASS attribute of the provider, not a module
+        # constant — the old module-level import raised ImportError on the
+        # first tap of the report menu (owner's log, 2026-10-16).
+        from services.providers.anikato import AniKatoProvider
 
-        _REPORT_ISSUES = REPORT_ISSUES
+        _REPORT_ISSUES = tuple(AniKatoProvider.REPORT_ISSUES)
     return _REPORT_ISSUES
 
 
