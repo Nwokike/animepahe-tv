@@ -205,6 +205,11 @@ async def test_legacy_favorites_section_migrates_to_follows(store):
 
 @pytest.mark.asyncio
 async def test_external_player_round_trip(store):
+    # TRUE is the shipped default (owner's call, 2026-10-16): the in-app
+    # player's ad units are demo ids while the ad account is offline, so
+    # playback hands off to KTV unless the user flips the row.
+    assert await store.get_external_player() is True
+    await store.save_external_player(False)
     assert await store.get_external_player() is False
     await store.save_external_player(True)
     assert await store.get_external_player() is True

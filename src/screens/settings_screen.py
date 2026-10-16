@@ -255,7 +255,10 @@ def SettingsScreen() -> ft.Control:
     external_player_row = _setting_row(
         ft.Icons.OPEN_IN_NEW_ROUNDED,
         "Play in external player",
-        "Hand streams to KTV Player instead of the in-app player",
+        # The honest default note (owner's call): in-app playback is the
+        # one still being finished, and handing streams to KTV is what the
+        # app ships doing today.
+        "Default · hands streams to KTV Player — the in-app player is coming soon",
         trailing=ft.Switch(
             value=external_player,
             on_change=_on_external_player_change,

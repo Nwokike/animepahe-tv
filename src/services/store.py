@@ -484,7 +484,12 @@ class JsonStore:
     # ------------------------------------------------------------------
 
     async def get_external_player(self) -> bool:
-        return bool(await self.section("external_player", False))
+        """Play in KTV by DEFAULT (owner's call, 2026-10-16): the in-app
+        player's ad units are still Yandex demo ids while the ad account is
+        offline, so in-app playback earns nothing, and monetization lives
+        in KTV Player today. The row is still there — one tap brings the
+        in-app player back."""
+        return bool(await self.section("external_player", True))
 
     async def save_external_player(self, enabled: bool) -> None:
         await self.put_section("external_player", bool(enabled))

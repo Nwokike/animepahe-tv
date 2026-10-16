@@ -1108,6 +1108,21 @@ class AppController:
                     logger.warning("subtitle proxy build failed: %s", ex)
             if proxied_tracks:
                 spec_subtitles = proxied_tracks
+        # The 1.0.9 title, restored: "<Anime> - Episode N - (1080p)". The
+        # player window, the Android media notification and the volume
+        # mixer all read this, and a bare series name told the user nothing
+        # about what was playing (owner's report: "it only shows Black
+        # Clover"). Resolution comes from the chosen source when one is
+        # known; a local/unknown one simply omits it.
+        title_parts = [(anime or {}).get("title") or "AnimePahe"]
+        ep_row = next(
+            (e for e in state.episodes if e.session == episode_session), None
+        )
+        if ep_row is not None and ep_row.episode:
+            title_parts.append(f"Episode {ep_row.episode}")
+        chosen = state.selected_source
+        if chosen is not None and getattr(chosen, "resolution", 0):
+            title_parts.append(f"({chosen.resolution}p)")
         state.player_spec = {
             "resource": play_url,
             "source_url": resource,
@@ -1117,7 +1132,7 @@ class AppController:
             "subtitles": spec_subtitles,
             "skip": skip or {},
             "proxied": self.hls_proxy is not None,
-            "title": (anime or {}).get("title") or "AnimePahe",
+            "title": " - ".join(title_parts),
             "episode_session": episode_session,
             "anime_session": anime_session,
         }
@@ -2048,10 +2063,15 @@ class AppController:
         state.player_error = None
         # Local playback (an .m3u8 rewrite or a fetched file) needs no
         # request headers — the bytes are already on disk.
+        offline_title = [row.get("title") or "AnimePahe"]
+        if row.get("episode_num"):
+            offline_title.append(f"Episode {row['episode_num']}")
+        if row.get("resolution"):
+            offline_title.append(f"({row['resolution']}p)")
         state.player_spec = {
             "resource": local,
             "variants": [],
-            "title": row.get("title", "AnimePahe"),
+            "title": " - ".join(offline_title),
             "episode_session": episode_session,
             "anime_session": row.get("anime_session", ""),
             "headers": {},
