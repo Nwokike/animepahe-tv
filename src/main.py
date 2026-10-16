@@ -2223,7 +2223,38 @@ class AppController:
         state.episodes_version += 1
         anime = await self._resolve_anime(anime_session)
         state.selected_anime = anime
+        if not (anime or {}).get("synopsis"):
+            # The Home-open path builds the header from the release row,
+            # which carries no description. Fetch the provider's own detail
+            # record ONCE and merge what it adds (synopsis, genres, ids) —
+            # off the critical path, so the screen paints first.
+            spawn(self._enrich_anime_meta(anime_session), name="anime-meta")
         await self.load_episodes(anime_session, 1)
+
+    async def _enrich_anime_meta(self, anime_session: str):
+        """Fill the detail header's description from the provider's own
+        record, once, only when the fast path left it empty."""
+        provider = self.router.get(self._owner_of(anime_session or ""))
+        if provider is None or not hasattr(provider, "anime"):
+            return
+        try:
+            details = await provider.anime(anime_session)
+        except Exception as ex:
+            logger.debug("anime meta enrich failed: %s", ex)
+            return
+        if details is None or state.current_anime_session != anime_session:
+            return
+        filled = _anime_dict(details)
+        merged = dict(state.selected_anime or {})
+        changed = False
+        for key in ("synopsis", "genres", "mal_id", "anilist_id", "studios", "aired", "backdrop"):
+            if not merged.get(key) and filled.get(key):
+                merged[key] = filled[key]
+                changed = True
+        if changed:
+            state.selected_anime = merged
+            state.episodes_version += 1
+            logger.info("anime meta enriched for %s", anime_session)
 
     async def load_search(self, query: str, page: int = 1):
         if not query:

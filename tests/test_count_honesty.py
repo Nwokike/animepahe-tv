@@ -212,3 +212,26 @@ def test_metadata_row_keeps_its_zero_guard():
         isinstance(node, ast.If) and "episodes" in ast.unparse(node.test) for node in ast.walk(fn)
     )
     assert guarded
+
+
+def test_plain_summary_strips_tags_and_caps_at_a_sentence():
+    """The WP pair publishes its description inside the post body — the
+    helper that turns that HTML into prose (tags stripped, whitespace
+    collapsed, capped at a sentence end, never mid-word)."""
+    from core.html_extract import plain_summary
+
+    html = (
+        "<h4>Title</h4><p><strong>Type: TV Series</strong><br />Episodes: 24</p>"
+        "<p>First sentence of the description. Second sentence follows here "
+        "and continues past the limit so the cap has to cut it cleanly.</p>"
+        "<a href='x'>link</a>"
+    )
+    text = plain_summary(html, limit=80)
+    assert "<" not in text and ">" not in text
+    assert "Type: TV Series" in text
+    assert text.endswith("."), text
+    assert len(text) <= 81
+
+    # Short bodies come back whole.
+    assert plain_summary("<p>Short.</p>") == "Short."
+    assert plain_summary("") == ""

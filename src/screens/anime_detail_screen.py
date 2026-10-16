@@ -172,12 +172,20 @@ def _episode_card(
     )
 
 
+# Above this, the description earns a "Read more" (about four lines at the
+# detail screen's width); below it the full text shows as-is.
+LONG_SYNOPSIS_CHARS = 220
+
+
 @ft.component
 def AnimeDetailScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.episodes_version
     _ = state.busy_version  # download-start spinners, quality resolving
+    # "About this release" expander (declared HERE: hooks are positional,
+    # a use_state inside a nested builder would corrupt the mapping).
+    about_open, set_about_open = ft.use_state(False)
 
     from flet import context as flet_context
 
@@ -547,8 +555,12 @@ def AnimeDetailScreen() -> ft.Control:
         )
 
     def _synopsis_block(anime: dict) -> ft.Control:
-        """Synopsis + the external ids. Clamped, not scrolled: the
-        episodes grid below is the point of the screen."""
+        """About this release: the description the serving backend
+        publishes (anikato/animepahe's synopsis, the WP pair's post text),
+        plus the external ids. Clamped to four lines with a "Read more"
+        expander — the whole text is one tap away, and the episodes grid
+        below stays the point of the screen. A source with neither text
+        nor ids renders nothing at all."""
         synopsis = str(anime.get("synopsis") or "").strip()
         ids = []
         if anime.get("mal_id"):
@@ -559,15 +571,24 @@ def AnimeDetailScreen() -> ft.Control:
             return ft.Container(width=0, height=0)
         children: list[ft.Control] = [ft.Container(height=16)]
         if synopsis:
+            long_text = len(synopsis) > LONG_SYNOPSIS_CHARS
             children.append(
                 ft.Text(
                     synopsis,
                     size=13,
                     color=ft.Colors.ON_SURFACE_VARIANT,
-                    max_lines=4,
-                    overflow=ft.TextOverflow.ELLIPSIS,
+                    max_lines=None if (about_open or not long_text) else 4,
+                    overflow=ft.TextOverflow.CLIP if about_open else ft.TextOverflow.ELLIPSIS,
                 )
             )
+            if long_text:
+                children.append(ft.Container(height=4))
+                children.append(
+                    ft.TextButton(
+                        content="Show less" if about_open else "Read more",
+                        on_click=lambda e: set_about_open(not about_open),
+                    )
+                )
         if ids:
             children.append(ft.Container(height=6))
             children.append(

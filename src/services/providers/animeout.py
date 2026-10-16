@@ -20,6 +20,7 @@ from core.config import (
     CACHE_TTL_LATEST,
     CACHE_TTL_SEARCH,
 )
+from core.html_extract import plain_summary
 from core.state import Anime, Episode, LatestRelease, Source
 from services.providers.base import (
     all_episodes,
@@ -184,6 +185,7 @@ class AnimeOutProvider:
             poster = _poster_from_content(
                 (post.get("content") or {}).get("rendered", "")
             ) or poster_map.get(post.get("featured_media"), "")
+            body = (post.get("content") or {}).get("rendered", "")
             results.append(
                 Anime(
                     id=int(post.get("id") or 0),
@@ -195,6 +197,11 @@ class AnimeOutProvider:
                     year=year,
                     score=0.0,
                     poster=poster,
+                    # The post body IS this source's description (it
+                    # publishes no synopsis field): the metadata block +
+                    # any prose, from the same HTML episodes() already
+                    # downloads — nothing extra fetched.
+                    synopsis=plain_summary(body),
                     session=make_session("animeout", str(post.get("id") or "")),
                 )
             )

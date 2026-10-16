@@ -33,6 +33,7 @@ from core.config import (
     DRIVE_WEB_KEY,
     KAYOANIME_API,
 )
+from core.html_extract import plain_summary
 from core.state import Anime, Episode, LatestRelease, Source
 from services.providers.base import (
     all_episodes,
@@ -220,6 +221,12 @@ class KayoanimeProvider:
             year=year,
             score=0.0,
             poster=poster,
+            # The post body is this source's blog entry — its intro
+            # paragraph is the description. Present only when the caller
+            # requested `content` (the catalog list does; the Drive-only
+            # passes do not), so this is empty there and the detail screen
+            # simply shows nothing extra.
+            synopsis=plain_summary((post.get("content") or {}).get("rendered", "")),
             session=make_session("kayoanime", post_id),
         )
 

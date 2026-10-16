@@ -12,9 +12,11 @@ loudly and get fixed, exactly as with soup — there is no query language
 here to mislead anyone.
 """
 
+import re
+from html import unescape
 from html.parser import HTMLParser
 
-__all__ = ["extract_anime_cards", "extract_data_src_elements"]
+__all__ = ["extract_anime_cards", "extract_data_src_elements", "plain_summary"]
 
 
 def _classes(attrs: dict) -> set:
@@ -78,3 +80,27 @@ def extract_data_src_elements(html: str) -> list[dict]:
     parser.feed(html)
     parser.close()
     return parser.elements
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def plain_summary(html: str, *, limit: int = 600) -> str:
+    """Human prose from a post body: tags stripped, whitespace collapsed,
+    capped. The WordPress pair (AnimeOut, KayoAnime) publishes its
+    description INSIDE the post body rather than an API field, so this is
+    where their "blog entry" text comes from — the same HTML the episode
+    parser already downloads, nothing extra fetched."""
+    text = _TAG_RE.sub(" ", html or "")
+    text = unescape(text)
+    text = _WS_RE.sub(" ", text).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    # Trim to the last sentence end so the cap never splits a word.
+    for mark in (". ", "! ", "? "):
+        idx = cut.rfind(mark)
+        if idx > limit // 2:
+            return cut[: idx + 1].strip()
+    return cut.rstrip() + "…"
