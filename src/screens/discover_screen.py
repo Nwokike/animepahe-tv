@@ -152,8 +152,8 @@ def DiscoverScreen() -> ft.Control:
             )
             for anime in results
         ],
-        spacing=12,
-        run_spacing=12,
+        spacing=16,
+        run_spacing=16,
     )
 
     body: list[ft.Control] = [
@@ -190,4 +190,8 @@ def DiscoverScreen() -> ft.Control:
                 ),
             )
         )
-    return ft.Column(body, spacing=0, expand=True, scroll=ft.ScrollMode.AUTO)
+    return ft.Container(
+        content=ft.Column(body, spacing=0, expand=True, scroll=ft.ScrollMode.AUTO),
+        padding=ft.Padding.only(left=24, right=24, bottom=16),
+        expand=True,
+    )

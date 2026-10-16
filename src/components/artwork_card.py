@@ -99,11 +99,15 @@ def card_frame(
     on_click,
     col: dict | None = None,
     gradient: ft.Control | None = None,
-    padding: int = 4,
+    padding: int | None = None,
     radius: int = 16,
 ) -> ft.Control:
     """The focusable frame every card shares: media, optional gradient,
-    overlay layers, the shape, and the D-pad focus chain."""
+    overlay layers, the shape, and the D-pad focus chain.
+
+    Portrait cards use 8px padding inset (giving 16px total breathing room
+    per card) to match nkiri-tv density exactly."""
+    card_padding = padding if padding is not None else (8 if mode == PORTRAIT else 4)
     layers: list[ft.Control] = [media]
     if gradient is not None:
         layers.append(gradient)
@@ -116,7 +120,7 @@ def card_frame(
                 clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
                 aspect_ratio=aspect_for(mode),
             ),
-            style=card_button_style(padding=padding, radius=radius),
+            style=card_button_style(padding=card_padding, radius=radius),
             animate_scale=card_focus_scale(),
             col=col,
             on_click=on_click,

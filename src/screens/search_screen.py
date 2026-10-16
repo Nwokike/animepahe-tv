@@ -360,8 +360,8 @@ def SearchScreen() -> ft.Control:
                         )
                         for a in state.search_results
                     ],
-                    spacing=12,
-                    run_spacing=12,
+                    spacing=16,
+                    run_spacing=16,
                 ),
                 build_banner_ad(page, inline=True),
                 pager,
@@ -483,5 +483,5 @@ def SearchScreen() -> ft.Control:
             expand=True,
         ),
         expand=True,
-        padding=ft.Padding.only(left=16, right=16, top=16, bottom=8),
+        padding=ft.Padding.only(left=24, right=24, top=16, bottom=8),
     )
