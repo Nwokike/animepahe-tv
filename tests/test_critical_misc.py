@@ -233,19 +233,22 @@ def test_mandatory_update_reshows_after_a_back_dismissal(monkeypatch):
 
 
 def test_series_download_preset_sticks_when_a_chip_is_tapped(monkeypatch):
-    """The preset callback passed ui into the `downloads` slot: the
-    preset never stuck (every re-open reset to 'highest') and the range
-    math called .get() on the string."""
+    """The preset callback must make the tapped chip the selected one.
+
+    The old bug: `_preset` passed `ui` into the `downloads` slot, so every
+    re-open reset to 'highest' and the range math called .get() on the
+    string. The buttons now update their styles IN PLACE (no re-open, so
+    the dialog cannot stack or lose the completed-exclusion set).
+    """
     import flet as ft
 
     from screens import anime_detail_screen
 
-    opens = []
     controller = type(
         "C",
         (),
         {
-            "open_sheet": lambda self, s: opens.append(s),
+            "open_sheet": lambda self, s: None,
             "close_dialog": lambda self: None,
         },
     )()
@@ -264,15 +267,12 @@ def test_series_download_preset_sticks_when_a_chip_is_tapped(monkeypatch):
     )
     chips = [n for n in _walk(dlg) if isinstance(n, ft.OutlinedButton)]
     assert len(chips) == 3  # Highest / Lowest / As served
-    # Tap "lowest" — the old code passed ui into the downloads slot here
-    # and crashed (or reset the preset).
+    assert chips[0].style.bgcolor is not None  # 'highest' starts selected
+    # Tap "lowest" — the tap must flip the selection itself.
     chips[1].on_click(None)
-    assert len(opens) == 1
-    # The re-opened sheet carries the choice: the lowest chip is now the
-    # selected one.
-    chips2 = [n for n in _walk(opens[0]) if isinstance(n, ft.OutlinedButton)]
-    assert chips2[1].style.bgcolor is not None
-    assert chips2[0].style.bgcolor is None
+    assert chips[1].style.bgcolor is not None
+    assert chips[0].style.bgcolor is None
+    assert chips[2].style.bgcolor is None
 
 
 # ---------------------------------------------------------------------------

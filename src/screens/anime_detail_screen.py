@@ -9,6 +9,8 @@ Data comes from the controller (Phase 1). Phase 2 makes this screen fetch
 its own anime by session — today it reads state.episodes like the old view.
 """
 
+import contextlib
+
 import flet as ft
 
 from components.artwork_card import art_fallback, card_frame, card_media
@@ -217,9 +219,20 @@ def AnimeDetailScreen() -> ft.Control:
     def _titled(content: ft.Control) -> ft.Control:
         """Every branch of this screen keeps the shared header on top —
         the source pill/switcher must be visible even when the page has
-        nothing else to show (owner's order: all screens, detail too)."""
+        nothing else to show (owner's order: all screens, detail too).
+        The Back control lives INSIDE that header (``on_back``): the owner
+        rejected a second bar above it (2026-10-16)."""
         return ft.Column(
-            [app_header(state, page, controller, subtitle="Episodes"), content],
+            [
+                app_header(
+                    state,
+                    page,
+                    controller,
+                    subtitle="",
+                    on_back=lambda: controller.back(),
+                ),
+                content,
+            ],
             spacing=0,
             expand=True,
         )
@@ -234,10 +247,13 @@ def AnimeDetailScreen() -> ft.Control:
         )
 
     # Whose anime is this? A Continue-Watching row (or a stale link) can
-    # point at a session owned by a DIFFERENT backend than the pinned one —
-    # its fetches then hit that source's wall while the pin is elsewhere,
-    # and the screen showed a bare "no episodes" (owner's log, 2026-10-16).
-    # The switcher below turns that dead end into one tap.
+    # point at a session owned by a DIFFERENT backend than the active one.
+    # Every chain here is OWNER-SCOPED, so the fetch still goes to the
+    # session's own provider — and when that owner is AnimePahe its
+    # Cloudflare flow must open for it (the owner's live run: tapping an
+    # AnimePahe recent under another source showed "no episodes" and no
+    # solver). The controller opens the gate for every user-driven load
+    # (load_anime → load_episodes), so the window rides with the fetch.
     pinned = (state.current_source_name or "").strip()
     owner = owner_of(anime_session or "")
     owner_mismatch = bool(pinned and owner and owner != pinned)
@@ -246,6 +262,33 @@ def AnimeDetailScreen() -> ft.Control:
         controller.set_backend_pin(owner or pinned)
 
     if not episodes:
+        # The wall, not an empty catalogue: show the same SHIELD card Home
+        # uses (Verify + Change source) instead of "No episodes found" —
+        # the owner's report was exactly this dead end (2026-10-16).
+        if getattr(state, "cf_blocked", False) and state.is_online:
+            from components.offline_state import cf_gate_card
+
+            return _titled(
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            cf_gate_card(state, controller),
+                            ft.Container(height=12),
+                            ft.Text(
+                                "The episode list loads again the moment the check passes.",
+                                size=12,
+                                color=ft.Colors.ON_SURFACE_VARIANT,
+                                text_align=ft.TextAlign.CENTER,
+                            ),
+                        ],
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        spacing=0,
+                    ),
+                    expand=True,
+                    alignment=ft.Alignment.CENTER,
+                )
+            )
         if owner_mismatch:
             return _titled(empty_or_offline(
                 state,
@@ -265,6 +308,7 @@ def AnimeDetailScreen() -> ft.Control:
                 message="This series may have no releases yet — try again later.",
                 icon=ft.Icons.MOVIE_FILTER_ROUNDED,
                 on_retry=lambda e: controller.load_anime(state.current_anime_session),
+                on_downloads=lambda e: controller.open_downloads(),
             )
         )
 
@@ -784,20 +828,40 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
             e.session for e in episodes if start <= e.episode <= end and e.session not in done
         ]
         controller.close_dialog()
-        # The controller bridge already spawns this — wrapping it in a
-        # second spawn() fed a Task (not a coroutine) to create_task and
-        # crashed the button with TypeError on every tap.
         controller.download_series(anime_session, chosen, ui["preset"])
+
+    preset_buttons: dict[str, ft.OutlinedButton] = {}
+
+    def _button_style(val: str) -> ft.ButtonStyle:
+        is_active = ui["preset"] == val
+        return ft.ButtonStyle(
+            bgcolor=ft.Colors.with_opacity(0.18, ft.Colors.PRIMARY) if is_active else None,
+            side=ft.BorderSide(1.5, AppColors.PRIMARY)
+            if is_active
+            else ft.BorderSide(1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE)),
+            color=AppColors.PRIMARY if is_active else ft.Colors.ON_SURFACE,
+        )
 
     def _preset(value):
         ui["preset"] = value
-        # The ui cell must ride as the ui= kwarg — it used to land in the
-        # `downloads` slot (the preset never stuck, and the range math
-        # called .get() on the string). `downloads` is this builder's own
-        # argument, so the re-open keeps the same completed-exclusion set.
-        controller.open_sheet(
-            _build_series_download_dialog(episodes, controller, anime_session, downloads, ui)
+        for val, btn in preset_buttons.items():
+            btn.style = _button_style(val)
+            with contextlib.suppress(Exception):
+                btn.update()
+
+    preset_row_controls = []
+    for value, label in (
+        ("highest", "Highest"),
+        ("lowest", "Lowest"),
+        ("as-served", "As served"),
+    ):
+        btn = ft.OutlinedButton(
+            content=label,
+            style=_button_style(value),
+            on_click=lambda e, v=value: _preset(v),
         )
+        preset_buttons[value] = btn
+        preset_row_controls.append(btn)
 
     count = len([e for e in episodes if lo <= e.episode <= hi and e.session not in done])
     sizes = [float(getattr(e, "size", "") or 0) for e in episodes if getattr(e, "size", "")]
@@ -816,22 +880,7 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
                 ft.Row([ft.Text("From"), from_ctl, ft.Text("to"), to_ctl], spacing=8),
                 ft.Text("Quality", size=13, weight=ft.FontWeight.W_700),
                 ft.Row(
-                    [
-                        ft.OutlinedButton(
-                            content=label,
-                            style=ft.ButtonStyle(
-                                bgcolor=ft.Colors.with_opacity(0.18, ft.Colors.PRIMARY)
-                                if ui["preset"] == value
-                                else None
-                            ),
-                            on_click=lambda e, v=value: _preset(v),
-                        )
-                        for value, label in (
-                            ("highest", "Highest"),
-                            ("lowest", "Lowest"),
-                            ("as-served", "As served"),
-                        )
-                    ],
+                    preset_row_controls,
                     spacing=6,
                 ),
                 ft.Text(

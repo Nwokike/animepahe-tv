@@ -1,7 +1,8 @@
 """app_header — the ONE header every screen shares (Sherlock's pattern).
 
-Left: the app icon + the source pill — "<Backend> TV ▾", the content-source
-switcher — with the screen's own name as a quiet subtitle beneath it.
+Left: an optional round back button (sub-screens), the app icon, and the
+source pill — "<Backend> TV ▾", the content-source switcher — with the
+screen's own name as a quiet subtitle beneath it.
 
 Right: the backend badge, the version/update pill, the screen's own extra
 actions, then the theme cycle. The whole right group rides a
@@ -11,10 +12,11 @@ add as many actions as it earns without a layout fight.
 
 Every screen renders it, so switching backends (and theme) never depends on
 being on Home or finding Settings — the owner's reuse pattern from Sherlock
-and CollabShell.
+and CollabShell. Sub-screens (an anime's episodes) pass ``on_back``: the
+back control lives INSIDE this header, never as a second bar stacked above
+it (the owner's report, 2026-10-16 — a separate AppBar put "back · Anime"
+ahead of the header).
 """
-
-import contextlib
 
 import flet as ft
 
@@ -38,20 +40,35 @@ def backend_title(state) -> str:
     return f"{name.capitalize()} TV" if name else APP_NAME
 
 
-def theme_icon_for(page) -> ft.IconData:
-    """The icon names the mode the tap LANDS ON (the cycle's next mode)."""
-    mode = getattr(page, "theme_mode", ft.ThemeMode.SYSTEM) if page else ft.ThemeMode.SYSTEM
+def theme_icon_for(page, state=None) -> ft.IconData:
+    """The icon names the mode the tap LANDS ON (the cycle's next mode).
+
+    The mode comes from ``state.theme_mode`` — the observable field the
+    header cycle and the Settings picker both drive — so the icon lands
+    via a re-render, never by mutating the control (frozen subtrees raise
+    "Frozen controls cannot be updated."). The page is only a fallback
+    before the observable has anything."""
+    mode = getattr(state, "theme_mode", None) if state is not None else None
+    if mode is None:
+        mode = getattr(page, "theme_mode", ft.ThemeMode.SYSTEM) if page else ft.ThemeMode.SYSTEM
     return THEME_ICONS.get(next_theme_mode(mode), ft.Icons.DARK_MODE_ROUNDED)
 
 
-def _cycle_theme(page, controller) -> ft.IconData:
+def _cycle_theme(page, controller, state=None) -> ft.IconData:
     """DARK -> LIGHT -> SYSTEM -> DARK, persisted. Returns the icon that
-    now names the mode the NEXT tap lands on."""
-    if page is None:
+    now names the mode the NEXT tap lands on. The mode lands on the page
+    AND on ``state.theme_mode`` (observable), which is what re-renders the
+    header's icon through the normal component path."""
+    if state is None:
         return ft.Icons.DARK_MODE_ROUNDED
+    current = getattr(state, "theme_mode", None)
+    if current is None:
+        current = getattr(page, "theme_mode", ft.ThemeMode.SYSTEM) if page else ft.ThemeMode.SYSTEM
+    nxt = next_theme_mode(current)
+    if page is not None:
+        page.theme_mode = nxt
+    state.theme_mode = nxt
     app_controller = getattr(controller, "_app_controller", None)
-    nxt = next_theme_mode(getattr(page, "theme_mode", ft.ThemeMode.SYSTEM))
-    page.theme_mode = nxt
     if app_controller is not None:
         from core.tasks import spawn
 
@@ -135,11 +152,14 @@ def app_header(
     *,
     subtitle: str = "",
     extra_actions: list[ft.Control] | None = None,
+    on_back=None,
     on_theme=None,
 ) -> ft.Control:
     """The shared header. ``subtitle`` names the screen ("Settings",
     "Downloads"); ``extra_actions`` are the screen's own buttons, rendered
-    left of the theme cycle inside the scrolling group."""
+    left of the theme cycle inside the scrolling group. ``on_back`` turns
+    the leading round button into a Back control — for screens that were
+    pushed (an anime's episodes), never a second bar above the header."""
 
     def _action(icon, tip, handler, colour=None) -> ft.Control:
         return ft.Container(
@@ -152,19 +172,17 @@ def app_header(
         )
 
     def _default_theme(_e=None):
-        icon = _cycle_theme(page, controller)
-        # The header may live inside a frozen component subtree, so the
-        # action repaints its OWN icon instead of relying on a re-render.
-        theme_action.content.icon = icon
-        with contextlib.suppress(Exception):
-            theme_action.update()
-        if page is not None:
-            with contextlib.suppress(Exception):
-                page.update()
+        # The icon must land through a RE-RENDER: the header lives in a
+        # frozen `@ft.component` subtree, and mutating `theme_action`
+        # here raised "Frozen controls cannot be updated." (owner's run,
+        # 2026-10-16 — the 3-way cycle was broken by exactly this line).
+        # `state.theme_mode` is observable, so setting it re-renders the
+        # screen that called app_header with the new icon.
+        icon = _cycle_theme(page, controller, state)
         if on_theme is not None:
             on_theme(icon)
 
-    theme_action = _action(theme_icon_for(page), "Switch theme", _default_theme)
+    theme_action = _action(theme_icon_for(page, state), "Switch theme", _default_theme)
 
     right = ft.Row(
         [
@@ -179,8 +197,32 @@ def app_header(
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
+    # The round back button (sub-screens only): a soft-tinted disc that
+    # belongs to the header row — the modern "icon button on the bar",
+    # never a separate strip of chrome above it.
+    leading: list[ft.Control] = []
+    if on_back is not None:
+        leading.append(
+            ft.Container(
+                content=ft.Icon(
+                    ft.Icons.ARROW_BACK_ROUNDED,
+                    size=18,
+                    color=ft.Colors.ON_SURFACE,
+                ),
+                width=34,
+                height=34,
+                border_radius=17,
+                bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+                alignment=ft.Alignment.CENTER,
+                ink=True,
+                tooltip="Back",
+                on_click=lambda e: on_back(),
+            )
+        )
+
     left = ft.Row(
         [
+            *leading,
             ft.Image(src="icon.png", width=32, height=32, fit="contain"),
             ft.Container(
                 content=ft.Column(

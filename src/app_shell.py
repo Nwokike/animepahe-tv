@@ -166,7 +166,7 @@ def AppShell() -> ft.Control:
             set_portal_owner("backend")
             set_active_dialog(_build_backend_picker(state, controller))
     elif sheet is not None:
-        if portal_owner != "sheet":
+        if portal_owner != "sheet" or active_dialog is not sheet:
             set_portal_owner("sheet")
             set_active_dialog(sheet)
     else:
@@ -233,7 +233,11 @@ def AppShell() -> ft.Control:
 
     if active_view == "anime":
         body = AnimeDetailScreen()
-        chrome = _detail_appbar(controller)
+        # The detail screen renders the SHARED header itself, with the
+        # back button inside it (the owner's order: the header is always
+        # the topmost element — a separate AppBar above it put
+        # "back · Anime" ahead of the header, 2026-10-16).
+        chrome = None
         show_nav = False
     else:
         if active_tab == "Home":
@@ -616,19 +620,6 @@ def _close_player():
     if page is None:
         return
     page.run_task(_player_back)
-
-
-def _detail_appbar(controller) -> ft.Control:
-    return ft.AppBar(
-        leading=ft.IconButton(
-            icon=ft.Icons.ARROW_BACK_ROUNDED,
-            on_click=lambda e: controller.back(),
-            tooltip="Back",
-        ),
-        title=ft.Text("Anime", weight=ft.FontWeight.W_600),
-        bgcolor=ft.Colors.TRANSPARENT,
-        center_title=False,
-    )
 
 
 def _build_download_quality_dialog(state, controller) -> ft.Control:
