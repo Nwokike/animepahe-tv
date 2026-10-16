@@ -159,7 +159,7 @@ def test_kayoanime_anime_cache_returns_anime_on_second_call():
     }
     provider = KayoanimeProvider(client=_KayClient(post))
     first = asyncio.run(provider.anime("kayoanime:5"))
-    assert first is not None and first.title == "Some Anime 1080p"
+    assert first is not None and first.title == "Some Anime"
     second = asyncio.run(provider.anime("kayoanime:5"))
     assert second is first  # cached, not a tuple on the second call
 

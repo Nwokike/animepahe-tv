@@ -54,11 +54,19 @@ def _clean_title(raw: str) -> tuple[str, int, str]:
     year = int(year_match.group(1)) if year_match else 0
     title = re.sub(r"\(\d{4}\)", "", text).strip()
     title = re.sub(r"\|\s*Kayoanime\s*$", "", title, flags=re.I).strip()
+    # Strip pipe episode tags e.g. | Episode 3
+    title = re.sub(r"\|\s*Episode\s*\d+.*$", "", title, flags=re.I).strip()
+    # Strip trailing quality / encoding / audio tags
+    title = re.sub(r"\s+(?:1080p|720p|480p)\b.*$", "", title, flags=re.I).strip()
+    # Strip Episode N English Subbed / Dual Audio if present
+    title = re.sub(r"\s+Episode\s*\d+\s*(?:English\s*Subbed|Eng\s*Sub)?.*$", "", title, flags=re.I).strip()
+    title = re.sub(r"\s+(?:English\s*Subbed|Dual\s*Audio|Eng\s*Sub)\b.*$", "", title, flags=re.I).strip()
+    title = re.sub(r"\s+", " ", title).strip(" -–—")
     lower = text.lower()
     media_type = "TV"
     if "movie" in lower or "gekijouban" in lower:
         media_type = "Movie"
-    return title.strip(" -–—")[:200], year, media_type
+    return title[:200], year, media_type
 
 
 def _title_relevance(query: str, title: str) -> int:
@@ -104,26 +112,37 @@ def _looks_like_drive_file_id(session: str) -> bool:
 
 
 def _episode_key(filename: str) -> tuple[int, int] | None:
-    """(season, episode) — the three observed shapes, in the map's order:
+    """(season, episode) — the observed shapes, in the map's order:
     `[Kayoanime] Show - NNN.mkv` → `- 274.mkv` trailing number (season 1,
     the default when the name carries no SxxExx),
-    `[Kayoanime] Show - S02E05.mkv` → the season-episode form,
+    `[Kayoanime] Show - S02E05[v2].mkv` → the season-episode form,
+    trailing tags like `(1920x1080 HEVC2 EAC3).mkv` ignored,
     movies (`- Movie 08 - Film.mkv`) → extras, no number.
 
     The key keeps the SEASON: a flat episode number collided across
     multi-season posts (Dandadan S1 and S2 both had "episode 5"), and the
     dedupe silently kept only one of them."""
     name = filename.rsplit("/", 1)[-1]
-    se = re.search(r"\bS(\d{1,2})E(\d{1,3})\b", name, re.I)
-    if se:
-        return int(se.group(1)), int(se.group(2))
     if re.search(r"\bmovie\b", name, re.I):
         return None
-    trailing = re.search(r"-\s*(\d{1,4})\s*\.(?:mkv|mp4)$", name, re.I)
+    se = re.search(r"\bS(\d{1,2})E(\d{1,3})(?:v\d+)?\b", name, re.I)
+    if se:
+        return int(se.group(1)), int(se.group(2))
+    trailing = re.search(
+        r"-\s*(\d{1,4})(?:v\d+)?(?:\s*[\(\[][^\)\]]*[\)\]])*\s*\.(?:mkv|mp4)$",
+        name,
+        re.I,
+    )
     if trailing:
         return 1, int(trailing.group(1))
-    loose = re.search(r"\b(\d{1,4})\s*\.(?:mkv|mp4)$", name, re.I)
-    return int(loose.group(1)) if loose else None
+    loose = re.search(
+        r"\b(\d{1,4})(?:v\d+)?(?:\s*[\(\[][^\)\]]*[\)\]])*\s*\.(?:mkv|mp4)$",
+        name,
+        re.I,
+    )
+    if loose:
+        return 1, int(loose.group(1))
+    return None
 
 
 def _extract_resolution(title: str) -> int:

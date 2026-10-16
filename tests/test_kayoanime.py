@@ -24,8 +24,42 @@ def test_episode_key_three_shapes_plus_movie():
     # (S02E05 used to collapse onto the same "5" as S01E05).
     assert _episode_key("[Kayoanime] Dandadan - S02E05.mkv") == (2, 5)
     assert _episode_key("Sousou no Frieren - 01.mkv") == (1, 1)
+    # v2 suffixes on episodes (e.g. Clevatess S02E13v2)
+    assert _episode_key("Clevatess - S02E13v2.mkv") == (2, 13)
+    # Trailing parenthesized resolution/codec metadata
+    assert (
+        _episode_key("Shichisei no Subaru - 07 (1920x1080 HEVC2 EAC3).mkv")
+        == (1, 7)
+    )
     assert _episode_key("[Kayoanime] Naruto Shippuden - Movie 08 - Boruto.mkv") is None
     assert _episode_key("random-notes.txt") is None
+
+
+def test_clean_title_removes_episode_and_blog_suffixes():
+    from services.providers.kayoanime import _clean_title
+
+    t1, y1, _ = _clean_title("Magical Explorer Episode 3 English Subbed")
+    assert t1 == "Magical Explorer"
+
+    t2, y2, _ = _clean_title(
+        "Though I Am an Inept Villainess (Season 1) 1080p Dual Audio HEVC"
+    )
+    assert t2 == "Though I Am an Inept Villainess (Season 1)"
+
+    t3, y3, _ = _clean_title("Overgeared 1080p Eng Sub HEVC | Episode 3")
+    assert t3 == "Overgeared"
+
+    t4, y4, _ = _clean_title("Boruto 1080p Dual Audio | Kayoanime")
+    assert t4 == "Boruto"
+
+
+def test_discover_provider_defaults_to_kayoanime_when_unpinned():
+    from services.providers.kayoanime import KayoanimeProvider
+    from services.router import ProviderRouter
+
+    kayo = KayoanimeProvider(client=None)
+    router = ProviderRouter([kayo])
+    assert router.discover_provider() is kayo
 
 
 def test_folder_pairs_and_maintenance_rule():
