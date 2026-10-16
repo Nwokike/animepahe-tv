@@ -226,3 +226,32 @@ Left/Right (and j/l) seek ±10 s, Up/Down adjust volume, m mutes,
 f toggles fullscreen, [ ]/p/n change episodes, < > cycle speed, 0–9 jump
 to 0–90 %, s skips the active intro/outro window. focus_scope forwards
 every non-Back key to the player's handler.
+
+## 2026-10-16 (later) — one header everywhere, downloads UX, artwork fill, About
+
+- **Shared header** (`components/app_header.py`, Sherlock's pattern): the
+  source pill, badge, version pill, screen actions and theme cycle render
+  on Home, Search, Discover, Downloads and Settings; the action group is a
+  `Row(scroll=AUTO)` (scroll, never clip). The theme cycle repaints its own
+  icon in place (a frozen subtree cannot be relied on to re-render it).
+- **Downloads**: series cards collapse (most recently updated open by
+  default); the header shows a live aggregate ("3/11 done · 42%") over the
+  per-episode bars; only the open series renders its rows.
+- **Search**: a Type chip row refines the page the source just returned
+  (client-side; only types actually present; hidden when the source's rows
+  carry none).
+- **Artwork fill**: the probe's real ratio is now authoritative in
+  `card_media` — within 25% of the cell COVER fills it (no empty space);
+  a genuinely different shape keeps the frosted fill.
+- **About this release**: AniKato/AnimePahe synopses now reach the header
+  on every open (one-shot off-path enrichment from the provider's own
+  detail record when the fast path left it empty); AnimeOut/KayoAnime
+  descriptions come from the post body via `core.html_extract.plain_summary`
+  (the HTML episodes() already downloads). Four-line clamp + Read more.
+  Comment threads stay out (AniKato's is per-episode and read-only).
+- Verified live: `m=links` is a retired endpoint (the play page never calls
+  it; every parameter shape answers "not enough arguments") — the play page
+  is primary, the JSON route a debug-level last resort. A 30-image burst
+  tripped Cloudflare's load detector ("too_many_data_frames") and surfaced
+  as unhandled page errors — now capped at 4 concurrent, failures fall back
+  to the card's own artwork panel.
