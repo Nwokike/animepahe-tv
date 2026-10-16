@@ -196,6 +196,10 @@ flet build windows --release
 # Tests (462 passing; the F-category ruff gate is clean)
 python -m pytest tests/ -q
 python -m ruff check --select F src/ tests/
+
+# Reproduce the download pipeline per backend, locally (discovery →
+# episodes → sources → bytes on disk, in a scratch store)
+python tools/download_matrix.py anikato kayoanime
 ```
 
 ## Legal Disclaimer
