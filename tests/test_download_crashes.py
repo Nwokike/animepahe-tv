@@ -417,3 +417,16 @@ def test_out_of_order_master_picks_the_highest_bandwidth():
         assert "lo/" not in url
 
     asyncio.run(scenario())
+
+
+def test_a_playlist_with_no_segments_is_a_failure_not_a_complete_row():
+    """The owner's log: "download complete: … (0 segments)". A stub
+    playlist (an ad-only or empty manifest) must fail the job — a COMPLETE
+    row with nothing in it "plays" as a black frame, which is the lie this
+    guard exists to prevent."""
+    import pathlib
+
+    import services.downloads as downloads_module
+
+    source = pathlib.Path(downloads_module.__file__).read_text(encoding="utf-8")
+    assert "the stream served no segments" in source

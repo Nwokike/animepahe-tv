@@ -736,6 +736,13 @@ class DownloadManager:
             base_url = media_url.rsplit("/", 1)[0]
             uris = parse_segment_uris(media_text)
             total = len(uris)
+            if total == 0:
+                # A playlist with no segments is not a video: the source
+                # served an ad-stub or an empty manifest. The owner's log
+                # showed "download complete: … (0 segments)" — a COMPLETE
+                # row holding nothing, which then "plays" as a black frame.
+                # Failing here is the honest outcome; the row offers Retry.
+                raise RuntimeError("the stream served no segments")
             progress = self._progress[episode_session]
             progress["total"] = total
 
