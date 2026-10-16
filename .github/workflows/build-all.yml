@@ -114,16 +114,17 @@ jobs:
           files: build/apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload to Public Release Repo
-        if: github.event_name != 'pull_request' && env.RELEASE_PAT != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: soco-live/animepahe-releases
-          token: ${{ env.RELEASE_PAT }}
-          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
-          files: build/apk/*.apk
+      - name: Upload to Public Release Repo (optional mirror)
+        if: github.event_name != 'pull_request'
         env:
-          GITHUB_TOKEN: ${{ env.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAG: ${{ needs.prepare-release.outputs.TAG_NAME }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RELEASE_PAT is not set — mirror upload skipped (the private release has the APK)."
+            exit 0
+          fi
+          gh release upload "$TAG" build/apk/*.apk --repo soco-live/animepahe-releases --clobber
 
   # ─── 2. Android APK (split per ABI) ───────────────────────
   build-apk-split:
@@ -157,13 +158,14 @@ jobs:
           files: build/apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload to Public Release Repo
-        if: github.event_name != 'pull_request' && env.RELEASE_PAT != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: soco-live/animepahe-releases
-          token: ${{ env.RELEASE_PAT }}
-          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
-          files: build/apk/*.apk
+      - name: Upload to Public Release Repo (optional mirror)
+        if: github.event_name != 'pull_request'
         env:
-          GITHUB_TOKEN: ${{ env.RELEASE_PAT }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAG: ${{ needs.prepare-release.outputs.TAG_NAME }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "RELEASE_PAT is not set — mirror upload skipped (the private release has the APK)."
+            exit 0
+          fi
+          gh release upload "$TAG" build/apk/*.apk --repo soco-live/animepahe-releases --clobber
