@@ -42,8 +42,8 @@ Get the latest version of AnimePahe TV. If you aren't sure which Android version
 
 ## Features
 
-- **Independent sources, one at a time** — five backends (AniKato, AnimeOut, Kusonime, Kayoanime,
-  AnimePahe), each with its own catalog, artwork, playback and Cloudflare story. The app resolves
+- **Independent sources, one at a time** — four backends (AniKato, AnimeOut,
+  AnimePahe, Kayoanime), each with its own catalog, artwork, playback and Cloudflare story. The app resolves
   one source behind a startup splash (a stored pin, or an automatic race of the open sources) and
   then *is* that source: nothing else is consulted, and switching re-runs the whole gate.
 - **The art decides the layout** — the screen sniffs the shape of the artwork the active source
@@ -83,7 +83,7 @@ Get the latest version of AnimePahe TV. If you aren't sure which Android version
 | Sources | Provider protocol + `ProviderRouter` (breaker per provider, owner-scoped catalog ops, health in Settings) |
 | Cloudflare | `flet-webview-all` on Android/iOS/TV; pywebview subprocess for desktop dev (UA-pinned, renderer-guarded) |
 | Durable state | Atomic JSON in the data tier (`FLET_APP_STORAGE_DATA`): history, continue watching, positions, clearance, downloads, artwork defaults |
-| Stream resolution | Per-source: AniKato's encrypted MegaPlay manifests, AnimePahe's Kwik unpack, Kusonime's pixeldrain, Kayoanime's Drive, AnimeOut's DDL chain |
+| Stream resolution | Per-source: AniKato's encrypted MegaPlay manifests, AnimePahe's Kwik unpack, Kayoanime's Drive, AnimeOut's DDL chain |
 | Artwork | `core/artwork.py` (byte sniffing) + `services/artwork_probe.py` (cache-first range probes) |
 | Ads | `flet-yandex-ads` (banner, interstitial, rewarded, app open) |
 | State Management | `@observable` AppState + context providers + a controller bridge |
@@ -121,7 +121,7 @@ src/
 │   └── use_grid_mode.py       # The automatic orientation decision (learned + probed + seeded)
 ├── services/
 │   ├── router.py              # ProviderRouter: breakers, owner-scoped ops, startup race
-│   ├── providers/             # anikato, animeout, kusonime, kayoanime, animepahe_provider
+│   ├── providers/             # anikato, animeout, animepahe_provider, kayoanime
 │   ├── animepahe.py           # AnimePahe scraper (API → HTML → regex → unpack) behind its provider
 │   ├── kwik_resolver.py       # Kwik m3u8 resolution with referer + clearance
 │   ├── ddos_solver.py         # AnimePahe Cloudflare session + durable clearance

@@ -1,10 +1,10 @@
 """Episode paging — Phase 3 Step 1.
 
 The protocol has always promised ``episodes(session, page) -> (list,
-has_more)``; four providers simply ignored ``page`` and returned the whole
-list, so a 170-episode series (or kusonime's 1000-episode One Piece) dumped
-every card at once with a dead pager. They now slice their already-cached
-full list to ``EPISODES_PER_PAGE``; animepahe keeps its server pages.
+has_more)``; the providers simply ignored ``page`` and returned the whole
+list, so a 170-episode series dumped every card at once with a dead pager.
+They now slice their already-cached full list to ``EPISODES_PER_PAGE``;
+animepahe keeps its server pages.
 
 The title-keyed lookups and the new-episode checker need the WHOLE list —
 they walk pages through ``all_episodes`` instead of trusting page 1, which
@@ -27,7 +27,6 @@ from services.providers.base import (  # noqa: E402
     page_slice,
 )
 from services.providers.kayoanime import KayoanimeProvider  # noqa: E402
-from services.providers.kusonime import KusonimeProvider  # noqa: E402
 
 
 def _eps(n: int) -> list[Episode]:
@@ -81,7 +80,6 @@ def test_each_provider_pages_from_its_cached_full_list():
     cases = [
         (AniKatoProvider(client=None), "anikato:black-clover", "episodes_black-clover"),
         (AnimeOutProvider(client=None), "animeout:99", "episodes_99"),
-        (KusonimeProvider(client=None), "kusonime:42", "episodes_42"),
         (KayoanimeProvider(client=None), "kayoanime:7", "episodes_7"),
     ]
     for provider, session, key in cases:

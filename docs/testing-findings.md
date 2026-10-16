@@ -123,8 +123,8 @@ guarded hosts; `data:` URIs (animepahe's) pass through. Provider data and
 everything persisted stay raw, so no store row can ever carry a loopback
 port.
 
-Host probe (live, 2026-10-15, primp chrome): `cdn.anipixcdn.co`,
-`kusonime.com/wp-content`, `kayoanime.com/wp-content` all answer **200 both
+Host probe (live, 2026-10-15, primp chrome): `cdn.anipixcdn.co` and
+`kayoanime.com/wp-content` all answer **200 both
 bare and with their referer**; `www.animeout.xyz/wp-content` answers a
 Cloudflare **"Just a moment" 403 either way** — same wall family as its
 files, which is why its host is the first member of `GUARDED_IMAGE_HOSTS`.
@@ -143,7 +143,7 @@ all); the honest-counts sweep found and fixed the two real leaks:
 
 ### 3. 170 episodes at once: closed — 24 per page
 The protocol's `episodes(session, page)` is honored by all five providers
-now: anikato/animeout/kusonime/kayoanime slice their cached full list at
+now: anikato/animeout/kayoanime slice their cached full list at
 `EPISODES_PER_PAGE = 24` (ktv-player's documented `PAGE_SIZE`; nkiri-tv
 renders everything and its pager is vestigial — studied on disk), animepahe
 keeps its server pages. The existing pager (Prev · Page N · Next) drives it.

@@ -27,8 +27,6 @@ CACHE_TTL_EPISODES = 3600
 
 # Provider endpoints (the complete bench; see docs/decisions.md).
 ANIMEOUT_API = "https://animeout.xyz/wp-json/wp/v2"
-KUSONIME_API = "https://kusonime.com/wp-json/wp/v2"
-KUSONIME_BASE = "https://kusonime.com"
 
 # Kayoanime (WordPress + Google Drive). The Drive "web key" is Google's
 # own public client key (shipped inside drive.google.com's own app) with

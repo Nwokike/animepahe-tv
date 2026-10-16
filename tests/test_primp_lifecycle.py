@@ -17,7 +17,6 @@ from services.providers.anikato import AniKatoProvider
 from services.providers.animeout import AnimeOutProvider
 from services.providers.base import close_client
 from services.providers.kayoanime import KayoanimeProvider
-from services.providers.kusonime import KusonimeProvider
 
 
 def test_installed_primp_client_has_no_aclose():
@@ -82,7 +81,6 @@ async def test_provider_close_tolerates_real_shaped_client():
     """Provider close() with a context-manager-only client must not raise."""
     for provider in (
         AnimeOutProvider(client=_RealShapedClient()),
-        KusonimeProvider(client=_RealShapedClient()),
         AniKatoProvider(client=_RealShapedClient()),
         KayoanimeProvider(client=_RealShapedClient()),
     ):

@@ -60,15 +60,8 @@ def test_animeout_every_params_path_is_string_typed():
     assert len(client.calls) >= 4
 
 
-def test_kusonime_and_kayoanime_params_are_string_typed():
+def test_kayoanime_params_are_string_typed():
     from services.providers.kayoanime import KayoanimeProvider
-    from services.providers.kusonime import KusonimeProvider
-
-    kuso_client = StrictParamsClient()
-    kuso = KusonimeProvider(client=kuso_client)
-    asyncio.run(kuso.latest_releases(1))
-    asyncio.run(kuso.search("x", 1))
-    asyncio.run(kuso.filters())
 
     kayo_client = StrictParamsClient()
     kayo = KayoanimeProvider(client=kayo_client)

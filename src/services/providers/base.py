@@ -24,14 +24,13 @@ PROVIDER_ORDER: tuple[str, ...] = (
     "anikato",
     "animeout",
     "animepahe",
-    "kusonime",
     "kayoanime",
 )
 
 # One page of an episode grid (Prev · Page N · Next). AnimePahe pages this
 # server-side (30/page — its own shape); the providers whose sources return
 # the whole list in one shot slice it to this cap so no screen ever renders
-# a 170-episode (or kusonime's 1000-episode) dump at once.
+# a 170-episode dump at once.
 EPISODES_PER_PAGE = 24
 
 

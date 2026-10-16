@@ -82,5 +82,5 @@ def test_kayoanime_is_one_source_with_a_download_route():
 
 def test_kayoanime_rejects_a_foreign_session_as_before():
     provider = KayoanimeProvider(client=None)
-    # kusonime's "post|ep" shape is not a Drive id — empty, the honest answer.
+    # A foreign "post|ep" shape is not a Drive id — empty, the honest answer.
     assert asyncio.run(provider.sources("kayoanime:9", "48025|1")) == []

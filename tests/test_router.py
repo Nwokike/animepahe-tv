@@ -282,15 +282,13 @@ def test_session_owner_is_tried_first():
 
 
 def test_a_namespaced_session_is_never_raced_against_other_providers():
-    """The flet-run failure: kayoanime was pinned, got asked for a
-    kusonime session, and returned an UNVALIDATED stream (drive URL built
-    from "48025|1") that won the race over the real owner."""
-    kayo, kuso = FakeProvider("kayoanime"), FakeProvider("kusonime")
-    r = _router(kayo, kuso)
+    """A pinned provider must not be asked for another provider's session."""
+    kayo, out = FakeProvider("kayoanime"), FakeProvider("animeout")
+    r = _router(kayo, out)
     r.set_pin("kayoanime")  # the pin must NOT pull a foreign provider in
-    asyncio.run(r.sources("kusonime:48968", "48968|1"))
+    asyncio.run(r.sources("animeout:48968", "48968|1"))
     assert kayo.calls == []  # never asked
-    assert ("sources", "kusonime:48968", "48968|1") in kuso.calls
+    assert ("sources", "animeout:48968", "48968|1") in out.calls
 
 
 def test_an_unknown_session_owner_fails_fast():

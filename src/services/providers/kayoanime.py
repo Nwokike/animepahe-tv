@@ -98,8 +98,8 @@ def _folder_pairs(content_html: str) -> list[tuple[str, str]]:
 
 def _looks_like_drive_file_id(session: str) -> bool:
     """A Google Drive file id is [A-Za-z0-9_-]+. Anything with a pipe,
-    slash or whitespace is another provider's session shape (kusonime's
-    "post|ep", anikato's tokens) and can never be a Drive file."""
+    slash or whitespace is another provider's session shape and can
+    never be a Drive file."""
     return bool(session) and re.fullmatch(r"[A-Za-z0-9_-]+", session) is not None
 
 
@@ -543,12 +543,9 @@ class KayoanimeProvider:
         showed two identical rows reading "0p". The file id IS the
         episode session."""
         if not _looks_like_drive_file_id(episode_session):
-            # A session from another provider (namespaced "post|ep" shapes,
-            # anything with a pipe or separators) is NOT a Drive file id.
-            # Building /files/<junk> produced a stream that 404'd — and
-            # because these URLs were returned UNVALIDATED, they used to
-            # WON the router race over the real owner (flet run log,
-            # 2026-10-15: kusonime's "48025|1" played as a Drive 404).
+            # A session from another provider (namespaced shapes, anything
+            # with a pipe or separators) is NOT a Drive file id.
+            # Building /files/<junk> produced a stream that 404'd.
             # Empty is the honest answer; the owner gets the call.
             return []
         keyed = f"{DRIVE_API}/files/{episode_session}?alt=media&key={DRIVE_WEB_KEY}"

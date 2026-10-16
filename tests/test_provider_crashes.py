@@ -6,7 +6,7 @@ Each test kills one crash that shipped in the swarm audit:
 - kayoanime anime(): cached tuple returned where an Anime belongs,
   _quality never populated on the anime-first path, one folder's
   transport error aborting the whole episode walk
-- animeout / kusonime episodes(): bare [] where the contract is a
+- animeout episodes(): bare [] where the contract is a
   (episodes, has_more) tuple
 - WP providers' latest_releases(): Anime rows where the home grid
   reads LatestRelease fields
@@ -14,8 +14,8 @@ Each test kills one crash that shipped in the swarm audit:
 
 import asyncio
 
-import pytest  # -----------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
 # anikato
 # ---------------------------------------------------------------------------
 
@@ -236,20 +236,11 @@ def test_kayoanime_multiseason_post_keeps_both_seasons():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "provider_factory",
-    [
-        lambda: __import__(
-            "services.providers.animeout", fromlist=["AnimeOutProvider"]
-        ).AnimeOutProvider(client=object()),
-        lambda: __import__(
-            "services.providers.kusonime", fromlist=["KusonimeProvider"]
-        ).KusonimeProvider(client=object()),
-    ],
-)
-def test_episodes_returns_a_tuple_for_a_bad_session(provider_factory):
+def test_episodes_returns_a_tuple_for_a_bad_session():
     """A bare [] crashed every `episodes, has_more = ...` caller."""
-    provider = provider_factory()
+    from services.providers.animeout import AnimeOutProvider
+
+    provider = AnimeOutProvider(client=object())
     result = asyncio.run(provider.episodes("animeout:not-a-number", 1))
     assert result == ([], False)
 

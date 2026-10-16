@@ -92,22 +92,6 @@ function start() {
 </script>
 """
 
-KUSONIME_PAGE = """
-<div id="dl">
-<div class="smokeurlrh"><strong>360P</strong>
-  <a href="https://acefile.co/frieren-s2-01-16-360p-rar">Acefile</a> |
-  <a href="https://pixeldrain.com/u/abc123">Pixeldrain</a> |
-  <a href="https://mega.nz/file/X05W3YyZ#key">Mega.nz</a>
-</div>
-<div class="smokeurlrh"><strong>720P</strong>
-  <a href="https://acefile.co/frieren-s2-01-16-720p-rar">Acefile</a> |
-  <a href="https://pixeldrain.com/u/def456">Pixeldrain</a> |
-  <a href="https://drive.usercontent.google.com/download?id=1drvfile&export=download">Google Drive</a>
-</div>
-</div>
-<div id="dl-notif">adblock notice</div>
-"""
-
 
 def _run(coro):
     return asyncio.run(coro)
@@ -240,97 +224,6 @@ def test_animeout_walled_file_host_reports_no_stream_not_a_crash():
     # The wall is external (CF on public.animeout.xyz today) — the chain
     # resolves, the host reports nothing, and nothing raises.
     assert sources == []
-
-
-# ---------------------------------------------------------------------
-# Kusonime — page links + direct host API
-# ---------------------------------------------------------------------
-
-
-def test_kusonime_episodes_and_sources_from_block_headers():
-    from services.providers.kusonime import KusonimeProvider
-
-    client = FakeClient(
-        {
-            "/wp-json/wp/v2/posts/5789": FakeResponse(
-                200,
-                json_data={
-                    "id": 5789,
-                    "link": "https://kusonime.com/frieren-batch-subtitle-indonesia/",
-                },
-            ),
-            # the host-side truth: pixeldrain /info gives the real names
-            "/api/file/abc123/info": FakeResponse(
-                200,
-                json_data={
-                    "name": "[Kusonime] Frieren BD 01-16 360p.rar",
-                    "size": 500 * 1024 * 1024,
-                },
-            ),
-            "/api/file/def456/info": FakeResponse(
-                200,
-                json_data={
-                    "name": "[Kusonime] Frieren BD 01-16 720p.rar",
-                    "size": 900 * 1024 * 1024,
-                },
-            ),
-        }
-    )
-    page_client = FakeClient(
-        {
-            "kusonime.com/frieren": FakeResponse(
-                200, text=KUSONIME_PAGE + "Episode 01-12"
-            )
-        }
-    )
-    provider = KusonimeProvider(client=client, page_client=page_client)
-    episodes, _ = _run(provider.episodes("kusonime:5789", 1))
-    # Quality came from the block <strong>, the range from pixeldrain's
-    # own name — mega.nz is ignored (no verified route).
-    assert [e.episode for e in episodes] == list(range(1, 17))
-    sources = _run(provider.sources("kusonime:5789", "5789|7"))
-    # pixeldrain 360 + pixeldrain 720 + Drive 720 — every verified route
-    assert len(sources) == 3
-    assert {s.resolution for s in sources} == {360, 720}
-    pixeldrain = [s for s in sources if s.url.startswith("https://pixeldrain.com")]
-    assert len(pixeldrain) == 2
-    assert next(s for s in pixeldrain if s.resolution == 360).size == "500MB"
-    drive = next(s for s in sources if "drive.usercontent" in s.url)
-    assert drive.resolution == 720  # only the 720 block has a Drive link
-    assert drive.headers.get("Referer") == "https://drive.google.com/"
-
-
-def test_kusonime_block_quality_and_evidence_ranges():
-    from services.providers.kusonime import (
-        _batch_range,
-        _block_quality,
-        _is_archive,
-        _is_video,
-        _pixeldrain_id,
-        _quality_from_slug,
-        _range_from_slug,
-    )
-
-    # quality from the block header (the anchor text is a host label).
-    # The site has served BOTH header shapes: '360P' and pixel
-    # dimensions ('848×352') whose height is the quality.
-    assert _block_quality("360P") == 360
-    assert _block_quality("1080P") == 1080
-    assert _block_quality("848×352") == 352
-    assert _block_quality("1280×720") == 720
-    assert _block_quality("1920×1080") == 1080
-    assert _block_quality("Pixeldrain") == 0  # labels never become quality
-    # ranges from real evidence, never block order
-    assert _range_from_slug("https://acefile.co/frieren-s2-01-15-480p-rar") == (1, 15)
-    assert _quality_from_slug("https://acefile.co/frieren-s2-01-15-480p-rar") == 480
-    assert _batch_range("[Kusonime] Frieren BD 01-16 360p.rar") == (1, 16)
-    assert _batch_range("[Zen-Kuso] Manusia Satu Pukulan Musim 3 720p.rar") is None
-    # classification: archive vs streamable video
-    assert _is_archive("[Kusonime] x 01-16 720p.rar")
-    assert _is_video("[Kusonime] JJK Execution (2025) HDCAM [1080p].mkv")
-    assert _is_video("[Kusonime] JJK [360p].mp4")
-    assert not _is_video("[Kusonime] x 01-16 720p.rar")
-    assert _pixeldrain_id("https://pixeldrain.com/u/abc123") == "abc123"
 
 
 def test_animeout_sources_serves_every_quality_of_the_episode():

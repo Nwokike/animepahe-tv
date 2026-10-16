@@ -1,7 +1,7 @@
 """Artwork geometry tests — the stdlib sniffer and the shape decision table.
 
 The synthetic-header battery is the same one proven against the live CDNs
-(anikato portrait / kusonime landscape / kayoanime landscape all parsed
+(anikato portrait / kayoanime landscape all parsed
 from the first 4 KiB), so these tests pin the exact contract the probe
 relies on.
 """

@@ -121,7 +121,7 @@ def test_schedule_answers_only_for_a_source_that_has_one():
 
 
 def test_schedule_is_honest_for_any_other_source():
-    controller = _controller(_Router("kusonime"))
+    controller = _controller(_Router("kayoanime"))
     state.schedule_tabs = ["unchanged"]
     asyncio.run(controller.load_schedule())
     assert controller.snacks == ["This source has no schedule."]

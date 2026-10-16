@@ -1,11 +1,11 @@
 # Roadmap — the multi-source app
 
-AnimePahe TV is a hybrid of independent backends: five sources (AniKato,
-AnimeOut, AnimePahe, Kusonime, Kayoanime), each treated like its own app —
+AnimePahe TV is a hybrid of independent backends: four sources (AniKato,
+AnimeOut, AnimePahe, Kayoanime), each treated like its own app —
 its own catalog, artwork, playback and Cloudflare story. One source is
 resolved at startup behind a splash: a stored pin, or otherwise the FIXED
 ORDER — the app tries AniKato first, then AnimeOut, then AnimePahe, then
-Kusonime/Kayoanime, and the first one that answers serves the session.
+Kayoanime, and the first one that answers serves the session.
 There is no "automatic" option anywhere, in any UI (owner's order,
 2026-10-15). While the app is open the source changes only when the owner
 changes it. Grid orientation is automatic: the screen sniffs the shape of
@@ -47,7 +47,7 @@ swarm audit, and `docs/reference/`.
 
 > **Revised 2026-10-15 (the owner's order).** The "Automatic" concept is
 > deleted everywhere — picker, settings, header badge. The app tries the
-> FIXED order **AniKato → AnimeOut → AnimePahe → Kusonime → Kayoanime**
+> FIXED order **AniKato → AnimeOut → AnimePahe → Kayoanime**
 > (`PROVIDER_ORDER` in providers/base.py); the first that answers serves the
 > session, in memory only. A stored provider name pins directly. The
 > description below keeps Steps 1–8 as shipped; Step 2's "auto race" is what
@@ -87,10 +87,10 @@ at the display edge only), and the exit gate below. 491 passing under
 lives at the end of docs/testing-findings.md.
 
 1. **Episode paging.** 24 per page, rendered with the existing pager
-   (Prev · Page N · Next). The four providers that return everything at once
-   (anikato, animeout, kusonime, kayoanime) slice their cached full list;
+   (Prev · Page N · Next). The three providers that return everything at once
+   (anikato, animeout, kayoanime) slice their cached full list;
    animepahe keeps its server pages (its own shape). Fixes the 170-episode
-   dump and kusonime's 1000+-episode lists.
+   dump.
 2. **Count honesty.** Unknown counts render as nothing — never "0"/"0p".
    AnimeOut's `Episodes:` parses from the post excerpt (probe: 220/24/4/1;
    mega-posts empty → hidden); the series-download dialog's zero guard.

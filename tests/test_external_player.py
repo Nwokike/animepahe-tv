@@ -29,7 +29,7 @@ def test_deep_link_carries_base64_m3u8():
 
 def test_no_stream_never_launches_anything(monkeypatch):
     """Live run: with no resolved m3u8 the old code built
-    animepahe.com/play/kusonime:9538/… (another backend's session — a URL
+    animepahe.com/play/foreign:9538/… (another backend's session — a URL
     that can never resolve) and launched it, raising the KTV install
     dialog for nothing. Now it says the truth and launches nothing."""
     import asyncio
@@ -54,7 +54,7 @@ def test_no_stream_never_launches_anything(monkeypatch):
 
     controller._resolve_anime = fake_resolve
 
-    asyncio.run(controller._open_external_player("kusonime:9538", "9538|90"))
+    asyncio.run(controller._open_external_player("animeout:9538", "9538|90"))
 
     assert launches == []
     assert snacks == ["No playable stream for this episode."]

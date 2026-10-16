@@ -58,7 +58,6 @@ WP_CATEGORIES = [
     [
         ("services.providers.animeout", "AnimeOutProvider", "animeout.xyz"),
         ("services.providers.kayoanime", "KayoanimeProvider", "kayoanime"),
-        ("services.providers.kusonime", "KusonimeProvider", "kusonime"),
     ],
 )
 async def test_wp_providers_discover_their_own_categories(

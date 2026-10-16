@@ -196,9 +196,7 @@ def test_episodes_walk_folders_dedupe_and_use_file_ids():
 
 
 def test_sources_rejects_a_foreign_session_shape():
-    """The flet-run bug: a kusonime session ("48025|1") built an
-    UNVALIDATED Drive URL that won the router race over the real owner.
-    A pipe/slash/space session can never be a Drive file id — return []
+    """A pipe/slash/space session can never be a Drive file id — return []
     (an empty answer is honest; the owner provider gets the call)."""
     import asyncio
 

@@ -310,8 +310,8 @@ def test_direct_download_falls_back_to_the_url_extension(tmp_path):
 
 
 def test_job_paths_are_stable_and_legal_on_every_platform(tmp_path):
-    """Our session ids carry a namespace colon ('kayoanime:961') and the
-    kusonime ones a pipe ('5789|7'). NTFS rejects both, which is how every
+    """Our session ids carry a namespace colon ('kayoanime:961') and some
+    have a pipe ('slug|7'). NTFS rejects both, which is how every
     download silently failed to start on Windows: makedirs raised
     WinError 267 inside the spawned task, so the row was saved as partial
     and nothing ever downloaded. The mapping is stable, so a resume (or a
@@ -323,14 +323,14 @@ def test_job_paths_are_stable_and_legal_on_every_platform(tmp_path):
     mgr = DownloadManager(store=None, downloads_dir=str(tmp_path))
     first = mgr._job_dir("kayoanime:961", "f274")
     assert mgr._job_dir("kayoanime:961", "f274") == first  # stable
-    assert mgr._job_dir("kusonime:5789", "5789|7") == mgr._job_dir(
-        "kusonime:5789", "5789|7"
+    assert mgr._job_dir("anikato:5789", "slug|7") == mgr._job_dir(
+        "anikato:5789", "slug|7"
     )
     # the directory is actually creatable now
     os.makedirs(first, exist_ok=True)
     assert os.path.isdir(first)
     # and the pipe session too
-    pipe_dir = mgr._job_dir("kusonime:5789", "5789|7")
+    pipe_dir = mgr._job_dir("anikato:5789", "slug|7")
     os.makedirs(pipe_dir, exist_ok=True)
     assert os.path.isdir(pipe_dir)
     # remove_job deletes what start_direct created

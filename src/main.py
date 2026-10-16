@@ -191,7 +191,6 @@ class AppController:
         from services.animeout_solver import AnimeOutSolver
         from services.providers.animepahe_provider import AnimePaheProvider
         from services.providers.kayoanime import KayoanimeProvider
-        from services.providers.kusonime import KusonimeProvider
         from services.router import ProviderRouter
 
         self.router = ProviderRouter(
@@ -201,7 +200,6 @@ class AppController:
                     solver=AnimeOutSolver(store=self.store),
                 ),
                 AnimePaheProvider(self.scraper),
-                KusonimeProvider(),
                 KayoanimeProvider(),
             ]
         )
@@ -809,7 +807,7 @@ class AppController:
     ) -> str | None:
         """Source URL -> playable URL, per the serving provider's
         capabilities. kwik_resolve providers (AnimePahe) unpack through
-        Kwik; others are already playable (anikato m3u8s, kusonime
+        Kwik; others are already playable (anikato m3u8s, direct
         files). None means resolution failed.
 
         `provider_name` overrides the owner-derived provider — the title
@@ -833,7 +831,7 @@ class AppController:
         falling back to a direct fetch when the proxy isn't running.
 
         Only HLS playlists are probed. A DIRECT file source (kayoanime's
-        Drive MKV, a pixeldrain batch) has no variants, and fetching it
+        Drive MKV) has no variants, and fetching it
         here read the ENTIRE video body as text — the flet run log showed
         a play-episode task dying on primp.TimeoutError for a Drive file,
         with the player never opening.
@@ -957,8 +955,8 @@ class AppController:
 
         HLS resources route through the loopback proxy (the hosts
         fingerprint TLS and reject the video backends' client — a raw
-        m3u8 fails with "Failed to open"); direct files (kusonime's
-        .mkv) play as-is. ``source_*`` carries the CHOSEN SOURCE's own
+        m3u8 fails with "Failed to open"); direct files (.mkv, .mp4)
+        play as-is. ``source_*`` carries the CHOSEN SOURCE's own
         headers (anikato's m3u8s need Referer megaplay.buzz; animepahe's
         need the kwik pair) so the player and the proxy rebuilds send
         exactly what the CDN requires.
@@ -978,8 +976,8 @@ class AppController:
         )
         referer = headers.get("Referer", "https://kwik.cx/")
         play_url = resource
-        # Only HLS routes through the proxy; progressive files (a .mkv
-        # from kusonime) play directly with their own headers.
+        # Only HLS routes through the proxy; progressive files
+        # play directly with their own headers.
         if self.hls_proxy is not None and ".m3u8" in resource:
             try:
                 play_url = self.hls_proxy.get_proxy_url(
@@ -1405,7 +1403,7 @@ class AppController:
 
         A stored preference pins directly (the owner's explicit choice).
         With no preference the app tries the fixed PROVIDER_ORDER — AniKato
-        first, then AnimeOut, then AnimePahe, then Kusonime/Kayoanime — and
+        first, then AnimeOut, then AnimePahe, then Kayoanime — and
         the first one that answers serves the session, pinned IN MEMORY ONLY
         (nothing is stored, so every launch re-tries the order). There is no
         user-facing "automatic" concept: this order is simply how the app
@@ -1418,7 +1416,7 @@ class AppController:
             state.startup_ready = False
             state.startup_stage = "Finding a source…"
             preference = await self.store.get_backend()
-            if preference and preference != "auto":
+            if preference and preference != "auto" and self.router.get(preference):
                 self.router.set_pin(preference)
             else:
                 self.router.set_pin(await self._ordered_backend())
@@ -1601,9 +1599,8 @@ class AppController:
 
         if not self._resolved_m3u8:
             # Nothing resolved. The old path handed the site's play page to
-            # KTV — but that URL embeds ANOTHER backend's session (a
-            # kusonime one produced animepahe.com/play/kusonime:9538/…,
-            # which can never resolve), and a launch with no stream at all
+            # KTV — but that URL embeds ANOTHER backend's session,
+            # which can never resolve, and a launch with no stream at all
             # just raised the install dialog for nothing. Say what is true
             # instead; a backend with no stream is a result, not a handoff.
             logger.warning("external fallback with no resolved stream")
@@ -2070,7 +2067,7 @@ class AppController:
             # SAME render. The previous anime's rows used to stay clickable
             # while the new load ran (resolve + CF retries take seconds),
             # so a tap paired the NEW anime with the OLD anime's episode
-            # session — "player opening for kusonime:48968 / 48025|1".
+            # session.
             state.episodes = []
             state.episodes_has_more = True
         state.current_anime_session = anime_session

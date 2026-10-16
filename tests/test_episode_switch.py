@@ -1,6 +1,6 @@
 """Episode-list switch guard — the wrong-episode playback bug.
 
-The flet run log showed `SOURCES session=kusonime:48968 episode=48025|1`:
+The flet run log showed `SOURCES session=anime:48968 episode=48025|1`:
 load_anime flipped `current_anime_session` to the NEW anime instantly, but
 the PREVIOUS anime's episode rows stayed rendered (and clickable) while
 the new load ran through resolve + Cloudflare retries for seconds. A tap
@@ -75,13 +75,13 @@ def _restore(snap):
 def test_switching_anime_clears_episodes_before_the_load():
     snap = _snapshot()
     try:
-        state.current_anime_session = "kusonime:48025"
+        state.current_anime_session = "kayoanime:48025"
         state.episodes = [_episode("48025|1"), _episode("48025|2")]
         state.selected_anime = {}
 
         router = _Router()
         controller = _controller(router)
-        asyncio.run(controller.load_anime("kusonime:48968"))
+        asyncio.run(controller.load_anime("kayoanime:48968"))
 
         assert router.seen == [[]], (
             "the previous anime's rows were still present when the new "
@@ -95,13 +95,13 @@ def test_switching_anime_clears_episodes_before_the_load():
 def test_reloading_the_same_anime_keeps_rows_during_pagination():
     snap = _snapshot()
     try:
-        state.current_anime_session = "kusonime:48025"
+        state.current_anime_session = "kayoanime:48025"
         rows = [_episode("48025|1")]
         state.episodes = list(rows)
 
         router = _Router()
         controller = _controller(router)
-        asyncio.run(controller.load_episodes("kusonime:48025", 2))
+        asyncio.run(controller.load_episodes("kayoanime:48025", 2))
 
         # Same session: no pre-fetch clear (pagination keeps rows visible).
         assert router.seen == [list(rows)]

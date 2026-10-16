@@ -113,13 +113,12 @@ bench, each certified by live probes from this machine:
 
 | Provider | Legs | Verdict |
 |---|---|---|
-| anikato (anikototv.to) | catalog + episodes + **streaming files** | COMPLETE — RC4 VRF (`base64(RC4("simple-hash", id))`, key hardcoded in the site's JS) unlocks the episode list; MegaPlay `getSources` `enc` decrypts (AES-256-CBC, keys hardcoded in megaplay's own JS) to a DIRECT playable master.m3u8 (#EXTM3U VOD) with 9 subtitle tracks + skip data. Sub + dub. |
-| animeout (WordPress) | catalog + episodes | files CF-walled at public.animeout.xyz (httpx AND primp 403) — durable resolve code, lights up if the wall clears |
-| kusonime (WordPress) | catalog + episodes + batch files (pixeldrain direct, verified Accept-Ranges) | COMPLETE for downloads; batch archives, not per-episode streams |
-| animepahe | catalog + episodes + streaming files | untouched; CF-walled catalog → breaker trips, files still attempted; safety net LAST |
+| anikato (anikototv.to) | catalog + episodes + **streaming files** | COMPLETE — RC4 VRF unlocks the episode list; MegaPlay decrypts to DIRECT playable master.m3u8 with subtitle tracks + skip data. Sub + dub. |
+| animeout (WordPress) | catalog + episodes + files | DDL landing chain resolves to public.animeout.xyz; solver captures clearance and sends DDL referer. |
+| animepahe | catalog + episodes + streaming files | untouched; CF-walled catalog → breaker trips, files still attempted; safety net |
+| kayoanime (WordPress) | catalog + episodes + streaming files | COMPLETE — WordPress catalog, Drive folders (BOX ranges / season folders), 206 ranged streaming via alt=media, keyless download route via usercontent. |
 
-REJECTED as providers (not complete): kayoanime (files are Drive
-folders — a resolver project), Telegram (web previews carry no file
+REJECTED / REMOVED as providers: kusonime (Indonesian-subbed, removed per owner), Telegram (web previews carry no file
 bytes; MTProto-only), AniList/TVMaze/MALSync (metadata glue — the
 owner's rule: every provider must be a whole app in its own way).
 

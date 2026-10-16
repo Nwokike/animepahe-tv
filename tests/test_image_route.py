@@ -3,7 +3,7 @@
 The owner's web run showed zero images: the browser refuses every
 cross-origin image URL (no CORS headers on the art hosts), and AnimeOut's
 host answers a Cloudflare "Just a moment" 403 to anything but a browser
-session (live probe 2026-10-15: anikato/kusonime/kayoanime CDNs are 200
+session (live probe 2026-10-15: anikato/kayoanime CDNs are 200
 bare and with referer; www.animeout.xyz 403s either way). The loopback
 proxy's GET /image (b64 url + referer, content-type forward, 8 MB cap, mem
 cache, ACAO) is the one path that fixes CORS everywhere and can ever carry

@@ -156,11 +156,11 @@ def _filename_from_disposition(value) -> str:
 def _safe_component(name, fallback: str = "unknown") -> str:
     """One path component every platform this app ships on accepts.
 
-    Our session ids carry a namespace colon ('kayoanime:961') and the
-    kusonime ones a pipe ('5789|7') — both are NTFS-illegal, and
-    ``makedirs`` raises WinError 267 on them, which silently killed every
-    download on Windows. The mapping is STABLE (the same session always
-    maps to the same directory) because resume has to find the job again.
+    Our session ids carry a namespace colon ('kayoanime:961') or separators —
+    both are NTFS-illegal, and ``makedirs`` raises WinError 267 on them,
+    which silently killed every download on Windows. The mapping is STABLE
+    (the same session always maps to the same directory) because resume has
+    to find the job again.
     """
     text = _ILLEGAL_PATH_CHARS.sub("_", str(name or "")).strip(" .")
     return text[:80] or fallback

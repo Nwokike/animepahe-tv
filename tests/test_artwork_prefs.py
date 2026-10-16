@@ -23,11 +23,11 @@ def test_round_trip_and_reload(monkeypatch, tmp_path):
         store = JsonStore(filename="prefs.json")
         assert await store.get_artwork_defaults() == {}
         await store.save_artwork_default("anikato", "latest", "portrait")
-        await store.save_artwork_default("kusonime", "episodes", "landscape")
+        await store.save_artwork_default("animeout", "episodes", "landscape")
         return await store.get_artwork_defaults()
 
     learned = asyncio.run(_run())
-    assert learned == {"anikato:latest": "portrait", "kusonime:episodes": "landscape"}
+    assert learned == {"anikato:latest": "portrait", "animeout:episodes": "landscape"}
 
     async def _reload():
         return await JsonStore(filename="prefs.json").get_artwork_defaults()

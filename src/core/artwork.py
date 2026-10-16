@@ -55,7 +55,7 @@ MAJORITY = 0.6
 
 # Static first-paint seeds, per provider and surface, from the certified
 # backend maps plus live probes (anikato posters 266x400 portrait;
-# kusonime featured 1919x1079 and kayoanime 1280x720 landscape; animepahe
+# kayoanime 1280x720 landscape; animepahe
 # stills landscape + posters portrait). Detection refines these within a
 # second and the learned default remembers the result across launches.
 SEED_MODES: dict[str, dict[str, str]] = {
@@ -69,11 +69,6 @@ SEED_MODES: dict[str, dict[str, str]] = {
         "search": PORTRAIT,
         "discover": PORTRAIT,
         "episodes": PORTRAIT,
-    },
-    "kusonime": {
-        "latest": LANDSCAPE,
-        "search": LANDSCAPE,
-        "episodes": LANDSCAPE,
     },
     "animeout": {
         "latest": LANDSCAPE,
@@ -101,13 +96,12 @@ FALLBACK_MODE: dict[str, str] = {
 PROBE_REFERERS: dict[str, str] = {
     "animepahe": "https://animepahe.com/",
     "anikato": "https://anikototv.to/",
-    "kusonime": "https://kusonime.com/",
     "animeout": "https://www.animeout.xyz/",
     "kayoanime": "https://kayoanime.com/",
 }
 
 # Hosts whose artwork 403s a direct fetch. Live probe 2026-10-15: the
-# anikato/kusonime/kayoanime image CDNs answer 200 both bare and with their
+# anikato/kayoanime image CDNs answer 200 both bare and with their
 # referer; www.animeout.xyz answers a Cloudflare "Just a moment" 403 either
 # way — the same wall family as its files. The loopback /image route is the
 # one place such a host can ever be given headers (or a clearance) later.

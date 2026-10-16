@@ -40,9 +40,9 @@ def test_direct_files_are_never_probed_for_variants():
     direct_files = [
         # kayoanime's keyed Drive route (the exact URL from the log)
         "https://www.googleapis.com/drive/v3/files/1MQZpgV0yg33Dpr_tOkImhBgLLgydbTEe?alt=media&key=k",
-        # kusonime's keyless Drive download route
+        # keyless Drive download route
         "https://drive.usercontent.google.com/download?id=abc&export=download&confirm=t",
-        # a pixeldrain direct file with a query signature
+        # a direct file with a query signature
         "https://cdn.example/file.mkv?sig=1",
     ]
     for url in direct_files:

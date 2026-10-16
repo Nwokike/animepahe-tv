@@ -15,7 +15,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from services.providers.animeout import AnimeOutProvider  # noqa: E402
 from services.providers.kayoanime import KayoanimeProvider  # noqa: E402
-from services.providers.kusonime import KusonimeProvider  # noqa: E402
 
 
 class _Resp:
@@ -53,15 +52,6 @@ def test_animeout_every_param_is_a_string():
     _assert_all_strings(client.param_sets, "animeout")
     # The exact regression: the browse page must arrive as a string.
     assert any(p.get("page") == "2" for p in client.param_sets)
-
-
-def test_kusonime_every_param_is_a_string():
-    client = _RecClient()
-    provider = KusonimeProvider(client=client)
-    asyncio.run(provider.browse({}, 2))
-    asyncio.run(provider.latest_releases(1))
-    asyncio.run(provider.search("x", 3))
-    _assert_all_strings(client.param_sets, "kusonime")
 
 
 def test_kayoanime_every_param_is_a_string():

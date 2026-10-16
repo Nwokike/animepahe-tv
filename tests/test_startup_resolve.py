@@ -99,7 +99,6 @@ def test_the_fixed_order_is_the_owners_order():
         "anikato",
         "animeout",
         "animepahe",
-        "kusonime",
         "kayoanime",
     )
 
@@ -144,7 +143,6 @@ def test_the_first_in_order_that_answers_serves():
             "anikato": True,
             "animeout": True,
             "animepahe": True,
-            "kusonime": True,
             "kayoanime": True,
         }
     )
@@ -169,7 +167,7 @@ def test_animeout_down_falls_to_animepahe():
             "anikato": False,
             "animeout": False,
             "animepahe": True,
-            "kusonime": True,
+            "kayoanime": True,
         }
     )
     asyncio.run(controller.resolve_startup())
@@ -177,9 +175,9 @@ def test_animeout_down_falls_to_animepahe():
 
 
 def test_the_rest_follow_after_the_mains():
-    controller = _controller(health={"kusonime": True, "kayoanime": True})
+    controller = _controller(health={"kayoanime": True})
     asyncio.run(controller.resolve_startup())
-    assert controller.router.pin == "kusonime"
+    assert controller.router.pin == "kayoanime"
 
 
 def test_all_down_falls_back_to_the_first_in_order():
@@ -211,12 +209,12 @@ def test_a_manual_switch_reruns_the_gate():
     controller = _controller(pref="")
 
     async def scenario():
-        await controller.set_backend_pin("kusonime")
+        await controller.set_backend_pin("kayoanime")
         await asyncio.sleep(0.01)  # let the spawned gate resolve run
 
     asyncio.run(scenario())
-    assert controller.store.saved == ["kusonime"]
-    assert controller.router.pin == "kusonime"
+    assert controller.store.saved == ["kayoanime"]
+    assert controller.router.pin == "kayoanime"
     assert controller.calls == [1]
     assert state.startup_ready is True
 
