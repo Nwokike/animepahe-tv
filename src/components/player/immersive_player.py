@@ -814,7 +814,7 @@ class ImmersivePlayer(ft.Stack):
     # "Return" vs "Enter", "Esc" vs "Escape") — CollabShell normalizes by
     # lowercase + de-space + alias and so do we. The old exact-string
     # compares are why only Space ever matched.
-    _KEY_ALIASES = {"return": "enter", "esc": "escape", "spacebar": "space"}
+    _KEY_ALIASES: ClassVar[dict] = {"return": "enter", "esc": "escape", "spacebar": "space"}
     _SEEK_BACK = ("arrowleft", "left", "j")
     _SEEK_FORWARD = ("arrowright", "right", "l")
     _VOLUME_UP = ("arrowup", "up")
@@ -862,14 +862,12 @@ class ImmersivePlayer(ft.Stack):
         if key == "f":
             self.toggle_fullscreen()
             return True
-        if key in self._NEXT:
-            if self.on_next is not None:
-                self.on_next()
-                return True
-        if key in self._PREV:
-            if self.on_previous is not None:
-                self.on_previous()
-                return True
+        if key in self._NEXT and self.on_next is not None:
+            self.on_next()
+            return True
+        if key in self._PREV and self.on_previous is not None:
+            self.on_previous()
+            return True
         if key in (">", "."):
             self._cycle_speed()
             return True

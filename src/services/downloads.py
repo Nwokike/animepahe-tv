@@ -687,10 +687,9 @@ class DownloadManager:
             if self._store is not None:
                 await self._store.save_download_error(episode_session, str(exc))
 
-        try:
+        with contextlib.suppress(RuntimeError):
+            # No running loop (interpreter teardown): nothing to record.
             asyncio.get_running_loop().create_task(_record())
-        except RuntimeError:
-            pass
 
     async def close(self):
         for session in list(self._tasks):
