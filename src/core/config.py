@@ -25,6 +25,11 @@ CACHE_TTL_LATEST = 300
 CACHE_TTL_SEARCH = 600
 CACHE_TTL_EPISODES = 3600
 
+# The home-feed paint-first snapshot (cache tier). Longer than any provider
+# TTL on purpose: it is not truth, it is the catalog the user saw last —
+# shown instantly at launch while the live fetch revalidates behind it.
+HOME_FEED_SNAPSHOT_TTL = 21600  # 6 h
+
 # Provider endpoints (the complete bench; see docs/decisions.md).
 ANIMEOUT_API = "https://animeout.xyz/wp-json/wp/v2"
 

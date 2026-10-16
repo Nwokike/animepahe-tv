@@ -679,6 +679,15 @@ def _build_backend_picker(state, controller) -> ft.Control:
     announcing one."""
     from services.providers.base import PROVIDER_ORDER
 
+    # One short line per provider: what it is and what it costs. Kept to a
+    # few words — a picker is for choosing, not reading.
+    hints = {
+        "anikato": "Fast · direct streams · subtitles & dubs",
+        "animeout": "Huge catalogue · download links",
+        "animepahe": "Needs a one-time human check",
+        "kayoanime": "English subs · powers Discover",
+    }
+
     health = controller.sources_status() if hasattr(controller, "sources_status") else {}
     listed = {*health, (state.current_source_name or "").strip()} - {""}
     providers = [n for n in PROVIDER_ORDER if n in listed] + [
@@ -703,12 +712,31 @@ def _build_backend_picker(state, controller) -> ft.Control:
             if h.get("last_error"):
                 detail += f" · {str(h['last_error'])[:40]}"
         selected = current == name
+        label_column = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Container(width=8, height=8, border_radius=4, bgcolor=colour),
+                        ft.Container(width=8),
+                        ft.Text(name.capitalize(), size=13, weight=ft.FontWeight.W_600),
+                    ],
+                    spacing=4,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                ft.Text(
+                    hints.get(name, ""),
+                    size=10,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                    visible=bool(hints.get(name)),
+                ),
+            ],
+            spacing=2,
+            tight=True,
+        )
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Container(width=8, height=8, border_radius=4, bgcolor=colour),
-                    ft.Container(width=8),
-                    ft.Text(name.capitalize(), size=13, weight=ft.FontWeight.W_600),
+                    label_column,
                     ft.Container(expand=True),
                     ft.Text(detail, size=11, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.Text(

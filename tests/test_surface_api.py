@@ -137,3 +137,65 @@ def test_the_two_known_phantoms_stay_gone():
         options=[ft.dropdown.Option("auto", "Automatic")], on_select=lambda e: None
     )
     assert dropdown.on_select is not None
+
+
+def test_no_ft_icon_or_color_constant_is_a_phantom():
+    """``ft.Icons.X`` / ``ft.Colors.X`` where the installed flet has no
+    such attribute.
+
+    This is the downloads-screen blocker of 2026-10-16: a single
+    ``ft.Icons.DOWNLOAD_OUTLINE_ROUNDED`` (a name that exists in neither
+    flet 1.0.4's enum nor any older line) sat on the "partial row" branch
+    — the branch a user only reaches after a download fails or is
+    interrupted. The screen then crashed on open for exactly that user,
+    while every test fixture (complete/queued rows only) passed.
+    """
+    import re
+
+    icons = set(dir(ft.Icons))
+    colors = set(dir(ft.Colors))
+    icon_pat = re.compile(r"ft\.Icons\.([A-Z0-9_]+)")
+    color_pat = re.compile(r"ft\.Colors\.([A-Z0-9_]+)")
+    problems: list[str] = []
+    for path in _python_files():
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        for match in icon_pat.finditer(text):
+            if match.group(1) not in icons:
+                problems.append(f"{path}: ft.Icons.{match.group(1)}")
+        for match in color_pat.finditer(text):
+            if match.group(1) not in colors:
+                problems.append(f"{path}: ft.Colors.{match.group(1)}")
+    assert not problems, "phantom flet constants:\n" + "\n".join(problems)
+
+
+def test_every_download_row_state_builds():
+    """The downloads screen renders a row for EVERY state combination —
+    including the partial row with no live progress, which is the exact
+    shape a killed/interrupted download leaves behind (and the branch the
+    phantom icon hid in)."""
+    from screens.downloads_screen import _episode_row
+
+    class _Ctl:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    controller = _Ctl()
+    progress_cases = [
+        None,
+        {"state": "downloading", "percent": 42.5},
+        {"state": "downloading", "percent": None},  # unknown length
+        {"state": "queued"},
+        {"state": "stopped", "bytes": 2048},
+        {"state": "failed"},
+        {"state": "complete"},
+    ]
+    for state in ("partial", "complete"):
+        for progress in progress_cases:
+            row = _episode_row(
+                {"state": state, "episode_num": 8, "size_bytes": 3757},
+                "s1",
+                controller,
+                progress,
+            )
+            assert row is not None

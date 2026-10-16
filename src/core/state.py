@@ -159,6 +159,11 @@ class AppState:
     # The header badge's provider picker (shell-owned dialog).
     backend_picker_open: bool = False
 
+    # Settings -> Storage: live cache-tier size and a bump-to-re-render
+    # counter (computed on the fly — it is a directory walk).
+    cache_bytes: int = 0
+    storage_version: int = 0
+
     # Player (in-app playback)
     player_open: bool = False
     player_spec: dict | None = None

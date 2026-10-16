@@ -195,52 +195,16 @@ def test_single_rendition_start_clears_the_spinner_even_when_it_fails():
     assert "e1" not in state.starting_downloads
 
 
-def test_the_providers_own_download_route_is_not_reresolved():
-    """A provider-authored download URL (animepahe's pahe.win link) is a
-    file. Feeding it through the owner's kwik resolver can only fail — and
-    the fallback would then discard the site's own offering."""
-    import asyncio
-
-    import main as app_main
-
-    controller = app_main.AppController.__new__(app_main.AppController)
-    resolves: list[str] = []
-
-    async def _resolve(url, session, provider_name=None):
-        resolves.append(url)
-        return url
-
-    controller._resolve_source = _resolve
-    controller._owner_of = lambda session: "animepahe"
-    controller.router = type("R", (), {"get": lambda self, name: None})()
-
-    kind, filename = "file", ""
-    captured = {}
-
-    class _Downloads:
-        active_jobs: ClassVar[list] = []
-
-        async def detect_kind(self, url, headers):
-            return (kind, filename)
-
-        async def start_direct(self, episode_session, url, headers, metadata):
-            captured.update({"url": url, "metadata": metadata})
-
-    class _Store:
-        async def get_downloads(self):
-            return {}
-
-        async def save_download(self, session, row):
-            pass
-
-    controller.downloads = _Downloads()
-    controller.store = _Store()
-
-    from core.state import Source, state
+def test_a_landing_page_download_url_is_dropped_not_downloaded():
+    """Animepahe's download_url is a pahe.win SHORTLINK — a landing page
+    that redirects to the same kwik player, not a file. The owner's run
+    (2026-10-16) showed the old "download_url is direct" rule saving 3.7 KB
+    of HTML as the episode. A provider that says its download_url is not a
+    file (direct_download_url=False) must have it dropped, so the resolve
+    chain can only see the real source URL."""
+    from core.state import Source
     from main import _source_choices
 
-    state.starting_downloads = set()
-    state.downloads = {}
     src = Source(
         url="https://kwik.si/e/abc",
         resolution=1080,
@@ -248,13 +212,17 @@ def test_the_providers_own_download_route_is_not_reresolved():
         fansub="Sub",
         download_url="https://pahe.win/xyz",
     )
-    choices = _source_choices([src])
+    # animepahe's capability: the download_url is not a file.
+    choices = _source_choices([src], direct_download=False)
+    assert choices[0]["direct"] is False
+    assert choices[0]["download_url"] == ""
+    # ... and the resolve chain therefore uses the kwik URL.
+    assert choices[0]["url"] == "https://kwik.si/e/abc"
+
+    # The flip side: a provider whose download_url IS a file keeps it.
+    choices = _source_choices([src], direct_download=True)
     assert choices[0]["direct"] is True
     assert choices[0]["download_url"] == "https://pahe.win/xyz"
-    asyncio.run(controller._begin_download(choices[0], "s1", "e1", None, {}))
-    # the pahe.win URL went straight through, and the kwik URL never did
-    assert resolves == []
-    assert captured["url"] == "https://pahe.win/xyz"
 
 
 def test_a_stream_source_is_still_resolved_normally():

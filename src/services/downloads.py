@@ -670,8 +670,27 @@ class DownloadManager:
             cancel.set()
 
     def _on_done(self, episode_session: str):
-        self._tasks.pop(episode_session, None)
+        task = self._tasks.pop(episode_session, None)
         self._cancel.pop(episode_session, None)
+        if task is None or task.cancelled():
+            return
+        # Retrieve the exception: an unretrieved one is logged by asyncio
+        # as "Task exception was never retrieved" and the row would sit on
+        # "partial" forever with no error to show. Recording it here means
+        # a crashed writer surfaces as the row's Retry state.
+        exc = task.exception()
+        if exc is None:
+            return
+        logger.warning("download task failed for %s: %s", episode_session, exc)
+
+        async def _record() -> None:
+            if self._store is not None:
+                await self._store.save_download_error(episode_session, str(exc))
+
+        try:
+            asyncio.get_running_loop().create_task(_record())
+        except RuntimeError:
+            pass
 
     async def close(self):
         for session in list(self._tasks):
@@ -997,15 +1016,38 @@ class DownloadManager:
         DownloadManager._atomic_write_text(path, json.dumps(manifest, indent=2, default=str))
 
     @staticmethod
+    def _replace_with_retry(tmp: str, path: str, attempts: int = 5) -> None:
+        """``os.replace`` with a short retry.
+
+        On Windows the destination can be transiently locked by an
+        antivirus scan or the search indexer right after the previous
+        write; the plain replace then raises WinError 5 and — because the
+        call sits inside a fire-and-forget task — killed the whole
+        download silently (owner's run, 2026-10-16: a manifest write died
+        with PermissionError and the task exception was never retrieved).
+        """
+        for attempt in range(attempts):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp)
+                    raise
+                # Short, growing backoff: the lock is held for milliseconds.
+                time.sleep(0.05 * (attempt + 1))
+
+    @staticmethod
     def _atomic_write_text(path: str, text: str) -> None:
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
-        os.replace(tmp, path)
+        DownloadManager._replace_with_retry(tmp, path)
 
     @staticmethod
     def _atomic_write(path: str, data: bytes) -> None:
         tmp = path + ".tmp"
         with open(tmp, "wb") as f:
             f.write(data)
-        os.replace(tmp, path)
+        DownloadManager._replace_with_retry(tmp, path)

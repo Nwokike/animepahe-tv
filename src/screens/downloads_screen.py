@@ -158,7 +158,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
                         if job_state == STATE_STOPPED
                         else ft.Icons.ERROR_OUTLINE_ROUNDED
                         if job_state == STATE_FAILED
-                        else ft.Icons.DOWNLOAD_OUTLINE_ROUNDED,
+                        else ft.Icons.DOWNLOAD_ROUNDED,
                         size=20,
                         color=AppColors.SUCCESS
                         if complete

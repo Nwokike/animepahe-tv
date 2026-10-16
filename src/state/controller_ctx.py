@@ -61,6 +61,8 @@ class ControllerMethods:
     retry_cloudflare: Callable[[], Any] = lambda: None
     load_search: Callable[..., Any] = lambda query, page=1: None
     clear_search_history: Callable[[], Any] = lambda: None
+    measure_cache: Callable[[], Any] = lambda: None
+    clear_cache: Callable[[], Any] = lambda: None
     record_search_selection: Callable[[Any], Any] = lambda anime: None
     remove_search: Callable[..., Any] = lambda title, session="": None
 

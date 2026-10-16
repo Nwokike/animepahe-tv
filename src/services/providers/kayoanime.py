@@ -166,6 +166,9 @@ class KayoanimeProvider:
         "episodes": True,
         "episode_stills": False,  # no per-episode stills exist — poster only
         "kwik_resolve": False,  # ready direct files
+        # download_url is the usercontent route: a real MKV (keyless,
+        # filename in Content-Disposition) — fetched as-is.
+        "direct_download_url": True,
         "subtitles": False,  # dual-audio/sub tracks are inside the MKV
     }
 

@@ -14,12 +14,14 @@ import os
 import flet as ft
 
 from app_shell import AppShell
+from core.config import HOME_FEED_SNAPSHOT_TTL
 from core.constants import APP_NAME
 
 # Logging first: the console + ring-buffer handlers attach at import time,
 # so every service constructed below logs where it can be seen.
 from core.logger_handler import in_memory_log_handler  # noqa: F401
 from core.notify import show_snack
+from core.state import LatestRelease
 from core.storage import app_cache_dir
 from core.tasks import session_alive, spawn, ui_set
 from core.theme import AppColors, AppTheme, mode_for_token, token_for_mode
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 _PROGRESS_FLUSH_SECONDS = 0.5
 
 
-def _source_choices(sources) -> list[dict]:
+def _source_choices(sources, *, direct_download: bool = False) -> list[dict]:
     """Every site source as a choice dict, SUB (JPN) first then DUB (ENG),
     each best-first — the exact list both the play dialog and the download
     dialog render, so the two can never disagree about what a quality
@@ -47,7 +49,14 @@ def _source_choices(sources) -> list[dict]:
     fansub, size, BD) are the same stream reached by different URLs (a
     provider's mirror routes), and collapsing them is what lets the
     single-rendition paths auto-play instead of asking a question with
-    two identical answers."""
+    two identical answers.
+
+    ``direct_download`` says whether the provider's ``download_url`` is a
+    FILE (kayoanime's usercontent route) or a LANDING PAGE that still
+    needs resolving (animepahe's pahe.win shortlink). Marking the landing
+    page "direct" made the downloader save 3.7 KB of HTML as the episode
+    (owner's run, 2026-10-16); a non-file download_url is dropped so the
+    resolve chain can only use the real source URL."""
     ordered = sorted(
         sources,
         key=lambda s: (str(s.audio or "").lower().startswith("eng"), -s.resolution),
@@ -85,8 +94,10 @@ def _source_choices(sources) -> list[dict]:
                 "headers": src.headers,
                 "subtitles": src.subtitles,
                 "skip": src.skip,
-                "download_url": getattr(src, "download_url", "") or "",
-                "direct": bool(getattr(src, "download_url", "")),
+                "download_url": (
+                    (getattr(src, "download_url", "") or "") if direct_download else ""
+                ),
+                "direct": direct_download and bool(getattr(src, "download_url", "")),
             }
         )
     return choices
@@ -136,6 +147,14 @@ def _anime_dict(anime) -> dict:
         "aired": getattr(anime, "aired", "") or "",
         "backdrop": getattr(anime, "backdrop", "") or "",
     }
+
+
+def _remove_tree(path: str) -> None:
+    """Best-effort recursive delete for the cache cleanup (blocking)."""
+    import shutil
+
+    with contextlib.suppress(OSError):
+        shutil.rmtree(path)
 
 
 def _write_bytes_file(path: str, data: bytes) -> None:
@@ -438,6 +457,64 @@ class AppController:
     # Data actions — called by screens through ControllerMethods
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Home-feed snapshot (cache tier): a paint-first copy of page 1 for the
+    # LAST successful fetch per provider, so a cold start shows the catalog
+    # instantly and revalidates behind it. The cache tier, not data: it is
+    # regenerable, the OS may purge it, and truth always comes from the
+    # network fetch that follows.
+    # ------------------------------------------------------------------
+
+    async def _save_home_snapshot(self, provider: str, releases, has_more: bool):
+        if not provider or not releases:
+            return
+        try:
+            import json
+            from dataclasses import asdict
+
+            items = []
+            for release in releases:
+                row = asdict(release)
+                snapshot = row.get("snapshot") or ""
+                # pahe's snapshots are inline data: URIs (hundreds of KB
+                # each) — a snapshot aid must not bloat the cache file.
+                if snapshot.startswith("data:") and len(snapshot) > 65536:
+                    row["snapshot"] = ""
+                items.append(row)
+            await self.cache.set(
+                f"homefeed:{provider}",
+                json.dumps({"has_more": has_more, "items": items}),
+                ttl=HOME_FEED_SNAPSHOT_TTL,
+            )
+        except Exception as ex:
+            logger.debug("home snapshot save failed: %s", ex)
+
+    async def _hydrate_home_snapshot(self, provider: str) -> bool:
+        """Paint the last feed for this provider, if one was kept. Returns
+        whether anything was painted (the fetch that follows still runs)."""
+        if not provider:
+            return False
+        try:
+            import json
+
+            raw = await self.cache.get(f"homefeed:{provider}")
+            if not raw:
+                return False
+            payload = json.loads(raw)
+            rows = payload.get("items") or []
+            releases = [LatestRelease(**row) for row in rows]
+        except Exception as ex:
+            logger.debug("home snapshot read failed: %s", ex)
+            return False
+        if not releases:
+            return False
+        ui_set(state, "latest_releases", releases)
+        ui_set(state, "latest_has_more", bool(payload.get("has_more")))
+        ui_set(state, "latest_source", provider)
+        state.latest_version += 1
+        logger.info("home snapshot: %d items painted from cache", len(releases))
+        return True
+
     async def load_latest(self, page_num: int = 1):
         lock = self._get_lock(f"latest_{page_num}")
         if lock.locked():
@@ -475,6 +552,9 @@ class AppController:
                 state.latest_source = self.router.last_winner or ""
                 if page_num == 1 and results:
                     state.cf_blocked = False
+                    await self._save_home_snapshot(
+                        state.latest_source or "", results, has_more
+                    )
             except Exception as ex:
                 if gen != self._latest_gen or not session_alive():
                     return
@@ -508,7 +588,10 @@ class AppController:
         try:
             await self.scraper.ddos.reset()
             self.scraper.clear_cache()
-            await self.cache.clear()
+            # NOT cache.clear(): the ttl cache holds artwork-shape verdicts
+            # (30-day TTL), not anything Cloudflare-poisoned — wiping them
+            # on every Verify threw away the layout knowledge with the wall.
+            # The clearance itself lives in the store, cleared by ddos.reset().
         except Exception as ex:
             logger.error("retry_cloudflare failed: %s", ex)
             self._show_error_snackbar("Couldn't refresh the session.")
@@ -789,7 +872,13 @@ class AppController:
         #    m3u8 variants of the chosen source are the in-player quality
         #    options instead (house-player parity), so they don't belong in
         #    this list.
-        choices = _source_choices(sources)
+        play_provider = self.router.get(self._owner_of(anime_session))
+        choices = _source_choices(
+            sources,
+            direct_download=bool(
+                play_provider and play_provider.capabilities.get("direct_download_url")
+            ),
+        )
 
         if len(choices) <= 1:
             await self._open_player(
@@ -1103,6 +1192,41 @@ class AppController:
     # ------------------------------------------------------------------
     # Discover (provider-generated filters)
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Storage (Settings): the cache tier is the app's own to manage
+    # ------------------------------------------------------------------
+
+    async def measure_cache(self):
+        """The cache tier's size, for the Settings row. A directory walk on
+        a worker thread — never on the UI loop."""
+        from core.storage import cache_dir, dir_size
+
+        try:
+            total = await asyncio.to_thread(dir_size, cache_dir())
+        except Exception as ex:
+            logger.debug("cache measure failed: %s", ex)
+            total = 0
+        state.cache_bytes = total
+        state.storage_version += 1
+
+    async def clear_cache(self):
+        """Drop everything regenerable: the TTL entries (artwork-shape
+        verdicts, the home-feed snapshot) and the poster mirror. Durable
+        data — history, resume positions, favorites, downloads, the CF
+        clearance — is untouched by design."""
+        from core.storage import app_cache_dir
+
+        try:
+            await self.cache.clear()
+            posters = app_cache_dir("posters")
+            if os.path.isdir(posters):
+                await asyncio.to_thread(_remove_tree, posters)
+            show_snack(self.page, "Cache cleared", bgcolor=AppColors.SUCCESS)
+        except Exception as ex:
+            logger.warning("clear_cache failed: %s", ex)
+            self._show_error_snackbar("Couldn't clear the cache.")
+        await self.measure_cache()
 
     async def load_discover_filters(self):
         """Ask the CHOSEN source for its own filter vocabulary. The list is
@@ -1433,6 +1557,10 @@ class AppController:
             # blank the badge. load_latest still updates it on success.
             state.current_source_name = self.router.pin or ""
             state.startup_stage = "Loading releases…"
+            # Paint-first: show the last feed this provider served while the
+            # fresh fetch runs behind it (the fetch replaces it).
+            if not state.latest_releases:
+                await self._hydrate_home_snapshot(self.router.pin or "")
             try:
                 await self.load_latest(1)
             finally:
@@ -1650,7 +1778,17 @@ class AppController:
                 sources = await self.router.sources(anime_session, episode_session)
                 if not sources:
                     continue
-                choice = _preset_choice(_source_choices(sources), preset)
+                series_provider = self.router.get(self._owner_of(anime_session))
+                choice = _preset_choice(
+                    _source_choices(
+                        sources,
+                        direct_download=bool(
+                            series_provider
+                            and series_provider.capabilities.get("direct_download_url")
+                        ),
+                    ),
+                    preset,
+                )
                 if not choice:
                     continue
                 await self._begin_download(
@@ -1706,7 +1844,13 @@ class AppController:
         # A silent sources[0] downloads whatever the provider listed first
         # — a 360p when a 1080p exists. The same list the play dialog
         # shows, so the user picks; a single rendition starts immediately.
-        choices = _source_choices(sources)
+        provider = self.router.get(self._owner_of(anime_session))
+        choices = _source_choices(
+            sources,
+            direct_download=bool(
+                provider and provider.capabilities.get("direct_download_url")
+            ),
+        )
         if len(choices) > 1:
             state.pending_download = {
                 "anime_session": anime_session,
@@ -2213,6 +2357,10 @@ async def main(page: ft.Page):
     methods.clear_search_history = lambda: spawn(
         controller.clear_search_history(), name="clear-search-history"
     )
+    methods.measure_cache = lambda: spawn(
+        controller.measure_cache(), name="measure-cache"
+    )
+    methods.clear_cache = lambda: spawn(controller.clear_cache(), name="clear-cache")
     methods.choose_quality = lambda index: spawn(
         controller.choose_quality(index), name="choose-quality"
     )

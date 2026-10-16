@@ -68,7 +68,9 @@ def test_kayoanime_is_one_source_with_a_download_route():
     assert source.resolution == 1080
     assert source.headers["Referer"] == "https://drive.google.com/"
 
-    choices = _source_choices(sources)
+    # Kayoanime's download_url is a real file (usercontent route) — the
+    # provider's own capability turns the direct path on.
+    choices = _source_choices(sources, direct_download=True)
     assert len(choices) == 1  # -> the play/download gates auto-start
     assert choices[0]["url"] == source.url
     assert choices[0]["download_url"] == source.download_url

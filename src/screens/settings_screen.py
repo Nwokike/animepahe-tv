@@ -86,6 +86,10 @@ def _setting_row(icon, title, subtitle, trailing=None) -> ft.Control:
 def SettingsScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
+    _ = state.storage_version  # the Storage row's size re-render trigger
+
+    # Measure once per mount: a directory walk behind the row's size text.
+    ft.use_effect(lambda: controller.measure_cache(), [])
 
     from flet import context as flet_context
 
@@ -382,6 +386,21 @@ def SettingsScreen() -> ft.Control:
                 ),
             )
         )
+    from core.storage import format_size
+
+    # Regenerable-only: a cleared cache costs a few refetches and an
+    # artwork re-probe; history, resume positions, favorites, downloads
+    # and the Cloudflare clearance all live in the durable tier and are
+    # deliberately not touchable from here.
+    cache_row = _setting_row(
+        ft.Icons.CLEANING_SERVICES_ROUNDED,
+        "Cache",
+        f"{format_size(state.cache_bytes)} · artwork & catalogue, rebuilt automatically",
+        trailing=ft.TextButton(
+            content="Clear",
+            on_click=lambda e: (controller.clear_cache(), controller.measure_cache()),
+        ),
+    )
     test_button = ft.TextButton(
         content="Test all sources",
         on_click=lambda e: controller.test_all_sources(),
@@ -402,6 +421,8 @@ def SettingsScreen() -> ft.Control:
             _section_header("DIAGNOSTICS"),
             _settings_card([terminal_row]),
             build_banner_ad(page, inline=True),
+            _section_header("STORAGE"),
+            _settings_card([cache_row]),
             _section_header("ABOUT"),
             _settings_card(
                 [

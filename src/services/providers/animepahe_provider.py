@@ -40,7 +40,13 @@ class AnimePaheProvider:
         "files": True,
         "episodes": True,
         "episode_stills": True,
-        "kwik_resolve": True,  # its source URLs need the Kwik unpack
+        "kwik_resolve": True,
+        # The site's download menu yields pahe.win SHORTLINKS — landing
+        # pages that lead to the same kwik player, not files. Marking
+        # them "direct" made the downloader save 3.7 KB of HTML as the
+        # episode (owner's run, 2026-10-16): the link must be unpacked
+        # exactly like the stream URL.
+        "direct_download_url": False,  # its source URLs need the Kwik unpack
         "subtitles": False,  # hardsubbed — three converging evidence lines
     }
 
