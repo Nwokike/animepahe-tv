@@ -1,5 +1,5 @@
 APP_NAME = "AnimePahe TV"
-APP_VERSION = "1.0.9"
+APP_VERSION = "2.0.0"
 
 LBL_SEARCH_EMPTY = "Search for anime to get started."
 

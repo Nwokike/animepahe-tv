@@ -2088,11 +2088,78 @@ class AppController:
         state.downloads_version += 1
 
     async def retry_download(self, episode_session: str):
-        """A failed job re-queued from its own manifest."""
-        await self.downloads.retry(episode_session)
+        """A failed job, RE-RESOLVED from scratch then re-queued.
+
+        The owner's rule: anything streamable is downloadable. A failed
+        job's manifest holds a SIGNED url that expires within hours —
+        retrying the stale link 404s forever (the live run: every animeout
+        retry replayed the same dead public.animeout.xyz link). So a retry
+        resolves the source again (the play-page chain, fresh token) and
+        starts the download with the NEW url; the playing chain and the
+        download chain are the same chain by construction."""
+        rows = await self.store.get_downloads()
+        row = rows.get(episode_session) or {}
+        anime_session = row.get("anime_session") or ""
+        # Clear the failure/stop latch so start()/start_direct() may enqueue.
+        self.downloads._stop_reason.pop(episode_session, None)
+
+        sources = []
+        source_headers: dict = {}
+        resolved = ""
+        if anime_session:
+            try:
+                sources = await self.router.sources(anime_session, episode_session)
+            except Exception as ex:
+                logger.warning("retry resolve failed for %s: %s", episode_session, ex)
+            if sources:
+                choice = _preset_choice(
+                    _source_choices(
+                        sources,
+                        direct_download=bool(
+                            (self.router.get(self._owner_of(anime_session)) or None)
+                            and self.router.get(
+                                self._owner_of(anime_session)
+                            ).capabilities.get("direct_download_url")
+                        ),
+                    ),
+                    row.get("preset") or "highest",
+                )
+                if choice:
+                    source_headers = dict(choice.get("headers") or {})
+                    url = choice.get("download_url") or choice.get("url") or ""
+                    if url:
+                        try:
+                            resolved = (
+                                url
+                                if choice.get("direct")
+                                else (await self._resolve_source(url, anime_session)) or url
+                            )
+                        except Exception as ex:
+                            logger.warning("retry resolve_source failed: %s", ex)
+
         state.download_progress = _with_job_state(
             state.download_progress, episode_session, "queued"
         )
+        if resolved:
+            kind, server_name = await self.downloads.detect_kind(resolved, source_headers)
+            metadata = {
+                k: row.get(k)
+                for k in ("anime_session", "anime_id", "title", "poster", "episode_num")
+            }
+            if server_name and not metadata.get("filename"):
+                metadata["filename"] = server_name
+            if kind == "file":
+                await self.downloads.start_direct(
+                    episode_session, resolved, source_headers, metadata
+                )
+            else:
+                await self.downloads.start(
+                    episode_session, resolved, source_headers, metadata
+                )
+        else:
+            # Nothing re-resolves right now (offline, walled): fall back to
+            # the job's own manifest, which may still be resumable.
+            await self.downloads.retry(episode_session)
         state.downloads_version += 1
 
     async def cancel_download(self, episode_session: str):

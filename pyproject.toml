@@ -1,6 +1,6 @@
 [project]
 name = "animepahe-tv"
-version = "1.0.9"
+version = "2.0.0"
 description = "Multi-source client-side Android TV / mobile / desktop app for streaming anime — independent backends, one chosen at startup."
 readme = "README.md"
 requires-python = ">=3.14"
@@ -17,7 +17,7 @@ dependencies = [
 [tool.flet]
 org = "com.animepahe"
 product = "AnimePahe TV"
-build_number = 10
+build_number = 20
 
 [tool.flet.app]
 path = "src"
