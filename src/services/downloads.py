@@ -532,6 +532,12 @@ class DownloadManager:
             )
         return True
 
+    def job_running(self, episode_session: str) -> bool:
+        """Is this job still tracked? False once it finished/was removed —
+        the signal the controller's flusher uses to stop resurrecting a
+        finished row from a late progress callback."""
+        return episode_session in self._progress
+
     def progress(self, episode_session: str) -> dict | None:
         """One progress row for the UI: bytes + the percent when the total
         is known, explicitly percent=None when it isn't (Media3's
@@ -746,6 +752,13 @@ class DownloadManager:
                 raise RuntimeError("the stream served no segments")
             progress = self._progress[episode_session]
             progress["total"] = total
+            # The job IS downloading now — without this the progress dict
+            # stayed "queued" for the whole 144-segment run and the UI
+            # rendered the "Waiting…" spinner with no bar, from first byte
+            # to last (owner's live run: every published row said
+            # state=queued while segments were flying). _run_direct
+            # already declared this; the HLS path never did.
+            progress["state"] = STATE_DOWNLOADING
 
             done, queue = await anyio.to_thread.run_sync(_scan_segments, segs_dir, uris)
             progress["done"] = done
@@ -984,20 +997,49 @@ class DownloadManager:
         # prefix on top of the body.
         done = have if mode == "ab" else 0
 
-        def _write(chunk: bytes) -> None:
-            # Off-loop: a per-chunk disk write competes with the UI's
-            # frames when it runs on the event loop.
-            with open(part_path, mode) as f:
-                f.write(chunk)
-
-        async for chunk in resp.aiter_bytes():
-            if cancel is not None and cancel.is_set():
-                await resp.aclose()
-                return False
-            await anyio.to_thread.run_sync(_write, chunk)
-            done += len(chunk)
-            if on_progress is not None:
-                on_progress(len(chunk))
+        # ONE handle for the whole body. The old per-chunk writer opened
+        # the part file with mode "wb" (truncate) on EVERY chunk and
+        # dispatched each write through anyio.to_thread.run_sync — a
+        # THREAD POOL, so concurrent writers truncated one another. Live
+        # proof (2026-10-16): 273 chunks / 950,904 bytes streamed and read
+        # back as a 632-byte garbage file. One handle also makes the
+        # close-before-rename ordering deterministic.
+        # One handle for the whole body; the handle lives across awaits
+        # by design and the finally below closes it on every path.
+        handle = await anyio.to_thread.run_sync(lambda: open(part_path, mode))  # noqa: SIM115
+        try:
+            first = True
+            async for chunk in resp.aiter_bytes():
+                if cancel is not None and cancel.is_set():
+                    await resp.aclose()
+                    return False
+                if first:
+                    first = False
+                    # A media segment is NEVER an HTML page. An EXPIRED
+                    # signed URL answers an error page with a 200 body —
+                    # the old code saved those pages as `.jpg` segments and
+                    # reported the job "complete": a 24-minute episode
+                    # ended up 500 KB on disk (owner's run, 2026-10-16).
+                    # Raising routes it into the worker's retry-with-cap
+                    # path, so the job FAILS honestly instead of publishing
+                    # 404 pages as video.
+                    head = chunk[:512].lower()
+                    if b"<html" in head or b"<!doctype html" in head or b"<head>" in head:
+                        await resp.aclose()
+                        raise RuntimeError(f"HTML error page served for {url}")
+                # Off-loop: a per-chunk disk write competes with the UI's
+                # frames when it runs on the event loop. Serialized on the
+                # single handle, so concurrent threads can never interleave.
+                await anyio.to_thread.run_sync(handle.write, chunk)
+                done += len(chunk)
+                if on_progress is not None:
+                    on_progress(len(chunk))
+        finally:
+            # Close SYNCHRONOUSLY: a thread-pool close can be skipped when
+            # the task is cancelled (and on Windows an open handle blocks
+            # every later delete/rename of the part file).
+            with contextlib.suppress(Exception):
+                handle.close()
         if not os.path.exists(part_path):
             # A 200 with an empty body (some CDNs answer the segment URL
             # with a zero-byte page): nothing to publish.

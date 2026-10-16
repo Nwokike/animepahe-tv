@@ -2163,7 +2163,17 @@ class AppController:
             if not pending:
                 return
             merged = dict(state.download_progress or {})
-            merged.update(pending)
+            # Finished jobs are DROPPED here: a callback queued in the
+            # final half-second used to resurrect the row as "downloading"
+            # right after _on_download_finished cleared it — a finished
+            # episode span forever (owner's live run, 2026-10-16). The
+            # manager pops a job's progress when it ends; a live entry
+            # means the job is still running (paused ones keep theirs).
+            live = {s: row for s, row in pending.items() if self.downloads.job_running(s)}
+            merged.update(live)
+            for session in list(merged):
+                if not self.downloads.job_running(session):
+                    merged.pop(session, None)
             state.download_progress = merged
             state.downloads_version += 1
             await self._sync_download_notifications(merged)
@@ -2196,11 +2206,23 @@ class AppController:
     def _on_download_finished(self, episode_session: str, metadata: dict) -> None:
         """A finished download replaces its progress row with a
         completion one — same id, so the tray never holds two rows for
-        one episode, and the tap deep-links to the anime."""
+        one episode, and the tap deep-links to the anime. The in-memory
+        rows are RELOADED from the store: the manager wrote the complete
+        row (state, size, playlist) there, and without this refresh the
+        card kept counting "0/2 done" over finished files until the next
+        launch (owner's live run, 2026-10-16)."""
         from core import notifications
         from core.tasks import spawn
 
         async def _announce():
+            rows = await self.store.get_downloads()
+            state.downloads = rows
+            state.download_progress = {
+                k: v
+                for k, v in (state.download_progress or {}).items()
+                if k != episode_session
+            }
+            state.downloads_version += 1
             await notifications.show_new_episode(
                 anime_session=str(metadata.get("anime_session") or ""),
                 title=str(metadata.get("title") or "Download"),
