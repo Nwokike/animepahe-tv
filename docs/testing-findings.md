@@ -305,3 +305,51 @@ lands through the observable `state.theme_mode` (set by the cycle, read by
 `theme_icon_for`), so a normal re-render paints it — verified in a real
 Flet render context (dark → light → system, icon follows).
 
+## 2026-10-16 (night) — the download engine, reproduced locally per backend
+
+Owner's evidence: finished episodes read ~500 KB on disk; the downloads
+screen sat at "0/2 done · 0%" over finished files. Reproduction harness:
+`tools/download_matrix.py` runs the app's OWN pipeline (router → provider →
+sources → DownloadManager) per backend into a scratch store.
+
+### The corruption bug (root cause of every 500 KB "download")
+`_download_file` opened the part file with mode `"wb"` — TRUNCATE — on
+EVERY chunk, dispatching each write through `anyio.to_thread.run_sync`,
+which is a THREAD POOL: concurrent writers truncated one another. Proven
+in isolation: 273 chunks / 950,904 bytes streamed, 632 garbage bytes on
+disk (`f13efffe…`), while the same URL fetched 950,904 correct bytes
+through the plain client in the same process. Fixed: ONE handle per file,
+writes serialized on it, closed synchronously in `finally` (a thread-pool
+close can be cancelled away and leaves a Windows file lock).
+
+### An error page is never a segment
+An expired signed URL answers an HTML error page with a 200 body; the old
+engine saved those pages as `.jpg` segments and reported "complete". The
+first chunk is now rejected (`html`/`doctype`/`head`) and raises into the
+worker's retry-with-cap path, so a dead source FAILS honestly.
+
+### The UI never saw progress (three leaks)
+- HLS jobs published `state="queued"` for the whole run (only the direct
+  path declared `"downloading"`), so the row showed "Waiting…" and no bar.
+- `_on_download_finished` only notified the tray; `state.downloads` kept
+  the stale `"partial"` rows, so the card counted 0/2 over finished files.
+- The flusher could resurrect a finished job's row from a late callback.
+
+### The live matrix (post-fix, from this machine)
+| Backend | Discovery | Sources | Result on disk | Verdict |
+|---|---|---|---|---|
+| AniKato | Black Clover, 170 eps | fetch.nexabloom master → index | 325 segments, **253.9 MB, MPEG-TS** | REAL |
+| KayoAnime | Black Clover S2 | Drive usercontent | **847.2 MB, Matroska (.mkv)** | REAL |
+| AnimeOut | catalogue OK | none | — | parked: file host is Cloudflare-walled |
+| AnimePahe | Cloudflare wall | — | — | walled this run; fails through the new gate |
+
+### AnimePahe's wall (state as of this run)
+Its catalogue answered 403 "Just a moment…" to every programmatic client;
+the stored clearance was expired, and a VPN detour got the address
+hard-blocked ("Sorry, you have been blocked") mid-session. The desktop
+solver now ASKS THE API whether the captured clearance works (`/api?m=airing`)
+before emitting success — a stale cookie can no longer be persisted and
+looped. The Android WebView path (the owner's phone) remains the place its
+clearance works; desktop retries must be earned by that verification.
+
+
