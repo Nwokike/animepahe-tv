@@ -18,6 +18,8 @@ def EmptyState(
     on_action: Callable | None = None,
     icon: ft.IconData | None = None,
     autofocus_action: bool = False,
+    secondary_label: str | None = None,
+    on_secondary: Callable | None = None,
 ) -> ft.Control:
     items = [
         ft.Icon(
@@ -48,8 +50,9 @@ def EmptyState(
                 overflow=ft.TextOverflow.ELLIPSIS,
             )
         )
+    actions = []
     if action_label and on_action:
-        items.append(
+        actions.append(
             ft.FilledButton(
                 content=ft.Text(action_label),
                 on_click=on_action,
@@ -59,6 +62,27 @@ def EmptyState(
                     color=ft.Colors.WHITE,
                     shape=ft.RoundedRectangleBorder(radius=10),
                 ),
+            )
+        )
+    if secondary_label and on_secondary:
+        actions.append(
+            ft.OutlinedButton(
+                content=ft.Text(secondary_label),
+                on_click=on_secondary,
+                style=ft.ButtonStyle(
+                    shape=ft.RoundedRectangleBorder(radius=10),
+                ),
+            )
+        )
+    if len(actions) == 1:
+        items.append(actions[0])
+    elif len(actions) > 1:
+        items.append(
+            ft.Row(
+                actions,
+                spacing=10,
+                alignment=ft.MainAxisAlignment.CENTER,
+                tight=True,
             )
         )
     return ft.Container(

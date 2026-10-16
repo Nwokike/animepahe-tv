@@ -232,8 +232,7 @@ every non-Back key to the player's handler.
 - **Shared header** (`components/app_header.py`, Sherlock's pattern): the
   source pill, badge, version pill, screen actions and theme cycle render
   on Home, Search, Discover, Downloads and Settings; the action group is a
-  `Row(scroll=AUTO)` (scroll, never clip). The theme cycle repaints its own
-  icon in place (a frozen subtree cannot be relied on to re-render it).
+  `Row(scroll=AUTO)` (scroll, never clip).
 - **Downloads**: series cards collapse (most recently updated open by
   default); the header shows a live aggregate ("3/11 done · 42%") over the
   per-episode bars; only the open series renders its rows.
@@ -255,3 +254,54 @@ every non-Back key to the player's handler.
   tripped Cloudflare's load detector ("too_many_data_frames") and surfaced
   as unhandled page errors — now capped at 4 concurrent, failures fall back
   to the card's own artwork panel.
+
+## 2026-10-16 (the owner's follow-up run) — the CF condition, the header back, the theme
+
+### The solver condition (the owner's exact report, closed)
+"I selected an animepahe recent. It swapped in the header nicely but no
+Cloudflare solver and no episode found." The log showed the episodes API
+answering 403 "Just a moment…" with `solve suppressed: no user action
+requested it` on every call, and the screen reading "No episodes found".
+
+- **A challenge is now a SIGNAL, not an empty catalogue**:
+  `services/providers/base.CloudflareBlocked`, raised by the pahe provider
+  on a 403/503 non-JSON answer, passed through the router WITHOUT tripping
+  its breaker (counting it turned the next retry into "no provider
+  available (all circuits open)") and without failing over (another
+  provider cannot answer for pahe's sessions).
+- **User-driven loads open the verification window for their duration**:
+  `AppController._user_action()` — ref-counted so the detail screen's
+  resolve and episode fetch cannot close the gate on each other — wraps
+  home/switching, opening an anime, search, Verify and play. Background
+  work (probes, the episode checker) still cannot pop a window.
+- **A blocked episodes load raises the gate**: `cf_blocked` + the SHARED
+  SHIELD card (Verify · Change source — `offline_state.cf_gate_card`,
+  one builder for Home's scrim and the detail screen's inline card, so
+  the two cannot drift); switching away clears the gate.
+- **Live evidence**: with the solver allowed, the same session's fetch
+  reaches `solve()` (it used to be suppressed); with `state.page` absent
+  in a headless probe the solve itself cannot run by design.
+- **Known external wall (unchanged)**: the WebView2 clearance cannot be
+  replayed by primp on this host ("Sorry, you have been blocked" after
+  repeated automated attempts — the owner's IP was VPN-blocked mid-run,
+  then restored). The next lever is a real interactive solve from a clean
+  client, not more retries; the app now fails honestly (Verify card)
+  instead of pretending the catalogue is empty.
+
+### Header: the back button lives IN the header
+"the back button with title anime is ahead of the header… integrate the
+back button in the header, the header should always be top. Remove 'Anime'."
+The shell's separate `_detail_appbar` (back + "Anime") is deleted;
+`app_header(on_back=…)` renders a round tinted disc as the leading control
+of the shared header, and the detail screen passes `controller.back()`.
+The "Episodes" subtitle duplicates the page's own title and is dropped.
+
+### The theme cycle (the "change color mode" error, closed)
+`RuntimeError: Frozen controls cannot be updated.` at
+`theme_action.content.icon = icon` — the cycle mutated a control inside a
+frozen `@ft.component` subtree (the old `suppress(Exception)` around it hid
+the same bug in one build and crashed loudly in another). The icon now
+lands through the observable `state.theme_mode` (set by the cycle, read by
+`theme_icon_for`), so a normal re-render paints it — verified in a real
+Flet render context (dark → light → system, icon follows).
+

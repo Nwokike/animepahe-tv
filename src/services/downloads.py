@@ -95,10 +95,13 @@ def rewrite_playlist(text: str, segment_dir_name: str = "segs") -> tuple[str, in
                 out.append(rewritten)
                 continue
         if stripped and not stripped.startswith("#"):
-            # A media segment line: last non-comment line wins.
+            # A media segment line: CDNs (AniKato, AnimePahe) frequently
+            # obfuscate video chunks with .jpg, .css, .html, .js or no
+            # extension to bypass middlebox filtering — any non-empty,
+            # non-comment line in a media playlist is a media segment.
             uri = stripped.split("?")[0]
             name = os.path.basename(uri)
-            if name and re.search(r"\.(ts|aac|mp4|m4s|vtt)(\.|$)", name, re.IGNORECASE):
+            if name:
                 out.append(f"{segment_dir_name}/{name}")
                 count += 1
                 continue
@@ -114,9 +117,7 @@ def parse_segment_uris(text: str) -> list[str]:
     for line in text.splitlines():
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):
-            name = os.path.basename(stripped.split("?")[0])
-            if name and re.search(r"\.(ts|aac|mp4|m4s|vtt)(\.|$)", name, re.IGNORECASE):
-                uris.append(stripped)
+            uris.append(stripped)
     return uris
 
 
