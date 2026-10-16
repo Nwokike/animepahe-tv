@@ -28,6 +28,7 @@ from core.theme import AppColors, AppTheme, mode_for_token, token_for_mode
 from services.animepahe import AnimePaheScraper
 from services.cache import Cache
 from services.kwik_resolver import KwikResolver
+from services.providers.base import CloudflareBlocked
 from services.update_service import UpdateService
 from state.app_state import state
 from state.controller_ctx import ControllerMethods, ControllerMethodsCtx
@@ -112,6 +113,12 @@ def _preset_choice(choices: list[dict], preset: str) -> dict:
     if not choices:
         return {}
     if preset == "lowest":
+        # Keep the primary audio language (SUB vs DUB): choosing lowest
+        # bandwidth must not switch language from Japanese to English dub.
+        is_dub = "DUB" in (choices[0].get("label") or "")
+        same_audio = [c for c in choices if ("DUB" in (c.get("label") or "")) == is_dub]
+        if same_audio:
+            return same_audio[-1]
         return choices[-1]
     return choices[0]
 
@@ -181,6 +188,10 @@ class AppController:
         self._episodes_gen = 0
         self._play_lock = asyncio.Lock()
         self._play_gen = 0
+        # How many user-driven loads are currently allowed to open the
+        # verification window (see _user_action). Zero means background
+        # work only — a fetch may not pop a Cloudflare window.
+        self._gate_depth = 0
         # Download progress throttle state (see _on_download_progress).
         self._pending_progress: dict = {}
         self._progress_flush_task = None
@@ -531,7 +542,11 @@ class AppController:
             state.latest_version += 1
 
             try:
-                results, has_more = await self.router.latest_releases(page_num)
+                # A home load is a user-driven act on this source (boot,
+                # switch, pager, Retry): if its first fetch meets the wall,
+                # the verification window may open for it.
+                async with self._user_action():
+                    results, has_more = await self.router.latest_releases(page_num)
                 if gen != self._latest_gen:
                     logger.info("load_latest discarding stale page=%d", page_num)
                     return
@@ -555,6 +570,14 @@ class AppController:
                     await self._save_home_snapshot(
                         state.latest_source or "", results, has_more
                     )
+            except CloudflareBlocked:
+                if gen != self._latest_gen or not session_alive():
+                    return
+                logger.warning("load_latest page=%d met the Cloudflare wall", page_num)
+                state.latest_releases = []
+                state.latest_has_more = False
+                # The finally below raises the gate itself (online + empty +
+                # page 1); no snackbar — the gate is the clearer answer.
             except Exception as ex:
                 if gen != self._latest_gen or not session_alive():
                     return
@@ -578,27 +601,27 @@ class AppController:
         """Clear the Cloudflare session + caches, then reload the home feed."""
         state.cf_blocked = False
         state.latest_version += 1
-        # Verify is the user's explicit act on the wall — the solver window
-        # may open for it (the 1.0.9 behavior).
-        self._gate_solver(True)
         # The Verify button spins for the whole re-challenge: it can take
         # several seconds on a cold WebView solve.
         state.cf_retrying = True
         state.busy_version += 1
         try:
-            await self.scraper.ddos.reset()
-            self.scraper.clear_cache()
-            # NOT cache.clear(): the ttl cache holds artwork-shape verdicts
-            # (30-day TTL), not anything Cloudflare-poisoned — wiping them
-            # on every Verify threw away the layout knowledge with the wall.
-            # The clearance itself lives in the store, cleared by ddos.reset().
+            # Verify is the user's explicit act on the wall — the solver
+            # window stays open for the whole re-load it drives.
+            async with self._user_action():
+                await self.scraper.ddos.reset()
+                self.scraper.clear_cache()
+                # NOT cache.clear(): the ttl cache holds artwork-shape verdicts
+                # (30-day TTL), not anything Cloudflare-poisoned — wiping them
+                # on every Verify threw away the layout knowledge with the wall.
+                # The clearance itself lives in the store, cleared by ddos.reset().
+                await self.load_latest(1)
         except Exception as ex:
             logger.error("retry_cloudflare failed: %s", ex)
             self._show_error_snackbar("Couldn't refresh the session.")
         finally:
             state.cf_retrying = False
             state.busy_version += 1
-        await self.load_latest(1)
 
     async def load_episodes(self, anime_session: str, page_num: int = 1):
         lock = self._get_lock(f"episodes_{anime_session}")
@@ -623,7 +646,12 @@ class AppController:
             state.episodes_version += 1
 
             try:
-                episodes, has_more = await self.router.episodes(anime_session, page_num)
+                # Opening an anime detail is the owner's deliberate act on
+                # this session: a walled episode fetch may open the
+                # verification window right here (then the one retry inside
+                # the solver's get() completes the load).
+                async with self._user_action():
+                    episodes, has_more = await self.router.episodes(anime_session, page_num)
                 state.current_source_name = self.router.last_winner or ""
                 if gen != self._episodes_gen:
                     logger.info("load_episodes discarding stale page for %s", anime_session)
@@ -640,6 +668,16 @@ class AppController:
                 state.episodes = episodes
                 state.episodes_has_more = has_more
                 state.cf_blocked = False
+            except CloudflareBlocked:
+                if gen != self._episodes_gen or not session_alive():
+                    return
+                # The wall, not an empty catalogue: raise the gate with the
+                # Verify + Change-source choices instead of "No episodes".
+                logger.warning("episodes for %s met the Cloudflare wall", anime_session)
+                state.episodes = []
+                state.episodes_has_more = False
+                if state.is_online:
+                    state.cf_blocked = True
             except Exception as ex:
                 if gen != self._episodes_gen or not session_alive():
                     return
@@ -693,18 +731,38 @@ class AppController:
     def _gate_solver(self, allowed: bool) -> None:
         """Open or close the verification-window gate for the session.
 
-        The 1.0.9 behavior, restored deliberately: once AnimePahe is the
-        resolved source (a pin at launch, a manual switch to it) or the user
-        presses Verify, a wall that answers AnimePahe's own fetches opens
-        the solver window — the clearance it captures serves the rest of
-        the session. Background work (health probes, the episode checker)
-        never flips the gate: only resolve/pin/Verify/Play do. Switching
-        away closes it again so another source's session can never pop a
-        pahe window.
+        The 1.0.9 behavior, restored deliberately: a wall that answers a
+        deliberate, user-driven fetch of AnimePahe's own content opens the
+        solver window — the clearance it captures serves the rest of the
+        session. Background work (health probes, the episode checker)
+        never flips the gate. Switching away closes it again so another
+        source's session can never pop a pahe window.
         """
         solver = self._ddos()
         if solver is not None:
             solver.solve_allowed = allowed
+
+    @contextlib.asynccontextmanager
+    async def _user_action(self):
+        """Open the verification window for the duration of one
+        user-driven fetch, and restore the previous gate after it.
+
+        Any attempt to reach AnimePahe starts with this: pressing Verify,
+        switching to AnimePahe, opening one of its anime, loading a page
+        of its episodes. Ref-counted so overlapping loads (the detail
+        screen's resolve + episodes) cannot close the gate on each other;
+        if any other holder still has it open, it stays open.
+        """
+        depth = getattr(self, "_gate_depth", 0)
+        self._gate_depth = depth + 1
+        solver = self._ddos()
+        previous = solver.solve_allowed if solver is not None else False
+        self._gate_solver(True)
+        try:
+            yield
+        finally:
+            self._gate_depth = getattr(self, "_gate_depth", 1) - 1
+            self._gate_solver(previous if self._gate_depth <= 0 else True)
 
     def _may_solve(self, anime_session: str | None) -> bool:
         """A verification window opens only for a deliberate action on
@@ -727,17 +785,13 @@ class AppController:
             logger.info("play_episode already resolving, ignoring tap")
             return
         async with self._play_lock:
-            solver = self._ddos()
+            may_solve = self._may_solve(anime_session)
             # Restore the gate — not force it shut — so a session already
             # pinned to animepahe keeps its ability to solve after play.
-            previous = solver.solve_allowed if solver is not None else False
-            if self._may_solve(anime_session) and solver is not None:
-                solver.solve_allowed = True
-            try:
+            async with contextlib.AsyncExitStack() as stack:
+                if may_solve:
+                    await stack.enter_async_context(self._user_action())
                 await self._play_episode(anime_session, episode_session)
-            finally:
-                if solver is not None:
-                    solver.solve_allowed = previous
 
     async def _play_episode(self, anime_session: str, episode_session: str):
         state.current_anime_session = anime_session
@@ -1610,6 +1664,12 @@ class AppController:
         immediately and persists; the switch goes through the startup gate:
         splash → resolve → first fetch."""
         self.router.set_pin(name)
+        # Switching away from a walled source clears its gate — the SHIELD
+        # card must not survive into another backend's session. (Switching
+        # TO animepahe keeps it: its first fetch may hit the wall, and the
+        # gate is the honest answer while the solver window opens.)
+        if self.router.pin != self._default_owner:
+            state.cf_blocked = False
         # The solver gate follows the choice: switching TO animepahe opens
         # it (the wall's window may appear for the first fetch), switching
         # away closes it so another source's session can never pop one.
@@ -2293,7 +2353,10 @@ class AppController:
             state.search_version += 1
 
             try:
-                results, has_more = await self.router.search(query, page)
+                # Search is the owner's explicit act too — its fetch may
+                # open the verification window when the wall answers.
+                async with self._user_action():
+                    results, has_more = await self.router.search(query, page)
                 if gen != self._search_gen:
                     logger.info("load_search discarding stale response for %r", query)
                     return
@@ -2307,6 +2370,13 @@ class AppController:
                     state.cf_blocked = False
                     await self.store.add_search(query)
                     state.search_history = await self.store.get_search_history()
+            except CloudflareBlocked:
+                logger.warning("search q=%r met the Cloudflare wall", query)
+                if gen == self._search_gen and session_alive():
+                    state.search_results = []
+                    state.search_has_more = False
+                    if state.is_online:
+                        state.cf_blocked = True
             except Exception as ex:
                 logger.error("load_search q=%r page=%d failed: %s", query, page, ex)
                 if gen == self._search_gen and session_alive():

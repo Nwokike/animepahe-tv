@@ -17,6 +17,15 @@ from core.state import Anime, Episode, LatestRelease, Source
 
 DEFAULT_OWNER = "animepahe"
 
+
+class CloudflareBlocked(Exception):
+    """A provider's own host answered a Cloudflare challenge instead of data.
+
+    Raised DELIBERATELY (never as a transport/parse error): the controller
+    turns it into the verification gate, so a walled fetch reads as "verify
+    to continue" — not as "the catalogue is empty". The router must not
+    count it as a provider failure (the host is fine, it is challenging)."""
+
 # The owner's fixed priority (2026-10-15): the app tries these in order and
 # the first one that answers serves the session. This order IS the app's
 # behavior — there is no "automatic" option anywhere, in any UI, ever.

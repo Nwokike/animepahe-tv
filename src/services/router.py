@@ -32,7 +32,7 @@ from core.config import (
     BREAKER_OPEN_SECONDS,
     STARTUP_PROBE_BUDGET,
 )
-from services.providers.base import Provider, owner_of
+from services.providers.base import CloudflareBlocked, Provider, owner_of
 
 logger = logging.getLogger("animepahe.router")
 
@@ -169,6 +169,13 @@ class ProviderRouter:
         started = self._clock()
         try:
             result = await getattr(provider, op)(*args)
+        except CloudflareBlocked:
+            # The wall is a SIGNAL, not a provider failure: the host is
+            # healthy and deliberately challenging. Passing it on lets the
+            # controller raise the verification gate; counting it would
+            # open the breaker and turn "verify" into "no provider
+            # available (all circuits open)".
+            raise
         except Exception:
             breaker.record_failure()
             self._record_health(
@@ -236,6 +243,11 @@ class ProviderRouter:
         first = eligible[0]
         try:
             result = await self._attempt(op, first, args)
+        except CloudflareBlocked:
+            # The owner's own host is challenging — no other provider can
+            # stand in for its sessions. Propagate so the app raises the
+            # verification gate instead of reporting an empty catalogue.
+            raise
         except Exception as ex:
             results_errors: list[Exception] = [ex]
         else:
@@ -281,6 +293,9 @@ class ProviderRouter:
             final_name = eligible[-1].name if eligible[-1].name in outcomes else last_answered_name
             self.last_winner = final_name
             return outcomes[final_name]
+        blocked = next((e for e in errors if isinstance(e, CloudflareBlocked)), None)
+        if blocked is not None:
+            raise blocked
         if errors:
             raise RouterError(f"all providers failed for {op}") from errors[-1]
         raise RouterError(f"no provider answered for {op}")

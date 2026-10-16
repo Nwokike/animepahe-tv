@@ -19,14 +19,9 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
+from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from core.artwork import LANDSCAPE
-from core.constants import (
-    LBL_CF_BLOCKED_BODY,
-    LBL_CF_BLOCKED_TITLE,
-    LBL_CF_VERIFY_BUTTON,
-    LBL_OFFLINE_BODY,
-)
 from core.theme import AppColors
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
@@ -236,71 +231,11 @@ def _continue_watching_row(entries: dict, on_open, mode: str = LANDSCAPE) -> ft.
 
 def _cf_overlay_card(state, controller) -> ft.Control:
     """The SHIELD card the original showed over the live grid (not instead
-    of it — the scrim keeps the app's context visible)."""
-    return ft.Container(
-        content=ft.Column(
-            [
-                ft.Container(
-                    content=ft.Icon(ft.Icons.SHIELD_ROUNDED, size=64, color=AppColors.PRIMARY),
-                    alignment=ft.Alignment.CENTER,
-                ),
-                ft.Container(height=8),
-                ft.Text(
-                    LBL_CF_BLOCKED_TITLE,
-                    size=20,
-                    weight=ft.FontWeight.BOLD,
-                    color=ft.Colors.ON_SURFACE,
-                    text_align=ft.TextAlign.CENTER,
-                ),
-                ft.Container(height=4),
-                ft.Text(
-                    LBL_CF_BLOCKED_BODY,
-                    size=13,
-                    color=ft.Colors.ON_SURFACE_VARIANT,
-                    text_align=ft.TextAlign.CENTER,
-                ),
-                ft.Container(height=20),
-                ft.FilledButton(
-                    content=ft.ProgressRing(
-                        width=16, height=16, stroke_width=2, color=ft.Colors.WHITE
-                    )
-                    if getattr(state, "cf_retrying", False)
-                    else LBL_CF_VERIFY_BUTTON,
-                    icon=None
-                    if getattr(state, "cf_retrying", False)
-                    else ft.Icons.VERIFIED_ROUNDED,
-                    disabled=bool(getattr(state, "cf_retrying", False)),
-                    style=ft.ButtonStyle(
-                        bgcolor=AppColors.PRIMARY,
-                        color=ft.Colors.WHITE,
-                        shape=ft.RoundedRectangleBorder(radius=10),
-                    ),
-                    on_click=lambda e: controller.retry_cloudflare(),
-                ),
-                ft.Container(height=6),
-                # The wall must never trap the user: swapping sources is
-                # one tap from the card itself (the header's title/arrow
-                # and badge do the same).
-                ft.TextButton(
-                    content="Change source",
-                    on_click=lambda e: controller.open_backend_picker(),
-                ),
-            ],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=0,
-            tight=True,
-        ),
-        padding=32,
-        width=320,
-        border_radius=20,
-        bgcolor=ft.Colors.SURFACE,
-        border=ft.Border.all(1, ft.Colors.OUTLINE),
-        shadow=ft.BoxShadow(
-            blur_radius=30,
-            color=ft.Colors.with_opacity(0.4, ft.Colors.BLACK),
-            offset=ft.Offset(0, 10),
-        ),
-    )
+    of it — the scrim keeps the app's context visible). One shared builder
+    with the detail screen's inline gate (components/offline_state)."""
+    from components.offline_state import cf_gate_card
+
+    return cf_gate_card(state, controller)
 
 
 def _cf_gate(body: ft.Control, state, controller) -> ft.Control:
@@ -327,34 +262,47 @@ def _cf_gate(body: ft.Control, state, controller) -> ft.Control:
     )
 
 
-def _offline_banner() -> ft.Control:
+def _offline_banner(on_downloads=None) -> ft.Control:
     """Offline strip, shown above the header when the network is down.
 
     Deliberately distinct from the CF gate: offline means "nothing will
     load", the gate means "verify to continue" — the old build showed the
     SHIELD card for both.
     """
+    row_controls: list[ft.Control] = [
+        ft.Icon(
+            ft.Icons.WIFI_OFF_ROUNDED,
+            size=18,
+            color=ft.Colors.ON_INVERSE_SURFACE,
+        ),
+        ft.Text(
+            "You're offline — your downloaded episodes are available to watch.",
+            size=12,
+            color=ft.Colors.ON_INVERSE_SURFACE,
+            expand=True,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        ),
+    ]
+    if on_downloads is not None:
+        row_controls.append(
+            ft.TextButton(
+                content=ft.Text(
+                    "View Downloads",
+                    size=12,
+                    color=AppColors.PRIMARY,
+                    weight=ft.FontWeight.W_700,
+                ),
+                on_click=on_downloads,
+            )
+        )
     return ft.Container(
         content=ft.Row(
-            [
-                ft.Icon(
-                    ft.Icons.WIFI_OFF_ROUNDED,
-                    size=18,
-                    color=ft.Colors.ON_INVERSE_SURFACE,
-                ),
-                ft.Text(
-                    LBL_OFFLINE_BODY,
-                    size=12,
-                    color=ft.Colors.ON_INVERSE_SURFACE,
-                    expand=True,
-                    max_lines=1,
-                    overflow=ft.TextOverflow.ELLIPSIS,
-                ),
-            ],
+            row_controls,
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        padding=ft.Padding.symmetric(horizontal=16, vertical=8),
+        padding=ft.Padding.symmetric(horizontal=16, vertical=4),
         bgcolor=ft.Colors.INVERSE_SURFACE,
     )
 
@@ -431,6 +379,20 @@ def HomeScreen() -> ft.Control:
         is_loading=state.is_loading,
     )
 
+    if not releases and not state.is_online:
+        grid_section: list[ft.Control] = [
+            empty_or_offline(
+                state,
+                title="You're offline",
+                message="Check your connection, or continue in offline mode with your downloaded episodes.",
+                icon=ft.Icons.CLOUD_OFF_ROUNDED,
+                on_retry=lambda e: controller.load_latest(1),
+                on_downloads=lambda e: controller.open_downloads(),
+            )
+        ]
+    else:
+        grid_section = [grid, pager]
+
     content = ft.Container(
         content=ft.Column(
             [
@@ -444,8 +406,7 @@ def HomeScreen() -> ft.Control:
                     weight=ft.FontWeight.W_700,
                     color=ft.Colors.ON_SURFACE,
                 ),
-                grid,
-                pager,
+                *grid_section,
                 build_banner_ad(page, inline=True),
                 ft.Container(height=32),
             ],
@@ -462,7 +423,9 @@ def HomeScreen() -> ft.Control:
         content = _cf_gate(content, state, controller)
     return ft.Column(
         [
-            _offline_banner() if not state.is_online else ft.Container(width=0),
+            _offline_banner(lambda e: controller.open_downloads())
+            if not state.is_online
+            else ft.Container(width=0),
             _home_header(state, page, controller),
             content,
         ],

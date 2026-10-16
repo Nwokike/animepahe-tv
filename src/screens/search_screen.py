@@ -420,6 +420,15 @@ def SearchScreen() -> ft.Control:
             message="Check the spelling or try a different title.",
             icon=ft.Icons.SEARCH_OFF_ROUNDED,
             on_retry=lambda e: controller.load_search(state.search_query, 1),
+            on_downloads=lambda e: controller.open_downloads(),
+        )
+    elif not getattr(state, "is_online", True):
+        results = empty_or_offline(
+            state,
+            title="You're offline",
+            message="Check your connection, or continue in offline mode with your downloaded episodes.",
+            icon=ft.Icons.CLOUD_OFF_ROUNDED,
+            on_downloads=lambda e: controller.open_downloads(),
         )
     else:
         results = EmptyState(

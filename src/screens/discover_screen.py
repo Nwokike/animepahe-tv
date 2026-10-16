@@ -103,23 +103,40 @@ def DiscoverScreen() -> ft.Control:
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
+    from flet import context as flet_context
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+
+    from components.app_header import app_header
+
     filters = state.discover_filters or []
     if not filters:
-        return ft.Column(
-            [
-                header,
-                ft.Container(height=24),
-                empty_or_offline(
-                    state,
-                    icon=ft.Icons.EXPLORE_OFF_ROUNDED,
-                    title="This source offers no discovery",
-                    message="The chosen source exposes no filtered browse. "
-                    "Pick another source (Settings → Content source) or "
-                    "just search — nothing else is consulted on its behalf.",
-                    on_retry=lambda e: controller.load_discover_filters(),
-                ),
-            ],
-            spacing=0,
+        return ft.Container(
+            content=ft.Column(
+                [
+                    app_header(state, page, controller, subtitle="Discover"),
+                    header,
+                    ft.Container(height=24),
+                    empty_or_offline(
+                        state,
+                        icon=ft.Icons.EXPLORE_OFF_ROUNDED,
+                        title="This source offers no discovery",
+                        message="The chosen source exposes no filtered browse. "
+                        "Pick another source (Settings → Content source) or "
+                        "just search — nothing else is consulted on its behalf.",
+                        on_retry=lambda e: controller.load_discover_filters(),
+                        on_downloads=lambda e: controller.open_downloads(),
+                    ),
+                ],
+                spacing=0,
+                expand=True,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+            padding=ft.Padding.only(left=24, right=24, bottom=16),
+            expand=True,
         )
 
     chips = ft.Column(
@@ -149,15 +166,6 @@ def DiscoverScreen() -> ft.Control:
         spacing=16,
         run_spacing=16,
     )
-
-    from flet import context as flet_context
-
-    try:
-        page = flet_context.page
-    except Exception:
-        page = None
-
-    from components.app_header import app_header
 
     body: list[ft.Control] = [
         # The shared header: the source pill/badge are on EVERY screen, so
@@ -194,6 +202,7 @@ def DiscoverScreen() -> ft.Control:
                 on_retry=lambda e: controller.load_discover(
                     state.discover_selections, state.discover_page
                 ),
+                on_downloads=lambda e: controller.open_downloads(),
             )
         )
     return ft.Container(

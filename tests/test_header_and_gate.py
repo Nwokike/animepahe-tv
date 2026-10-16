@@ -36,15 +36,20 @@ def test_the_title_names_the_active_backend():
 
 
 def test_the_title_pill_is_the_picker_and_the_gate_offers_a_swap():
-    from components import app_header
+    from components import app_header, offline_state
 
     source = inspect.getsource(app_header)
     # The tappable title pill exists with the dropdown affordance (now in
     # the SHARED header, so every screen's title is the switcher)…
     assert "backend_title(state)" in source
     assert "ARROW_DROP_DOWN" in source
-    # …and the wall is escapable from the gate card itself.
-    assert 'content="Change source"' in inspect.getsource(home)
+    # …and the wall is escapable from the gate card itself. The card is one
+    # shared builder (offline_state.cf_gate_card) — Home renders it through
+    # its scrim, the detail screen inline, so the two can never drift.
+    card = inspect.getsource(offline_state)
+    assert 'content="Change source"' in card
+    assert "LBL_CF_VERIFY_BUTTON" in card
+    assert "cf_gate_card" in inspect.getsource(home), "Home renders the shared card"
 
 
 def test_the_gate_scrims_the_content_not_the_header():

@@ -82,8 +82,13 @@ class AnimeOutSolver:
         return clearance
 
     async def _probe(self, clearance: dict) -> bool:
-        """Is this clearance still good? One cheap GET decides — the same
-        re-probe DDoSSolver does, so a stale cookie costs one request."""
+        """Is this clearance still good? One cheap GET decides.
+
+        Note: public.animeout.xyz root / answers an nginx 403 Forbidden
+        when cleared (directory listing is disabled). Only a real Cloudflare
+        challenge (cf-mitigated header, or "Just a moment...") means the
+        clearance is bad.
+        """
         try:
             import primp
 
@@ -98,9 +103,20 @@ class AnimeOutSolver:
         except Exception as ex:
             logger.debug("animeout clearance probe failed: %s", ex)
             return False
-        from services.ddos_solver import _looks_like_cf_challenge
 
-        return not _looks_like_cf_challenge(resp.text or "", resp.status_code)
+        headers = getattr(resp, "headers", None) or {}
+        if headers.get("cf-mitigated") == "challenge":
+            return False
+        lowered = (getattr(resp, "text", "") or "").lower()
+        return not any(
+            marker in lowered
+            for marker in (
+                "just a moment",
+                "cf-challenge",
+                "attention required",
+                "checking your browser",
+            )
+        )
 
     def file_headers(self, clearance: dict | None, referer: str | None = None) -> dict:
         """Headers for the walled host: the DDL public page referer plus the

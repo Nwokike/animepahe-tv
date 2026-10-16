@@ -113,12 +113,20 @@ class AnimePaheScraper:
             body_start = resp.text.lstrip()[:1]
             is_html_or_empty = body_start not in ("{", "[")
             if is_html_or_empty:
+                from services.providers.base import CloudflareBlocked
+
                 logger.warning(
                     "FETCH got non-JSON response (likely Cloudflare interstitial), "
-                    "treating as no data. status=%s body start: %s",
+                    "status=%s body start: %s",
                     resp.status_code,
                     resp.text[:200],
                 )
+                # An explicit challenge status is the WALL, not an empty
+                # catalogue: raise so the controller can open the gate
+                # (the 1.0.9 behavior — the solver window appears for the
+                # blocked fetch instead of "No episodes found").
+                if resp.status_code in (403, 503):
+                    raise CloudflareBlocked(f"animepahe api {resp.status_code} challenge")
                 return None
 
             if resp.status_code == 200:
@@ -129,6 +137,10 @@ class AnimePaheScraper:
                 resp.status_code,
                 resp.text[:200],
             )
+        except CloudflareBlocked:
+            # The wall is a SIGNAL for the controller's gate — it must
+            # never land in the generic empty-answer path below.
+            raise
         except Exception as ex:
             logger.error("FETCH FAILED: %s", ex)
         return None

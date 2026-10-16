@@ -42,6 +42,8 @@ def _controller(router):
     controller.router = router
     controller._loading_locks = {}
     controller._episodes_gen = 0
+    # The CF gate counter (main._user_action); this stub has no solver.
+    controller._gate_depth = 0
 
     async def _resolve(anime_session):
         return None
