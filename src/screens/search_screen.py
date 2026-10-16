@@ -221,6 +221,10 @@ def SearchScreen() -> ft.Control:
     # Inline spinner on the submit button while a search is in flight —
     # the visible half of the double-submit guard.
     searching = bool(state.is_loading and not state.search_results)
+    # Type refinement for the visible results (client-side, resets per page).
+    type_filter_state = ft.use_state("")
+    type_filter = type_filter_state[0]
+    set_type_filter = type_filter_state[1]
 
     header = ft.Row(
         [
@@ -331,6 +335,52 @@ def SearchScreen() -> ft.Control:
             expand=True,
         )
     elif state.search_results:
+        # Type refinement over the CURRENT page: the source returns mixed
+        # types (TV, Movie, OVA…), so a chip row narrows what is already
+        # here without a second query. Only types the page actually
+        # contains are offered — a chip that can only empty the grid is a
+        # lie, and a source whose results carry no type shows no chips.
+        page_types = sorted(
+            {str(a.type).strip() for a in state.search_results if str(a.type).strip()}
+        )
+
+        def _type_chip(label, value):
+            active = (type_filter or "") == value
+            return ft.Container(
+                content=ft.Text(
+                    label,
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    color=ft.Colors.ON_SURFACE,
+                ),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=6),
+                border_radius=16,
+                ink=True,
+                tooltip="Show only this type" if value else "Show everything",
+                bgcolor=ft.Colors.with_opacity(0.18, AppColors.PRIMARY)
+                if active
+                else ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE),
+                on_click=lambda e, v=value: set_type_filter(v),
+            )
+
+        chips_row = (
+            ft.Row(
+                [
+                    ft.Text("Type", size=12, weight=ft.FontWeight.W_700),
+                    _type_chip("All", ""),
+                    *[_type_chip(one, one) for one in page_types],
+                ],
+                spacing=6,
+                wrap=True,
+            )
+            if len(page_types) > 1 and type_filter not in ("__none__",)
+            else None
+        )
+        shown = [
+            a
+            for a in state.search_results
+            if not type_filter or str(a.type).strip() == type_filter
+        ]
         pager = ft_pager(
             page=state.search_page,
             has_more=state.search_has_more,
@@ -340,6 +390,7 @@ def SearchScreen() -> ft.Control:
         )
         results = ft.Column(
             [
+                *([chips_row] if chips_row is not None else []),
                 ft.ResponsiveRow(
                     controls=[
                         _result_card(
@@ -350,7 +401,7 @@ def SearchScreen() -> ft.Control:
                             mode=grid_mode,
                             provider=state.search_source or state.current_source_name,
                         )
-                        for a in state.search_results
+                        for a in shown
                     ],
                     spacing=16,
                     run_spacing=16,
