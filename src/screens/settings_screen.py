@@ -425,8 +425,11 @@ def SettingsScreen() -> ft.Control:
         _settings_card([*status_rows, test_button]) if status_rows else ft.Container(height=0),
     ]
 
+    from components.app_header import app_header
+
     return ft.Column(
         controls=[
+            app_header(state, page, controller, subtitle="Settings"),
             _section_header("APPEARANCE", "Theme preference"),
             _settings_card([theme_picker]),
             *source_section,

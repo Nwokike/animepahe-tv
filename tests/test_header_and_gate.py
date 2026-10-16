@@ -24,20 +24,27 @@ class _State:
 
 
 def test_the_title_names_the_active_backend():
-    assert home._app_title(_State("anikato")) == "Anikato TV"
-    assert home._app_title(_State("animepahe")) == "Animepahe TV"
+    from components.app_header import backend_title
+
+    assert backend_title(_State("anikato")) == "Anikato TV"
+    assert backend_title(_State("animepahe")) == "Animepahe TV"
     # Nothing resolved yet: the brand name stands in.
-    assert home._app_title(_State("")) == home.APP_NAME
-    assert home._app_title(_State("  ")) == home.APP_NAME
+    from core.constants import APP_NAME
+
+    assert backend_title(_State("")) == APP_NAME
+    assert backend_title(_State("  ")) == APP_NAME
 
 
 def test_the_title_pill_is_the_picker_and_the_gate_offers_a_swap():
-    source = inspect.getsource(home)
-    # The tappable title pill exists with the dropdown affordance…
-    assert "_app_title(state)" in source
+    from components import app_header
+
+    source = inspect.getsource(app_header)
+    # The tappable title pill exists with the dropdown affordance (now in
+    # the SHARED header, so every screen's title is the switcher)…
+    assert "backend_title(state)" in source
     assert "ARROW_DROP_DOWN" in source
     # …and the wall is escapable from the gate card itself.
-    assert 'content="Change source"' in source
+    assert 'content="Change source"' in inspect.getsource(home)
 
 
 def test_the_gate_scrims_the_content_not_the_header():
@@ -49,4 +56,6 @@ def test_the_gate_scrims_the_content_not_the_header():
     # The header is composed into the returned column AFTER the gate wraps
     # only the content.
     tail = source[source.index("if state.cf_blocked:") :]
-    assert "_header(state, page, controller, _toggle_theme, theme_icon)" in tail
+    # Home composes the SHARED header after the gate wraps the content:
+    # the header (with the backend switcher) stays live above the scrim.
+    assert "_home_header(state, page, controller)" in tail

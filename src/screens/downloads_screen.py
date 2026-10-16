@@ -293,9 +293,14 @@ def DownloadsScreen() -> ft.Control:
     sections.append(build_banner_ad(page))
     # Column takes no padding in flet 1.0.4 — the screen inset lives on the
     # wrapper so the scrollable keeps its margin.
+    from components.app_header import app_header
+
     return ft.Container(
         content=ft.Column(
-            controls=sections,
+            controls=[
+                app_header(state, page, controller, subtitle="Downloads"),
+                *sections,
+            ],
             spacing=12,
             expand=True,
             scroll=ft.ScrollMode.AUTO,

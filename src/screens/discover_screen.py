@@ -150,7 +150,19 @@ def DiscoverScreen() -> ft.Control:
         run_spacing=16,
     )
 
+    from flet import context as flet_context
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+
+    from components.app_header import app_header
+
     body: list[ft.Control] = [
+        # The shared header: the source pill/badge are on EVERY screen, so
+        # swapping a walled backend never depends on being on Home.
+        app_header(state, page, controller, subtitle="Discover"),
         header,
         ft.Container(height=12),
         chips,

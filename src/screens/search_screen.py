@@ -458,9 +458,15 @@ def SearchScreen() -> ft.Control:
     # Column has no `padding` field in flet 1.0.4 — the screen inset lives
     # on the wrapper Container (passing it to Column raises TypeError the
     # moment the component re-renders).
+    from components.app_header import app_header
+
     return ft.Container(
         content=ft.Column(
             [
+                # The shared header first: the source pill and badge live on
+                # EVERY screen, so swapping a walled backend never depends
+                # on being on Home (owner's reuse pattern).
+                app_header(state, page, controller, subtitle="Search"),
                 header,
                 follows_shelf,
                 ft.Row([ft.Container(expand=True), clear_btn], spacing=8),

@@ -251,7 +251,7 @@ def test_the_queue_caps_concurrency_across_both_paths(tmp_path):
 
 
 def test_the_badge_names_the_serving_backend():
-    from screens.home_screen import _backend_badge
+    from components.app_header import _backend_badge
 
     class _State:
         current_source_name = "anikato"
@@ -270,7 +270,7 @@ def test_the_badge_names_the_serving_backend():
 def test_the_badge_with_no_serving_backend_says_nothing_auto(tmp_path):
     """Before a source resolves the badge shows a neutral placeholder —
     the word "Auto" never appears (the owner's rule)."""
-    from screens.home_screen import _backend_badge
+    from components.app_header import _backend_badge
 
     class _State:
         current_source_name = ""

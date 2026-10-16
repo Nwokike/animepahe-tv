@@ -22,14 +22,12 @@ from components.focus_styles import (
 from components.pagination import pager as ft_pager
 from core.artwork import LANDSCAPE
 from core.constants import (
-    APP_NAME,
-    APP_VERSION,
     LBL_CF_BLOCKED_BODY,
     LBL_CF_BLOCKED_TITLE,
     LBL_CF_VERIFY_BUTTON,
     LBL_OFFLINE_BODY,
 )
-from core.theme import AppColors, next_theme_mode
+from core.theme import AppColors
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
 from services.providers.base import owner_of
@@ -110,106 +108,16 @@ def _release_card(
     )
 
 
-def _version_pill(state, page) -> ft.Control:
-    # Morphs into the "Update Available!" pill the original had, wired
-    # to the restored update dialog. Until then it's a quiet version tag.
-    update_data = state.update_data if state.update_available else None
+def _home_header(state, page, controller) -> ft.Control:
+    """The shared header plus Home's own actions — the schedule, the
+    random pick and the search entry. Everything else (the source pill,
+    the badge, the version pill, the theme cycle) comes from app_header,
+    so the switcher is identical on every screen."""
+    from components.app_header import app_header
 
-    if update_data:
-        from components.update_dialog import show_update_dialog
-
+    def _action(icon, tip, handler, colour=None) -> ft.Control:
         return ft.Container(
-            content=ft.Row(
-                [
-                    ft.Text(
-                        "Update Available!",
-                        size=11,
-                        weight=ft.FontWeight.BOLD,
-                        color=AppColors.PRIMARY,
-                    ),
-                    ft.Container(
-                        width=6,
-                        height=6,
-                        border_radius=3,
-                        bgcolor=AppColors.PRIMARY,
-                    ),
-                ],
-                spacing=4,
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            padding=ft.Padding.symmetric(horizontal=8, vertical=6),
-            border_radius=6,
-            bgcolor=ft.Colors.with_opacity(0.15, AppColors.PRIMARY),
-            border=ft.Border.all(1.5, AppColors.PRIMARY),
-            ink=True,
-            tooltip="A new version is available",
-            on_click=lambda e: show_update_dialog(page, update_data) if page else None,
-        )
-    return ft.Container(
-        content=ft.Text(
-            f"v{APP_VERSION}",
-            size=11,
-            color=ft.Colors.ON_SURFACE_VARIANT,
-        ),
-        padding=ft.Padding.symmetric(horizontal=8, vertical=6),
-        border_radius=6,
-        border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT)),
-        tooltip="Version",
-    )
-
-
-def _backend_badge(state, controller) -> ft.Control:
-    """The clickable backend badge: which provider is serving, and a state
-    colour from its live health. Tapping opens the picker for one-tap
-    switching. There is no "auto" label — the badge shows the provider that
-    IS serving (the splash covers the app until one resolves)."""
-    name = (state.current_source_name or "").strip()
-    label = name.capitalize() if name else ""
-    colour = AppColors.SUCCESS if name else ft.Colors.ON_SURFACE_VARIANT
-    return ft.Container(
-        content=ft.Row(
-            [
-                ft.Container(
-                    width=8,
-                    height=8,
-                    border_radius=4,
-                    bgcolor=colour,
-                ),
-                ft.Container(width=6),
-                ft.Text(label or "…", size=12, weight=ft.FontWeight.W_700),
-            ],
-            spacing=0,
-            tight=True,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
-        border_radius=14,
-        bgcolor=ft.Colors.with_opacity(0.1, colour),
-        border=ft.Border.all(1, ft.Colors.with_opacity(0.35, colour)),
-        ink=True,
-        tooltip=f"Served by {label} — tap to switch" if label else "Choosing a source…",
-        on_click=lambda e: controller.open_backend_picker(),
-    )
-
-
-def _app_title(state) -> str:
-    """`<Backend> TV` — "Anikato TV", "Animepahe TV" — the active source's
-    own name for the header. The brand name only stands in before anything
-    is resolved (the splash covers that moment)."""
-    name = (getattr(state, "current_source_name", "") or "").strip()
-    return f"{name.capitalize()} TV" if name else APP_NAME
-
-
-def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
-    """Icon + title-pill left; badge, version, actions right.
-
-    The title is the source switcher: "<Backend> TV ▾" — tapping it (like
-    the badge) opens the content-source picker, so changing backends never
-    depends on finding Settings."""
-
-    def action(icon, tip, handler, icon_color=None) -> ft.Control:
-        return ft.Container(
-            content=ft.Icon(icon, color=icon_color or ft.Colors.ON_SURFACE, size=20),
+            content=ft.Icon(icon, color=colour or ft.Colors.ON_SURFACE, size=20),
             padding=10,
             border_radius=10,
             ink=True,
@@ -217,91 +125,30 @@ def _header(state, page, controller, on_theme, theme_icon) -> ft.Control:
             on_click=handler,
         )
 
-    # The original dimmed the search action while the CF gate was up.
     blocked = getattr(state, "cf_blocked", False)
-    search_color = ft.Colors.OUTLINE if blocked else None
-    return ft.Container(
-        padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
-        content=ft.Row(
-            [
-                ft.Row(
-                    [
-                        ft.Image(src="icon.png", width=32, height=32, fit="contain"),
-                        ft.Container(
-                            content=ft.Row(
-                                [
-                                    ft.Text(
-                                        _app_title(state),
-                                        size=20,
-                                        weight=ft.FontWeight.W_800,
-                                        color=ft.Colors.ON_SURFACE,
-                                    ),
-                                    ft.Icon(
-                                        ft.Icons.ARROW_DROP_DOWN,
-                                        size=20,
-                                        color=ft.Colors.ON_SURFACE_VARIANT,
-                                    ),
-                                ],
-                                spacing=2,
-                                tight=True,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            padding=ft.Padding.symmetric(horizontal=6, vertical=4),
-                            border_radius=10,
-                            ink=True,
-                            tooltip="Change content source",
-                            on_click=lambda e: controller.open_backend_picker(),
-                        ),
-                    ],
-                    spacing=10,
-                ),
-                ft.Row(
-                    [
-                        _backend_badge(state, controller),
-                        _version_pill(state, page),
-                        action(
-                            ft.Icons.CALENDAR_MONTH_ROUNDED,
-                            "Airing schedule",
-                            lambda e: controller.open_schedule(),
-                        ),
-                        action(
-                            ft.Icons.SHUFFLE_ROUNDED,
-                            "Surprise me",
-                            lambda e: controller.open_random(),
-                        ),
-                        action(
-                            ft.Icons.SEARCH_ROUNDED,
-                            "Search",
-                            lambda e: controller.open_search(),
-                            icon_color=search_color,
-                        ),
-                        action(
-                            theme_icon,
-                            "Switch theme",
-                            lambda e: on_theme(),
-                        ),
-                    ],
-                    spacing=4,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-        ),
+    return app_header(
+        state,
+        page,
+        controller,
+        extra_actions=[
+            _action(
+                ft.Icons.CALENDAR_MONTH_ROUNDED,
+                "Airing schedule",
+                lambda e: controller.open_schedule(),
+            ),
+            _action(
+                ft.Icons.SHUFFLE_ROUNDED,
+                "Surprise me",
+                lambda e: controller.open_random(),
+            ),
+            _action(
+                ft.Icons.SEARCH_ROUNDED,
+                "Search",
+                lambda e: controller.open_search(),
+                colour=ft.Colors.OUTLINE if blocked else None,
+            ),
+        ],
     )
-
-
-_THEME_ICONS = {
-    ft.ThemeMode.DARK: ft.Icons.DARK_MODE_ROUNDED,
-    ft.ThemeMode.LIGHT: ft.Icons.LIGHT_MODE_ROUNDED,
-    ft.ThemeMode.SYSTEM: ft.Icons.SETTINGS_SYSTEM_DAYDREAM_ROUNDED,
-}
-
-
-def _theme_cycle(page) -> tuple[str, object]:
-    """3-way cycle: DARK -> LIGHT -> SYSTEM (Sherlock's pattern), on the
-    shared order. The icon names the mode the tap lands on."""
-    mode = getattr(page, "theme_mode", ft.ThemeMode.SYSTEM) if page else ft.ThemeMode.SYSTEM
-    nxt = next_theme_mode(mode)
-    return _THEME_ICONS.get(nxt, ft.Icons.DARK_MODE_ROUNDED), nxt
 
 
 def _continue_watching_row(entries: dict, on_open, mode: str = LANDSCAPE) -> ft.Control | None:
@@ -543,19 +390,6 @@ def HomeScreen() -> ft.Control:
     ):
         controller.load_latest()
 
-    theme_icon, next_mode = _theme_cycle(page)
-
-    def _toggle_theme():
-        if page:
-            page.theme_mode = next_mode
-            page.update()
-            from core.tasks import spawn
-
-            spawn(
-                controller._app_controller.save_theme_mode(next_mode),
-                name="save-theme",
-            )
-
     if state.is_loading and not state.latest_releases:
         return ft.Container(
             content=ft.ProgressRing(color=AppColors.PRIMARY),
@@ -629,7 +463,7 @@ def HomeScreen() -> ft.Control:
     return ft.Column(
         [
             _offline_banner() if not state.is_online else ft.Container(width=0),
-            _header(state, page, controller, _toggle_theme, theme_icon),
+            _home_header(state, page, controller),
             content,
         ],
         spacing=0,
