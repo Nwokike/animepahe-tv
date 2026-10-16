@@ -54,9 +54,7 @@ def _prune(directory: str, keep: int) -> None:
         return
     try:
         names = sorted(
-            n
-            for n in os.listdir(directory)
-            if n.startswith(PREFIX) and n.endswith(".png")
+            n for n in os.listdir(directory) if n.startswith(PREFIX) and n.endswith(".png")
         )
     except OSError:
         return

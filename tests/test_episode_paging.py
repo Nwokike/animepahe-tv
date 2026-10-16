@@ -17,16 +17,16 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core.state import Anime, Episode  # noqa: E402
-from services.providers.anikato import AniKatoProvider  # noqa: E402
-from services.providers.animeout import AnimeOutProvider  # noqa: E402
-from services.providers.animepahe_provider import AnimePaheProvider  # noqa: E402
-from services.providers.base import (  # noqa: E402
+from core.state import Anime, Episode
+from services.providers.anikato import AniKatoProvider
+from services.providers.animeout import AnimeOutProvider
+from services.providers.animepahe_provider import AnimePaheProvider
+from services.providers.base import (
     EPISODES_PER_PAGE,
     all_episodes,
     page_slice,
 )
-from services.providers.kayoanime import KayoanimeProvider  # noqa: E402
+from services.providers.kayoanime import KayoanimeProvider
 
 
 def _eps(n: int) -> list[Episode]:

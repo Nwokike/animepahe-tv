@@ -118,7 +118,9 @@ async def shapes_for(
 
     owned = client is None
     if owned:
-        client = primp.AsyncClient(impersonate="chrome", timeout=PROBE_TIMEOUT, follow_redirects=True)
+        client = primp.AsyncClient(
+            impersonate="chrome", timeout=PROBE_TIMEOUT, follow_redirects=True
+        )
     try:
         semaphore = asyncio.Semaphore(PROBE_CONCURRENCY)
 

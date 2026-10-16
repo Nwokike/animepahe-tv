@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core.snapshots import (  # noqa: E402
+from core.snapshots import (
     KEEP_SNAPSHOTS,
     save_snapshot,
     snapshot_filename,
@@ -50,9 +50,7 @@ def test_rotation_keeps_the_newest(tmp_path):
     names = sorted(n for n in os.listdir(tmp_path) if n.endswith(".png"))
     assert len(names) == KEEP_SNAPSHOTS
     # The oldest five are gone; the newest is present.
-    assert names[-1] == snapshot_filename(
-        base + timedelta(milliseconds=KEEP_SNAPSHOTS + 4)
-    )
+    assert names[-1] == snapshot_filename(base + timedelta(milliseconds=KEEP_SNAPSHOTS + 4))
     assert snapshot_filename(base) not in names
 
 
@@ -100,9 +98,7 @@ def test_take_snapshot_writes_and_names_the_file(monkeypatch, tmp_path):
     import core.notify
 
     snacks = []
-    monkeypatch.setattr(
-        core.notify, "show_snack", lambda page, msg, **kw: snacks.append(msg)
-    )
+    monkeypatch.setattr(core.notify, "show_snack", lambda page, msg, **kw: snacks.append(msg))
     player = _player(b"png-bytes", str(tmp_path))
     asyncio.run(player._take_snapshot())
     files = [n for n in os.listdir(tmp_path) if n.endswith(".png")]
@@ -114,9 +110,7 @@ def test_take_snapshot_without_bytes_says_unavailable(monkeypatch, tmp_path):
     import core.notify
 
     snacks = []
-    monkeypatch.setattr(
-        core.notify, "show_snack", lambda page, msg, **kw: snacks.append(msg)
-    )
+    monkeypatch.setattr(core.notify, "show_snack", lambda page, msg, **kw: snacks.append(msg))
     player = _player(None, str(tmp_path))
     asyncio.run(player._take_snapshot())
     assert snacks == ["Screenshot unavailable"]
@@ -154,6 +148,4 @@ def test_snapshot_directory_falls_back_off_web_and_on_error(monkeypatch):
             return "/storage/emulated/0/Download"
 
     monkeypatch.setattr(ip.ft, "StoragePaths", _OK)
-    assert (
-        asyncio.run(player._snapshot_directory()) == "/storage/emulated/0/Download"
-    )
+    assert asyncio.run(player._snapshot_directory()) == "/storage/emulated/0/Download"

@@ -172,7 +172,7 @@ _display_web = False
 IMAGE_CACHE_TTL = 900.0
 IMAGE_CACHE_MAX = 128
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-# Failed fetches are negative-cached briefly and answered with a 1×1
+# Failed fetches are negative-cached briefly and answered with a 1x1
 # transparent PNG (200): the renderer treats any non-200 as a page error
 # per image, and one walled host (animeout's CF-challenged wp-content)
 # used to bury the log in hundreds of them per render — every repeat also
@@ -279,9 +279,7 @@ class HLSProxy:
 
         # The local socket is hand-rolled HTTP/1.1 (see _send_response).
         self._started = True
-        logger.info(
-            "HLSProxy started at http://%s:%s (upstream HTTP/2)", self.host, self.port
-        )
+        logger.info("HLSProxy started at http://%s:%s (upstream HTTP/2)", self.host, self.port)
         return f"http://{self.host}:{self.port}"
 
     async def stop(self):
@@ -354,9 +352,7 @@ class HLSProxy:
         upstream.update(headers or {})
         return upstream
 
-    async def fetch_master(
-        self, target_url: str, headers: dict[str, str] | None = None
-    ):
+    async def fetch_master(self, target_url: str, headers: dict[str, str] | None = None):
         """Fetch a playlist for inspection. Returns (content_type, text)."""
         now = time.monotonic()
         cache_key = f"{target_url}_{json.dumps(headers or {}, sort_keys=True)}"
@@ -370,16 +366,12 @@ class HLSProxy:
         merged = {"User-Agent": USER_AGENT}
         merged.update(headers or {})
         try:
-            resp = await self._http_client.get(
-                target_url, headers=merged, follow_redirects=True
-            )
+            resp = await self._http_client.get(target_url, headers=merged, follow_redirects=True)
         except Exception as ex:
             raise PlaylistFetchError(target_url, ex) from ex
         if resp.status_code != 200:
             raise PlaylistFetchError(target_url, f"upstream status {resp.status_code}")
-        content_type = next(
-            (v for k, v in resp.headers.items() if k.lower() == "content-type"), ""
-        )
+        content_type = next((v for k, v in resp.headers.items() if k.lower() == "content-type"), "")
         text = resp.text
         # Cap master cache size to 50 entries
         if len(self._master_cache) >= 50:
@@ -424,18 +416,14 @@ class HLSProxy:
     _MAX_HEADER_BYTES = 8192
     _MAX_QUERY_BYTES = 16384
 
-    async def _handle_client(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ):
+    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         async def _send400(msg: bytes) -> None:
             with contextlib.suppress(Exception):
                 await self._send_response(writer, 400, "text/plain", msg)
 
         try:
             try:
-                line = await asyncio.wait_for(
-                    reader.readline(), timeout=self._READ_TIMEOUT
-                )
+                line = await asyncio.wait_for(reader.readline(), timeout=self._READ_TIMEOUT)
             except TimeoutError:
                 writer.close()
                 return
@@ -453,9 +441,7 @@ class HLSProxy:
             method, path_qs = parts[0].upper(), parts[1]
             if method != "GET":
                 # The player only ever GETs from the proxy.
-                await self._send_response(
-                    writer, 405, "text/plain", b"Method Not Allowed"
-                )
+                await self._send_response(writer, 405, "text/plain", b"Method Not Allowed")
                 return
             if len(path_qs) > self._MAX_QUERY_BYTES:
                 await _send400(b"Request URI too long")
@@ -465,9 +451,7 @@ class HLSProxy:
             header_bytes = 0
             for _ in range(self._MAX_HEADER_LINES + 1):
                 try:
-                    h_line = await asyncio.wait_for(
-                        reader.readline(), timeout=self._READ_TIMEOUT
-                    )
+                    h_line = await asyncio.wait_for(reader.readline(), timeout=self._READ_TIMEOUT)
                 except TimeoutError:
                     writer.close()
                     return
@@ -490,9 +474,7 @@ class HLSProxy:
 
             raw_target_url = query.get("url", [None])[0]
             if not raw_target_url:
-                await self._send_response(
-                    writer, 400, "text/plain", b"Missing url param"
-                )
+                await self._send_response(writer, 400, "text/plain", b"Missing url param")
                 return
 
             try:
@@ -589,9 +571,7 @@ class HLSProxy:
         audio: str | None = None,
     ):
         if not self._http_client:
-            await self._send_response(
-                writer, 500, "text/plain", b"Proxy client uninitialized"
-            )
+            await self._send_response(writer, 500, "text/plain", b"Proxy client uninitialized")
             return
 
         try:
@@ -600,9 +580,7 @@ class HLSProxy:
             )
         except Exception as ex:
             logger.warning("Upstream playlist request failed: %s", ex)
-            await self._send_response(
-                writer, 502, "text/plain", b"Upstream unavailable"
-            )
+            await self._send_response(writer, 502, "text/plain", b"Upstream unavailable")
             return
         if resp.status_code != 200:
             await self._send_response(
@@ -613,9 +591,7 @@ class HLSProxy:
             )
             return
 
-        content_type = next(
-            (v for k, v in resp.headers.items() if k.lower() == "content-type"), ""
-        )
+        content_type = next((v for k, v in resp.headers.items() if k.lower() == "content-type"), "")
         playlist_text = resp.text
         if "#EXTM3U" not in playlist_text[:1024] and "mpegurl" not in content_type.lower():
             # Not actually a playlist (extension-less segment misrouted here
@@ -671,10 +647,7 @@ class HLSProxy:
         base_proxy = f"http://{self.host}:{self.port}"
 
         def _proxy_sub(abs_url: str) -> str:
-            return (
-                f"{base_proxy}/playlist.m3u8?"
-                f"url={_b64_encode(abs_url)}{ref_param}{hdrs_param}"
-            )
+            return f"{base_proxy}/playlist.m3u8?url={_b64_encode(abs_url)}{ref_param}{hdrs_param}"
 
         for line in lines:
             stripped = line.strip()
@@ -691,30 +664,20 @@ class HLSProxy:
                 attrs = _parse_attrs(stripped[len("#EXT-X-MEDIA:") :])
                 media_type = attrs.get("TYPE", "").upper()
                 if attrs.get("URI"):
-                    if (
-                        media_type == "AUDIO"
-                        and audio is not None
-                        and attrs.get("NAME") != audio
-                    ):
+                    if media_type == "AUDIO" and audio is not None and attrs.get("NAME") != audio:
                         # Pinned to a different rendition — drop this one
                         continue
                     abs_uri = urllib.parse.urljoin(base_url, attrs["URI"])
                     new_line = MEDIA_URI_PATTERN.sub(
                         lambda m, u=abs_uri: f'{m.group(1)}"{_proxy_sub(u)}"', stripped
                     )
-                    if (
-                        media_type == "AUDIO"
-                        and audio is not None
-                        and attrs.get("NAME") == audio
-                    ):
+                    if media_type == "AUDIO" and audio is not None and attrs.get("NAME") == audio:
                         attr_text = new_line[len("#EXT-X-MEDIA:") :]
                         attr_text = re.sub(r",?\s*DEFAULT=[^,]*", "", attr_text)
                         attr_text = re.sub(r",?\s*AUTOSELECT=[^,]*", "", attr_text)
                         attr_text = attr_text.strip(",")
                         if attr_text:
-                            new_line = (
-                                f"#EXT-X-MEDIA:{attr_text},DEFAULT=YES,AUTOSELECT=YES"
-                            )
+                            new_line = f"#EXT-X-MEDIA:{attr_text},DEFAULT=YES,AUTOSELECT=YES"
                         else:
                             new_line = "#EXT-X-MEDIA:DEFAULT=YES,AUTOSELECT=YES"
                     output_lines.append(new_line)
@@ -731,9 +694,7 @@ class HLSProxy:
                         f"{base_proxy}/segment?"
                         f"url={_b64_encode(abs_map_url)}{ref_param}{hdrs_param}"
                     )
-                    new_map_tag = KEY_URI_PATTERN.sub(
-                        f'URI="{proxy_map_url}"', stripped
-                    )
+                    new_map_tag = KEY_URI_PATTERN.sub(f'URI="{proxy_map_url}"', stripped)
                     output_lines.append(new_map_tag)
                 else:
                     output_lines.append(line)
@@ -745,12 +706,9 @@ class HLSProxy:
                     key_url = match.group(1)
                     abs_key_url = urllib.parse.urljoin(base_url, key_url)
                     proxy_key_url = (
-                        f"{base_proxy}/key?"
-                        f"url={_b64_encode(abs_key_url)}{ref_param}{hdrs_param}"
+                        f"{base_proxy}/key?url={_b64_encode(abs_key_url)}{ref_param}{hdrs_param}"
                     )
-                    new_key_tag = KEY_URI_PATTERN.sub(
-                        f'URI="{proxy_key_url}"', stripped
-                    )
+                    new_key_tag = KEY_URI_PATTERN.sub(f'URI="{proxy_key_url}"', stripped)
                     output_lines.append(new_key_tag)
                 else:
                     output_lines.append(line)
@@ -778,8 +736,7 @@ class HLSProxy:
             # file format". (A line that really is a nested playlist still
             # works: /segment streams the bytes it fetches.)
             output_lines.append(
-                f"{base_proxy}/segment?"
-                f"url={_b64_encode(abs_seg_url)}{ref_param}{hdrs_param}"
+                f"{base_proxy}/segment?url={_b64_encode(abs_seg_url)}{ref_param}{hdrs_param}"
             )
 
         if stream_inf_line is not None:
@@ -788,10 +745,8 @@ class HLSProxy:
 
         return "\n".join(output_lines)
 
-    async def _placeholder_image(
-        self, writer: asyncio.StreamWriter, key: str, now: float
-    ) -> None:
-        """A failed fetch: quiet 1×1 PNG + negative cache (see the
+    async def _placeholder_image(self, writer: asyncio.StreamWriter, key: str, now: float) -> None:
+        """A failed fetch: quiet 1x1 PNG + negative cache (see the
         constants' comment — non-200 image responses are page errors)."""
         if len(self._image_fail) >= IMAGE_CACHE_MAX:
             oldest = min(self._image_fail, key=lambda k: self._image_fail[k])
@@ -819,9 +774,7 @@ class HLSProxy:
             await self._send_response(writer, 200, "image/png", PLACEHOLDER_PNG)
             return
         if not self._http_client:
-            await self._send_response(
-                writer, 500, "text/plain", b"Proxy client uninitialized"
-            )
+            await self._send_response(writer, 500, "text/plain", b"Proxy client uninitialized")
             return
         try:
             resp = await self._http_client.get(
@@ -840,9 +793,7 @@ class HLSProxy:
             logger.debug("image too large for %s", target_url)
             await self._placeholder_image(writer, key, now)
             return
-        content_type = next(
-            (v for k, v in resp.headers.items() if k.lower() == "content-type"), ""
-        )
+        content_type = next((v for k, v in resp.headers.items() if k.lower() == "content-type"), "")
         if not str(content_type).lower().startswith("image/"):
             # A non-image upstream response is forwarded honestly as bytes,
             # never as a fake image type.
@@ -860,9 +811,7 @@ class HLSProxy:
         upstream_headers: dict[str, str],
     ):
         if not self._http_client:
-            await self._send_response(
-                writer, 500, "text/plain", b"Proxy client uninitialized"
-            )
+            await self._send_response(writer, 500, "text/plain", b"Proxy client uninitialized")
             return
 
         try:
@@ -874,15 +823,12 @@ class HLSProxy:
             )
         except Exception as ex:
             logger.warning("Upstream stream request failed: %s", ex)
-            await self._send_response(
-                writer, 502, "text/plain", b"Upstream unavailable"
-            )
+            await self._send_response(writer, 502, "text/plain", b"Upstream unavailable")
             return
 
         try:
             status_line = (
-                f"HTTP/1.1 {resp.status_code} "
-                f"{REASON_PHRASES.get(resp.status_code, 'Unknown')}\r\n"
+                f"HTTP/1.1 {resp.status_code} {REASON_PHRASES.get(resp.status_code, 'Unknown')}\r\n"
             )
             writer.write(status_line.encode("latin1"))
 
@@ -927,9 +873,7 @@ class HLSProxy:
         try:
             writer.write(
                 f"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
-                f"Content-Length: {len(resp.content)}\r\nConnection: close\r\n\r\n".encode(
-                    "latin1"
-                )
+                f"Content-Length: {len(resp.content)}\r\nConnection: close\r\n\r\n".encode("latin1")
                 + resp.content
             )
             await writer.drain()

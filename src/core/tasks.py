@@ -43,7 +43,10 @@ def session_alive() -> bool:
     if page is None:
         return False
     try:
-        page.session  # raises RuntimeError once the session is destroyed
+        # The ACCESS is the probe: it raises RuntimeError once the session
+        # is destroyed. Assigning to a throwaway keeps the expression's
+        # effect while satisfying the useless-expression lint (B018).
+        _ = page.session
     except RuntimeError:
         return False
     return True

@@ -16,6 +16,7 @@ rebuild goes through the same builder so the caller needs no logic.
 """
 
 import logging
+
 import flet as ft
 
 try:
@@ -67,9 +68,7 @@ def build_banner_ad(page=None, inline: bool = False) -> ft.Control:
         try:
             return fya.BannerAd(
                 unit_id=AD_BANNER_UNIT_ID,
-                size_type=fya.BannerSizeType.INLINE
-                if inline
-                else fya.BannerSizeType.STICKY,
+                size_type=fya.BannerSizeType.INLINE if inline else fya.BannerSizeType.STICKY,
                 max_height=_INLINE_MAX_HEIGHT if inline else None,
                 on_load=lambda e: None,
                 on_load_failed=lambda e: (

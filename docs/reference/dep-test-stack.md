@@ -60,7 +60,7 @@ require all their dependencies to have equal-or-wider scope (a
 Our suite's only declared fixture (`tests/test_store.py:24`):
 
 ```python
-@pytest.fixture          # function scope (default), no params, no autouse
+@pytest.fixture  # function scope (default), no params, no autouse
 def store():
     return JsonStore(filename=f"test-{next(_seq)}.json")
 ```
@@ -224,7 +224,7 @@ Source: `pytest_addoption` (`plugin.py:108`) + `_get_asyncio_mode`
 (`plugin.py:222`) + `ASYNCIO_MODE_HELP`:
 
 ```python
-parser.addini("asyncio_mode", default="strict")   # --asyncio-mode overrides ini
+parser.addini("asyncio_mode", default="strict")  # --asyncio-mode overrides ini
 ```
 
 - **strict** (current effective mode): only items carrying the `asyncio`
@@ -284,19 +284,22 @@ Verified by grepping the installed `plugin.py` (function/class index,
 
 ```python
 @pytest.fixture(scope="session", autouse=True)
-def event_loop_policy() -> AbstractEventLoopPolicy: ...   # plugin.py:1076
+def event_loop_policy() -> AbstractEventLoopPolicy: ...  # plugin.py:1076
+
 
 @pytest.fixture(scope="session")
 def _asyncio_loop_factory(request) -> LoopFactory | None: ...  # plugin.py:1071
+
 
 # per-scope runners, created in a loop: _function_scoped_runner,
 # _class_scoped_runner, _module_scoped_runner, _package_scoped_runner,
 # _session_scoped_runner  (plugin.py:1023 + for scope in Scope loop)
 
+
 @pytest.fixture
-def unused_tcp_port() -> int: ...            # plugin.py:1094
+def unused_tcp_port() -> int: ...  # plugin.py:1094
 @pytest.fixture
-def unused_udp_port() -> int: ...            # plugin.py:1099
+def unused_udp_port() -> int: ...  # plugin.py:1099
 @pytest.fixture(scope="session")
 def unused_tcp_port_factory() -> Callable[[], int]: ...  # plugin.py:1104
 @pytest.fixture(scope="session")

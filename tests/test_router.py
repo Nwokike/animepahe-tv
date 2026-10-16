@@ -13,6 +13,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+import contextlib
+
 from core.state import Anime, Episode, Source
 from services.router import ProviderRouter, RouterError
 
@@ -33,9 +35,7 @@ class FakeProvider:
             [Anime(2, "S", "TV", 1, "Airing", "fall", 2024, 8.0, "p", f"{name}:a2")],
             True,
         )
-        self.episodes_data = [
-            Episode(1, 1, 1, "Ep 1", "snap", "", "jpn", "24m", "e1", False)
-        ]
+        self.episodes_data = [Episode(1, 1, 1, "Ep 1", "snap", "", "jpn", "24m", "e1", False)]
         self.sources_data = [Source("https://x/e.mkv", 1080, "jpn", "SubsPlease")]
 
     async def probe(self):
@@ -119,7 +119,7 @@ def test_all_down_raises_router_error_with_wrapped_cause():
     r = _router(p1, p2)
     try:
         asyncio.run(r.latest_releases(1))
-        assert False, "expected RouterError"
+        raise AssertionError("expected RouterError")
     except RouterError as ex:
         assert isinstance(ex.__cause__, RuntimeError)
 
@@ -128,7 +128,7 @@ def test_empty_answer_falls_through_to_next_provider():
     p1, p2 = FakeProvider("p1"), FakeProvider("p2")
     p1.latest_data = ([], False)
     r = _router(p1, p2)
-    releases, has_more = asyncio.run(r.latest_releases(1))
+    releases, _has_more = asyncio.run(r.latest_releases(1))
     assert releases[0].title == "T"  # p2 served
     assert p2.calls
 
@@ -188,10 +188,8 @@ def test_three_consecutive_failures_open_the_circuit():
     p1.fail_latest = 99
     r = _router(p1, p2)
     for _ in range(BREAKER_FAIL_THRESHOLD):
-        try:
+        with contextlib.suppress(RouterError):
             asyncio.run(r.latest_releases(1))
-        except RouterError:
-            pass
     assert r.health()["p1"].state == "open"
     assert r.health()["p2"].state == "closed"
     calls_before = len(p1.calls)
@@ -211,10 +209,8 @@ def test_half_open_trial_recovers_and_failure_doubles_cooldown():
     p1.fail_latest = BREAKER_FAIL_THRESHOLD
     r = _router(p1, p2, clock=clock)
     for _ in range(BREAKER_FAIL_THRESHOLD + 1):
-        try:
+        with contextlib.suppress(RouterError):
             asyncio.run(r.latest_releases(1))
-        except RouterError:
-            pass
     assert r.health()["p1"].state == "open"
     p1.fail_latest = 0
     clock.advance(BREAKER_OPEN_SECONDS + 1)
@@ -222,10 +218,8 @@ def test_half_open_trial_recovers_and_failure_doubles_cooldown():
     assert r.health()["p1"].state == "closed"
     p1.fail_latest = 99
     for _ in range(BREAKER_FAIL_THRESHOLD):
-        try:
+        with contextlib.suppress(RouterError):
             asyncio.run(r.latest_releases(1))
-        except RouterError:
-            pass
     clock.advance(BREAKER_OPEN_SECONDS + 1)
     asyncio.run(r.latest_releases(1))  # the failed trial
     breaker = r._breakers["p1"]
@@ -239,10 +233,8 @@ def test_force_bypasses_open_circuit_for_explicit_user_retry():
     p1.fail_latest = 99
     r = _router(p1, p2)
     for _ in range(BREAKER_FAIL_THRESHOLD + 1):
-        try:
+        with contextlib.suppress(RouterError):
             asyncio.run(r.latest_releases(1))
-        except RouterError:
-            pass
     assert r.health()["p1"].state == "open"
     calls = len(p1.calls)
     # The owner's circuit is open and the session names p1 alone: asking
@@ -250,7 +242,7 @@ def test_force_bypasses_open_circuit_for_explicit_user_retry():
     # honest answer is a fast RouterError.
     try:
         asyncio.run(r.sources("p1:a1", "e1"))
-        assert False, "expected RouterError for an open owner circuit"
+        raise AssertionError("expected RouterError for an open owner circuit")
     except RouterError:
         pass
     # the pin path: force the open provider explicitly
@@ -275,7 +267,7 @@ def test_session_owner_is_tried_first():
     # returns unvalidated answers could WIN the race with garbage.
     try:
         asyncio.run(r2.episodes("p2:a1", 1))
-        assert False, "expected RouterError when the owner fails"
+        raise AssertionError("expected RouterError when the owner fails")
     except RouterError:
         pass
     assert not p1.calls  # the non-owner was never asked
@@ -296,7 +288,7 @@ def test_an_unknown_session_owner_fails_fast():
     r = _router(p1)
     try:
         asyncio.run(r.episodes("nosuchprovider:1", 1))
-        assert False, "expected RouterError"
+        raise AssertionError("expected RouterError")
     except RouterError as ex:
         assert "owns the session" in str(ex)
     assert p1.calls == []
@@ -306,10 +298,8 @@ def test_health_records_latency_and_errors():
     p1 = FakeProvider("p1")
     p1.fail_latest = 1
     r = _router(p1)
-    try:
+    with contextlib.suppress(RouterError):
         asyncio.run(r.latest_releases(1))
-    except RouterError:
-        pass
     h = r.health()["p1"]
     assert h.last_error and h.checked_at > 0
 
@@ -406,7 +396,7 @@ def test_a_pinned_catalog_fails_honestly_when_the_owner_is_down():
     r.set_pin("p2")
     try:
         asyncio.run(r.latest_releases(1))
-        assert False, "expected RouterError"
+        raise AssertionError("expected RouterError")
     except RouterError:
         pass
     assert p1.calls == [], "no silent catalog from another backend"
@@ -417,7 +407,7 @@ def test_empty_router_is_inert_not_fatal():
     assert asyncio.run(r.probe_all()) == {}
     try:
         asyncio.run(r.latest_releases(1))
-        assert False, "expected RouterError"
+        raise AssertionError("expected RouterError")
     except RouterError as ex:
         assert "no providers" in str(ex)
 

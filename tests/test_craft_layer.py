@@ -12,7 +12,7 @@ sys.path.insert(0, __file__.rsplit("tests", 1)[0] + "src")
 import flet as ft
 
 from components.cross_promo import PROMO_APPS, ROTATE_SECONDS
-from components.pagination import pager, page_pill
+from components.pagination import page_pill, pager
 
 
 class _Calls:
@@ -56,11 +56,7 @@ def test_page_pill_disabled_recolours_the_label():
 
 def test_pager_orders_prev_indicator_next():
     row = pager(page=3, has_more=True, on_prev=lambda e: None, on_next=lambda e: None)
-    labels = [
-        c.content.controls[1].value
-        for c in row.controls
-        if isinstance(c, ft.OutlinedButton)
-    ]
+    labels = [c.content.controls[1].value for c in row.controls if isinstance(c, ft.OutlinedButton)]
     assert labels == ["Prev", "Next"]
     # The page indicator sits between them.
     assert isinstance(row.controls[1], ft.Text)

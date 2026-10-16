@@ -12,18 +12,15 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import flet as ft
+
 from components.artwork_card import card_frame
 from core.artwork import LANDSCAPE, PORTRAIT
 
 
 def test_card_frame_density_by_mode():
     media = ft.Container()
-    portrait_card = card_frame(
-        mode=PORTRAIT, media=media, overlay=[], on_click=lambda e: None
-    )
-    landscape_card = card_frame(
-        mode=LANDSCAPE, media=media, overlay=[], on_click=lambda e: None
-    )
+    portrait_card = card_frame(mode=PORTRAIT, media=media, overlay=[], on_click=lambda e: None)
+    landscape_card = card_frame(mode=LANDSCAPE, media=media, overlay=[], on_click=lambda e: None)
 
     # card_frame returns a Button wrapped by attach_focus_zoom
     assert portrait_card.style.padding == 8
@@ -32,6 +29,7 @@ def test_card_frame_density_by_mode():
 
 def test_search_and_discover_grid_spacing_and_insets():
     import inspect
+
     import screens.discover_screen as discover
     import screens.search_screen as search
 

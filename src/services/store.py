@@ -27,15 +27,11 @@ SEARCH_HISTORY_LIMIT = 20
 CONTINUE_WATCHING_LIMIT = 20
 
 
-_default_store: "JsonStore | None" = None
-
-
-def get_store() -> "JsonStore":
-    """Process-wide store singleton — every writer must share one instance."""
-    global _default_store
-    if _default_store is None:
-        _default_store = JsonStore()
-    return _default_store
+def _read_json_file(path: str):
+    """Blocking read for asyncio.to_thread — the durable load must not
+    stall the UI loop (ASYNC230)."""
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _atomic_write_json(path: str, payload: dict) -> None:
@@ -67,8 +63,7 @@ class JsonStore:
             return
         self._loaded = True
         try:
-            with open(self.path, encoding="utf-8") as f:
-                raw = json.load(f)
+            raw = await asyncio.to_thread(_read_json_file, self.path)
             if isinstance(raw, dict):
                 self._data = raw
         except (OSError, ValueError):
@@ -178,21 +173,15 @@ class JsonStore:
         if session:
             history = [r for r in history if r.get("session") != session]
         else:
-            history = [
-                r for r in history if r.get("title", "").lower() != title.lower()
-            ]
-        history.insert(
-            0, {"title": title[:200], "session": session[:120], "ts": time.time()}
-        )
+            history = [r for r in history if r.get("title", "").lower() != title.lower()]
+        history.insert(0, {"title": title[:200], "session": session[:120], "ts": time.time()})
         del history[SEARCH_HISTORY_LIMIT:]
         await self.put_section("search_history", history)
 
     async def remove_search(self, title: str, session: str = "") -> None:
         history = await self.get_search_history()
         history = [
-            r
-            for r in history
-            if not (r.get("title") == title and r.get("session") == session)
+            r for r in history if not (r.get("title") == title and r.get("session") == session)
         ]
         await self.put_section("search_history", history)
 
@@ -228,9 +217,7 @@ class JsonStore:
         entries = dict(
             sorted(
                 entries.items(),
-                key=lambda kv: kv[1].get("timestamp", 0)
-                if isinstance(kv[1], dict)
-                else 0,
+                key=lambda kv: kv[1].get("timestamp", 0) if isinstance(kv[1], dict) else 0,
                 reverse=True,
             )
         )
@@ -319,9 +306,7 @@ class JsonStore:
         keyed = entry.get(host)
         return keyed if isinstance(keyed, dict) and keyed.get("cookies") else None
 
-    async def save_clearance(
-        self, cookies: str, user_agent: str, host: str | None = None
-    ) -> None:
+    async def save_clearance(self, cookies: str, user_agent: str, host: str | None = None) -> None:
         if not cookies:
             return
         host = host or self._DEFAULT_CLEARANCE_HOST
@@ -465,9 +450,7 @@ class JsonStore:
         if len(follows) > self.FOLLOWS_LIMIT:
             oldest = sorted(
                 follows.items(),
-                key=lambda kv: kv[1].get("added_at", 0)
-                if isinstance(kv[1], dict)
-                else 0,
+                key=lambda kv: kv[1].get("added_at", 0) if isinstance(kv[1], dict) else 0,
             )
             for session, _ in oldest[: len(follows) - self.FOLLOWS_LIMIT]:
                 follows.pop(session, None)
@@ -542,3 +525,14 @@ class JsonStore:
             return
         current[key] = mode
         await self.put_section("artwork_defaults", current)
+
+
+_default_store: JsonStore | None = None
+
+
+def get_store() -> JsonStore:
+    """Process-wide store singleton — every writer must share one instance."""
+    global _default_store
+    if _default_store is None:
+        _default_store = JsonStore()
+    return _default_store

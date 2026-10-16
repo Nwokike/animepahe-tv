@@ -49,14 +49,10 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
     # rather than a lie at 0%.
     running = job_state in (STATE_DOWNLOADING, STATE_QUEUED)
     bar_value = (
-        min(max(float(percent), 0.0), 100.0) / 100.0
-        if isinstance(percent, (int, float))
-        else None
+        min(max(float(percent), 0.0), 100.0) / 100.0 if isinstance(percent, (int, float)) else None
     )
     if job_state == STATE_DOWNLOADING:
-        status_text = (
-            f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
-        )
+        status_text = f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
     elif job_state == STATE_QUEUED:
         status_text = "Waiting…"
     elif job_state == STATE_STOPPED:
@@ -97,7 +93,9 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
         if job_state in (STATE_STOPPED, STATE_FAILED):
             trailing.append(
                 ft.IconButton(
-                    icon=ft.Icons.PLAY_ARROW_ROUNDED if job_state == STATE_STOPPED else ft.Icons.REFRESH_ROUNDED,
+                    icon=ft.Icons.PLAY_ARROW_ROUNDED
+                    if job_state == STATE_STOPPED
+                    else ft.Icons.REFRESH_ROUNDED,
                     icon_size=20,
                     tooltip="Resume" if job_state == STATE_STOPPED else "Retry",
                     on_click=lambda e: controller.resume_download(session),
@@ -228,13 +226,9 @@ def DownloadsScreen() -> ft.Control:
 
     sections = []
     for session_key, group in groups.items():
-        rows = sorted(
-            group["rows"], key=lambda r: r[1].get("episode_num", 0), reverse=True
-        )
+        rows = sorted(group["rows"], key=lambda r: r[1].get("episode_num", 0), reverse=True)
         total_size = sum(
-            (r[1].get("size_bytes") or 0)
-            for r in rows
-            if r[1].get("state") == "complete"
+            (r[1].get("size_bytes") or 0) for r in rows if r[1].get("state") == "complete"
         )
         header = ft.Row(
             [
@@ -292,9 +286,7 @@ def DownloadsScreen() -> ft.Control:
                 padding=ft.Padding.all(12),
                 border_radius=12,
                 bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
-                border=ft.Border.all(
-                    1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)
-                ),
+                border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)),
             )
         )
 

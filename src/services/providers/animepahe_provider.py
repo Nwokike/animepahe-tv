@@ -24,9 +24,11 @@ synopsis block; (5) kwik.si Referer in the logs.
 """
 
 import logging
+from typing import ClassVar
 
 from core.state import Anime, Episode, LatestRelease, Source
-from services.animepahe import BASE as ANIMEPAHE_BASE, AnimePaheScraper
+from services.animepahe import BASE as ANIMEPAHE_BASE
+from services.animepahe import AnimePaheScraper
 from services.providers.base import all_episodes
 
 logger = logging.getLogger("animepahe.provider.animepahe")
@@ -34,7 +36,7 @@ logger = logging.getLogger("animepahe.provider.animepahe")
 
 class AnimePaheProvider:
     name = "animepahe"
-    capabilities = {
+    capabilities: ClassVar[dict] = {
         "files": True,
         "episodes": True,
         "episode_stills": True,
@@ -95,9 +97,7 @@ class AnimePaheProvider:
                 self._anime_ids[ep.session] = ep.anime_id
         return episodes, has_more
 
-    async def _sources_via_links(
-        self, anime_session: str, episode_session: str
-    ) -> list[Source]:
+    async def _sources_via_links(self, anime_session: str, episode_session: str) -> list[Source]:
         """m=links: one JSON call -> per-rendition {audio, kwik,
         kwik_pahewin, filesize?, hd}. Needs the numeric anime_id from
         m=release (carried on the episodes we already loaded).
@@ -130,9 +130,15 @@ class AnimePaheProvider:
             try:
                 if isinstance(key, str) and key.isdigit():
                     resolution = int(key)
-                elif isinstance(entry.get("quality"), (int, str)) and str(entry.get("quality")).isdigit():
+                elif (
+                    isinstance(entry.get("quality"), (int, str))
+                    and str(entry.get("quality")).isdigit()
+                ):
                     resolution = int(entry.get("quality"))
-                elif isinstance(entry.get("resolution"), (int, str)) and str(entry.get("resolution")).isdigit():
+                elif (
+                    isinstance(entry.get("resolution"), (int, str))
+                    and str(entry.get("resolution")).isdigit()
+                ):
                     resolution = int(entry.get("resolution"))
                 else:
                     resolution = 0
@@ -216,12 +222,12 @@ def _parse_details(html: str, session: str) -> Anime | None:
     import re
 
     def text(pattern: str) -> str:
-        m = re.search(pattern, html, re.S)
+        m = re.search(pattern, html, re.DOTALL)
         return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
 
-    title = text(
-        r"title-wrapper[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>"
-    ) or text(r"header[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>")
+    title = text(r"title-wrapper[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>") or text(
+        r"header[^>]*>\s*<h1[^>]*>\s*<span[^>]*>([^<]+)</span>"
+    )
     if not title:
         return None
     poster = text(r'anime-poster[^>]*>\s*<a href="([^"]+)"') or text(
@@ -238,30 +244,28 @@ def _parse_details(html: str, session: str) -> Anime | None:
     synopsis = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", synopsis_raw)).strip()
     # anime-info holds only <p> rows (no nested divs) — the first
     # closing div is its own.
-    info_html_m = re.search(r'class="anime-info">(.*?)</div>', html, re.S)
+    info_html_m = re.search(r'class="anime-info">(.*?)</div>', html, re.DOTALL)
     info_html = info_html_m.group(1) if info_html_m else ""
 
     def info(label: str) -> str:
-        m = re.search(label + r":\s*</b>\s*([^<]+)", info_html, re.I) or re.search(
-            label + r":\s*([^<\n]+)", info_html, re.I
+        m = re.search(label + r":\s*</b>\s*([^<]+)", info_html, re.IGNORECASE) or re.search(
+            label + r":\s*([^<\n]+)", info_html, re.IGNORECASE
         )
         return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""
 
     # Scope to the genre block first, then each anchor (the anchor wraps
     # an <li>; strip tags for the clean name — the title attribute
     # carries "X movies").
-    genre_block = re.search(r"anime-genre(.*?)</ul>", html, re.S)
+    genre_block = re.search(r"anime-genre(.*?)</ul>", html, re.DOTALL)
     genres = (
         [
             re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", g)).strip()
-            for g in re.findall(r"<a[^>]*>(.*?)</a>", genre_block.group(1), re.S)
+            for g in re.findall(r"<a[^>]*>(.*?)</a>", genre_block.group(1), re.DOTALL)
         ]
         if genre_block
         else []
     )
-    external = re.findall(
-        r'href="(https://(?:anilist\.co|myanimelist\.net)/anime/(\d+))"', html
-    )
+    external = re.findall(r'href="(https://(?:anilist\.co|myanimelist\.net)/anime/(\d+))"', html)
     ani_id = next((int(i) for url, i in external if "anilist" in url), 0)
     mal_id = next((int(i) for url, i in external if "myanimelist" in url), 0)
     id_m = re.search(r"release&id=(\d+)&l=", html)

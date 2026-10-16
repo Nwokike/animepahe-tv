@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def show_app_dialog(page: ft.Page, dialog) -> None:
     """Show a dialog and remember it for global Back."""
-    setattr(page, "_app_dialog", dialog)
+    page._app_dialog = dialog
     page.show_dialog(dialog)
 
 
@@ -31,7 +31,7 @@ def close_app_dialog(page: ft.Page) -> bool:
     dialog = getattr(page, "_app_dialog", None)
     if dialog is None:
         return False
-    setattr(page, "_app_dialog", None)
+    page._app_dialog = None
     try:
         top = next((d for d in reversed(page._dialogs.controls) if d.open), None)
         if top is dialog:

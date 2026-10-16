@@ -39,15 +39,9 @@ def _walk(control):
 
 
 def _overlay_card_matches(card) -> bool:
-    texts = [
-        c.value
-        for c in _walk(card)
-        if isinstance(c, ft.Text) and isinstance(c.value, str)
-    ]
+    texts = [c.value for c in _walk(card) if isinstance(c, ft.Text) and isinstance(c.value, str)]
     texts += [
-        c.content
-        for c in _walk(card)
-        if isinstance(c, ft.Button) and isinstance(c.content, str)
+        c.content for c in _walk(card) if isinstance(c, ft.Button) and isinstance(c.content, str)
     ]
     return (
         LBL_CF_BLOCKED_TITLE in texts
@@ -82,9 +76,7 @@ def test_verify_button_calls_retry():
     state = AppState()
     card = _cf_overlay_card(state, controller)
     button = next(
-        c
-        for c in _walk(card)
-        if isinstance(c, ft.Button) and c.content == LBL_CF_VERIFY_BUTTON
+        c for c in _walk(card) if isinstance(c, ft.Button) and c.content == LBL_CF_VERIFY_BUTTON
     )
     button.on_click(None)
     assert controller.retried == 1

@@ -49,8 +49,8 @@ class ControllerMethods:
     )
     download_episode: Callable[[str, str], Any] = lambda anime_session, episode_session: None
     choose_download_quality: Callable[[int], Any] = lambda index: None
-    download_series: Callable[..., Any] = (
-        lambda anime_session, episode_sessions, preset="highest": None
+    download_series: Callable[..., Any] = lambda anime_session, episode_sessions, preset="highest": (
+        None
     )
     pause_download: Callable[[str], Any] = lambda episode_session: None
     resume_download: Callable[[str], Any] = lambda episode_session: None
@@ -73,7 +73,7 @@ class ControllerMethods:
 
     # Backend management
     test_all_sources: Callable[[], Any] = lambda: None
-    sources_status: Callable[[], dict] = lambda: {}
+    sources_status: Callable[[], dict] = dict
     set_backend_pin: Callable[[str], Any] = lambda name: None
 
     # AppController reference (attached by main.py)

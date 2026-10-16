@@ -8,6 +8,7 @@ argv[2] when one exists — cf_clearance is bound to the UA that solved it,
 so the solve must present the same string the later API calls will.
 """
 
+import contextlib
 import json
 import os
 import sys
@@ -71,9 +72,47 @@ def served_a_plain_page(window) -> str | None:
     return None
 
 
+# Cookies Cloudflare's post-challenge redirect sets on the target site.
+# Their presence is a POSITIVE completion signal (the old 1.0.9 solver's
+# rule, restored): cf_clearance alone appears while the interstitial is
+# still running, and a title read that races a navigation comes back ""
+# rather than a challenge word — the old negative-only check therefore
+# declared success on UNFINISHED challenges and shipped a cf_clearance
+# primp could never use (owner's run, 2026-10-16).
+_TARGET_COOKIE_MARKERS = ("animepahe_session", "serverid", "xsrf-token", "latest")
+
+_CHALLENGE_TITLE_MARKERS = (
+    "just a moment",
+    "attention required",
+    "checking your browser",
+    "cloudflare",
+)
+
+
 def is_challenge_complete(window, cookie_keys: set[str]) -> bool:
+    """Did the challenge actually finish?
+
+    Rules, in order (the 1.0.9 discipline, kept two-host honest):
+    - cf_clearance must exist at all;
+    - a challenge URL/title is never complete;
+    - an EMPTY title is never complete — that read races a navigation and
+      is what shipped an unusable clearance for animepahe (owner's run,
+      2026-10-16): the solver "succeeded" while the interstitial was still
+      looping, and primp could never use the cookie;
+    - the site's own cookies, a title naming the site, or a plainly
+      non-Cloudflare page (public.animeout.xyz lands on an nginx 403 with
+      only cf_clearance in the jar) are POSITIVE completion signals.
+    """
     if "cf_clearance" not in cookie_keys:
         return False
+
+    # The site's own cookies are the strongest signal — the challenge
+    # redirected and the app's session began.
+    if any(
+        any(marker in key.lower() for marker in _TARGET_COOKIE_MARKERS)
+        for key in cookie_keys
+    ):
+        return True
 
     # Check URL for challenge tokens
     try:
@@ -83,26 +122,21 @@ def is_challenge_complete(window, cookie_keys: set[str]) -> bool:
     except Exception:
         pass
 
-    # Check page title for active challenge indicators
     try:
-        title = window.evaluate_js("document.title") or ""
-        title_lower = title.lower()
-        if any(
-            marker in title_lower
-            for marker in [
-                "just a moment",
-                "attention required",
-                "checking your browser",
-                "cloudflare",
-            ]
-        ):
-            return False
+        title = str(window.evaluate_js("document.title") or "").strip()
     except Exception:
-        pass
-
-    # When cf_clearance is present and challenge markers are absent,
-    # the challenge has successfully completed on this host.
-    return True
+        return False
+    title_lower = title.lower()
+    if not title_lower:
+        # A title read that raced a navigation — never judge it complete.
+        return False
+    if any(marker in title_lower for marker in _CHALLENGE_TITLE_MARKERS):
+        return False
+    if "animepahe" in title_lower or "anime" in title_lower:
+        return True
+    # A plain web-server page (the DDL host's nginx 403) means the
+    # challenge cleared and the origin answered.
+    return any(marker in title_lower for marker in _NOT_A_CHALLENGE_MARKERS)
 
 
 def _split_cookies(cookies) -> tuple[set[str], list[str]]:
@@ -139,10 +173,8 @@ def _emit_success(cookie_strs: list[str], window) -> None:
         file=sys.stderr,
     )
     print(json.dumps({"cookies": cookie_header, "user_agent": captured_ua}))
-    try:
+    with contextlib.suppress(Exception):
         window.destroy()
-    except Exception:
-        pass
 
 
 def _check_now(window) -> None:
@@ -165,15 +197,11 @@ def check_cookies(window):
     renderer = getattr(webview, "renderer", None)
     if renderer not in ("edgechromium", "cef"):
         print(f"[DEBUG] Unsupported renderer: {renderer!r}", file=sys.stderr)
-        try:
+        with contextlib.suppress(Exception):
             window.destroy()
-        except Exception:
-            pass
-        _fail(
-            f"unsupported-renderer ({renderer or 'none'}) — install the WebView2 Runtime"
-        )
+        _fail(f"unsupported-renderer ({renderer or 'none'}) — install the WebView2 Runtime")
     # The user closing the window must END the wait: without this the
-    # 120×1s poll kept calling get_cookies() on a dead window and the
+    # 120x1s poll kept calling get_cookies() on a dead window and the
     # parent's communicate() hung the app for two full minutes.
     closed = getattr(window.events, "closed", None)
     # Loop and check for completed challenge
@@ -186,6 +214,10 @@ def check_cookies(window):
         time.sleep(1.0)
         try:
             cookies = window.get_cookies()
+            if cookies is None:  # window destroyed mid-poll
+                if _done:
+                    return
+                continue
             print(f"[DEBUG] Cookie jar has {len(cookies)} entries", file=sys.stderr)
             cookie_keys, cookie_strs = _split_cookies(cookies)
             if is_challenge_complete(window, cookie_keys):
@@ -201,19 +233,15 @@ def check_cookies(window):
                     f"[DEBUG] Loaded page is not a challenge: {plain!r}",
                     file=sys.stderr,
                 )
-                try:
+                with contextlib.suppress(Exception):
                     window.destroy()
-                except Exception:
-                    pass
                 _fail(f"not-a-challenge ({plain[:60]})")
 
     # Timeout: an explicit error line and a NON-ZERO exit, so the parent
     # can tell "never finished" from "user closed it" from "solved".
     print("[DEBUG] Timed out waiting for the challenge", file=sys.stderr)
-    try:
+    with contextlib.suppress(Exception):
         window.destroy()
-    except Exception:
-        pass
     _fail("timeout")
 
 
@@ -229,19 +257,42 @@ def _fail(reason: str) -> None:
     os._exit(3)
 
 
+def _profile_dir() -> str | None:
+    """A durable WebView2 profile beside the app's own storage.
+
+    The default ephemeral profile wipes cookies/history every run, so the
+    challenge sees a brand-new client each time — the environment where the
+    non-interactive check loops forever. A persistent profile accumulates
+    the same kind of trust a user's own browser has.
+    """
+    base = os.environ.get("FLET_APP_STORAGE_DATA")
+    if not base:
+        return None
+    path = os.path.join(base, "cf-profile")
+    with contextlib.suppress(OSError):
+        os.makedirs(path, exist_ok=True)
+        return path
+    return None
+
+
 def run(url: str, requested_ua: str | None = None) -> None:
     """Create the solver window and pump the GUI. Split from __main__ so
     tests can drive it with a fake webview module."""
     global window, captured_ua
     if requested_ua:
         captured_ua = requested_ua
-    window = webview.create_window(
-        "Cloudflare Turnstile Solver", url, width=800, height=600
-    )
+    window = webview.create_window("Cloudflare Turnstile Solver", url, width=800, height=600)
     window.events.loaded += on_loaded
     # user_agent= pins the solve to the UA the clearance is bound to;
-    # None keeps the system default.
-    webview.start(check_cookies, window, user_agent=requested_ua)
+    # None keeps the system default. The storage_path keeps the profile.
+    profile = _profile_dir()
+    webview.start(
+        check_cookies,
+        window,
+        user_agent=requested_ua,
+        private_mode=profile is None,
+        storage_path=profile,
+    )
 
 
 if __name__ == "__main__":

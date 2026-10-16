@@ -186,6 +186,7 @@ def test_vrf_bare_retry_fallback_exists():
     """The map proved the VRF is not server-enforced: the provider must
     keep sending it but fall back to the bare call on rejection."""
     import inspect
+
     from services.providers import anikato
 
     method_src = inspect.getsource(anikato.AniKatoProvider._episode_entries)
@@ -572,10 +573,9 @@ def test_play_page_scrape_carries_av1_and_download_sizes():
 def test_position_row_carries_and_restores_rate():
     """The chosen speed rides the resume record."""
     import asyncio
+    import tempfile
 
     from services.store import JsonStore
-
-    import tempfile
 
     async def run(path):
         store = JsonStore(filename=path)
@@ -603,17 +603,17 @@ def test_adapter_no_op_without_extension():
 
     assert notifications.anime_session_from(notifications.payload_for("s")) == "s"
     assert asyncio.run(notifications.ensure_channel()) in (True, False)
-    assert asyncio.run(
-        notifications.show_new_episode(anime_session="s", title="T", episode=3)
-    ) in (True, False)
+    assert asyncio.run(notifications.show_new_episode(anime_session="s", title="T", episode=3)) in (
+        True,
+        False,
+    )
 
 
 def test_follow_progress_round_trip():
     import asyncio
+    import tempfile
 
     from services.store import JsonStore
-
-    import tempfile
 
     async def run(path):
         store = JsonStore(filename=path)
@@ -635,9 +635,9 @@ def test_follow_progress_round_trip():
 def test_focus_scope_is_a_plain_function():
     """The component form is a crash class (frozen subtree) — the hook
     must be a plain function returning the listener."""
-    from hooks.use_focus_scope import focus_scope
-
     import flet as ft
+
+    from hooks.use_focus_scope import focus_scope
 
     seen = []
 
@@ -677,10 +677,9 @@ def test_history_clear_returns_rows_and_restore_puts_them_back():
     """Undo: the clear hands back the exact rows; the restore returns
     them (MRU order intact)."""
     import asyncio
+    import tempfile
 
     from services.store import JsonStore
-
-    import tempfile
 
     async def run(path):
         store = JsonStore(filename=path)
@@ -792,9 +791,7 @@ def test_details_page_carries_the_cover():
     assert anime is not None
     assert anime.backdrop == "https://img.example/cover.jpg"
 
-    bare = _parse_details(
-        '<div class="title-wrapper"><h1><span>T</span></h1></div>', "t"
-    )
+    bare = _parse_details('<div class="title-wrapper"><h1><span>T</span></h1></div>', "t")
     assert bare.backdrop == ""
 
 
@@ -802,7 +799,9 @@ class _PostClient:
     """anikato's client surface for the report: GET the watch page, POST
     the form."""
 
-    def __init__(self, watch_text="", post_status=200, post_body='{"status":true,"msg":"Reported."}'):
+    def __init__(
+        self, watch_text="", post_status=200, post_body='{"status":true,"msg":"Reported."}'
+    ):
         self._watch_text = watch_text
         self._post_status = post_status
         self._post_body = post_body
@@ -834,10 +833,7 @@ def test_report_broken_stream_posts_the_sites_own_form():
 
     from services.providers.anikato import AniKatoProvider
 
-    watch = (
-        '<div id="watch-main" data-id="958"></div>'
-        '<div class="anime-synopsis">x</div>'
-    )
+    watch = '<div id="watch-main" data-id="958"></div><div class="anime-synopsis">x</div>'
     client = _PostClient(watch_text=watch)
     provider = AniKatoProvider(client=client)
     ok, message = asyncio.run(
@@ -877,9 +873,7 @@ def test_report_broken_stream_validates_before_the_wire():
 
     client = _PostClient()
     provider = AniKatoProvider(client=client)
-    ok, message = asyncio.run(
-        provider.report_broken("anikato:x", "x|1", [], note="")
-    )
+    ok, message = asyncio.run(provider.report_broken("anikato:x", "x|1", [], note=""))
     assert ok is False
     assert "issue" in message
     assert client.posts == []
@@ -892,9 +886,7 @@ def test_report_broken_stream_with_a_note_only_is_sent():
 
     client = _PostClient(watch_text='<div id="watch-main" data-id="7"></div>')
     provider = AniKatoProvider(client=client)
-    ok, _ = asyncio.run(
-        provider.report_broken("anikato:x", "x|2", [], note="audio drifts")
-    )
+    ok, _ = asyncio.run(provider.report_broken("anikato:x", "x|2", [], note="audio drifts"))
     assert ok is True
     assert len(client.posts) == 1
 

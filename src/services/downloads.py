@@ -57,7 +57,7 @@ MAX_PARALLEL_DOWNLOADS = 3
 # Job states (Media3's set — the persisted vocabulary in manifest.json).
 STATE_QUEUED = "queued"
 STATE_DOWNLOADING = "downloading"
-STATE_STOPPED = "stopped"        # paused by the user; partials kept
+STATE_STOPPED = "stopped"  # paused by the user; partials kept
 STATE_COMPLETED = "completed"
 STATE_FAILED = "failed"
 # The store row's two words — what the screens already speak. A row's
@@ -91,9 +91,7 @@ def rewrite_playlist(text: str, segment_dir_name: str = "segs") -> tuple[str, in
             match = re.search(r'URI="([^"]+)"', stripped)
             if match:
                 key_name = os.path.basename(match.group(1).split("?")[0]) or "key.bin"
-                rewritten = re.sub(
-                    r'URI="[^"]+"', f'URI="{segment_dir_name}/{key_name}"', stripped
-                )
+                rewritten = re.sub(r'URI="[^"]+"', f'URI="{segment_dir_name}/{key_name}"', stripped)
                 out.append(rewritten)
                 continue
         if stripped and not stripped.startswith("#"):
@@ -141,10 +139,10 @@ def _filename_from_disposition(value) -> str:
     if not value:
         return ""
     header = str(value)
-    match = re.search(r"filename\*\s*=\s*[^']*'[^']*'([^;]+)", header, re.I)
+    match = re.search(r"filename\*\s*=\s*[^']*'[^']*'([^;]+)", header, re.IGNORECASE)
     if not match:
-        match = re.search(r'filename\s*=\s*"([^"]+)"', header, re.I) or re.search(
-            r"filename\s*=\s*([^;]+)", header, re.I
+        match = re.search(r'filename\s*=\s*"([^"]+)"', header, re.IGNORECASE) or re.search(
+            r"filename\s*=\s*([^;]+)", header, re.IGNORECASE
         )
     if not match:
         return ""
@@ -199,9 +197,7 @@ def _calculate_dir_size(directory: str) -> int:
     )
 
 
-def _scan_segments(
-    segs_dir: str, uris: list[str]
-) -> tuple[int, list[tuple[int, str]]]:
+def _scan_segments(segs_dir: str, uris: list[str]) -> tuple[int, list[tuple[int, str]]]:
     """One directory listing answers both the resume count and the queue.
 
     The per-URI probes did N blocking listdir calls on the event loop;
@@ -252,9 +248,7 @@ class DownloadManager:
 
     def _get_client(self) -> primp.AsyncClient:
         if self._client is None:
-            self._client = primp.AsyncClient(
-                timeout=SEGMENT_TIMEOUT, impersonate="chrome"
-            )
+            self._client = primp.AsyncClient(timeout=SEGMENT_TIMEOUT, impersonate="chrome")
         return self._client
 
     # ------------------------------------------------------------------
@@ -331,12 +325,8 @@ class DownloadManager:
         client = self._get_client()
         filename = ""
         try:
-            resp = await client.get(
-                url, headers=headers, stream=True, timeout=PLAYLIST_TIMEOUT
-            )
-            filename = _filename_from_disposition(
-                resp.headers.get("content-disposition")
-            )
+            resp = await client.get(url, headers=headers, stream=True, timeout=PLAYLIST_TIMEOUT)
+            filename = _filename_from_disposition(resp.headers.get("content-disposition"))
             if url.split("?")[0].endswith(".m3u8") or resp.headers.get(
                 "content-type", ""
             ).startswith("application/vnd.apple.mpegurl"):
@@ -446,9 +436,7 @@ class DownloadManager:
         known = self._jobs.get(episode_session)
         if known and os.path.isdir(known.get("dir") or ""):
             return known["dir"]
-        return self._job_dir(
-            metadata.get("anime_session", "unknown"), episode_session
-        )
+        return self._job_dir(metadata.get("anime_session", "unknown"), episode_session)
 
     @staticmethod
     def _job_has_final_file(job_dir: str) -> bool:
@@ -458,7 +446,7 @@ class DownloadManager:
         unplayable 'complete' row."""
         if not os.path.isdir(job_dir):
             return False
-        for root, _dirs, files in os.walk(job_dir):
+        for _root, _dirs, files in os.walk(job_dir):
             for name in files:
                 if name == "manifest.json" or name.endswith(".part"):
                     continue
@@ -467,9 +455,7 @@ class DownloadManager:
 
     def _manifest_is_complete(self, job_dir: str, manifest: dict) -> bool:
         """COMPLETED means done AND present."""
-        return manifest.get("state") == STATE_COMPLETED and self._job_has_final_file(
-            job_dir
-        )
+        return manifest.get("state") == STATE_COMPLETED and self._job_has_final_file(job_dir)
 
     def pause(self, episode_session: str) -> bool:
         """Stop a running job and KEEP its partials. False when the job
@@ -501,24 +487,18 @@ class DownloadManager:
         """Clear the stop reason and re-enqueue. The partials on disk are
         what make this a resume rather than a restart (Range continues
         from the byte offset; complete segments are skipped)."""
-        job_dir = self._job_dir(
-            metadata.get("anime_session", "unknown"), episode_session
-        )
+        job_dir = self._job_dir(metadata.get("anime_session", "unknown"), episode_session)
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
         if self._manifest_is_complete(job_dir, manifest):
             return False
         self._stop_reason.pop(episode_session, None)
         if manifest.get("m3u8_url") or url.endswith(".m3u8"):
-            await self.start(
-                episode_session, manifest.get("m3u8_url") or url, headers, metadata
-            )
+            await self.start(episode_session, manifest.get("m3u8_url") or url, headers, metadata)
         else:
             # The manifest's stored URL wins: resuming with the passed URL
             # appended a different file's bytes to the existing .part.
-            await self.start_direct(
-                episode_session, manifest.get("url") or url, headers, metadata
-            )
+            await self.start_direct(episode_session, manifest.get("url") or url, headers, metadata)
         return True
 
     async def retry(self, episode_session: str) -> bool:
@@ -607,15 +587,11 @@ class DownloadManager:
             # (session, bytes, 0), which raised TypeError against the
             # controller's handler and was swallowed, so a direct-file
             # download's byte progress never reached the UI at all.
-            progress["bytes"] = (
-                have + n if not progress["done"] else progress["bytes"] + n
-            )
+            progress["bytes"] = have + n if not progress["done"] else progress["bytes"] + n
             progress["done"] = 1
             if on_progress is not None:
-                try:
+                with contextlib.suppress(Exception):
                     on_progress(episode_session, dict(progress))
-                except Exception:
-                    pass
 
         try:
             async with self._job_limiter:
@@ -642,11 +618,7 @@ class DownloadManager:
                 # A paused job keeps its STOPPED state — overwriting it
                 # with queued would make the next enqueue resume a job the
                 # user paused.
-                state = (
-                    STATE_STOPPED
-                    if episode_session in self._stop_reason
-                    else STATE_QUEUED
-                )
+                state = STATE_STOPPED if episode_session in self._stop_reason else STATE_QUEUED
                 self._write_manifest(
                     manifest_path,
                     {
@@ -661,10 +633,8 @@ class DownloadManager:
             return
         size_bytes = os.path.getsize(final_path)
         if on_progress is not None:
-            try:
+            with contextlib.suppress(Exception):
                 on_progress(episode_session, {"bytes": size_bytes, "done": 1, "total": 1})
-            except Exception:
-                pass
         self._write_manifest(
             os.path.join(job_dir, "manifest.json"),
             {
@@ -687,9 +657,7 @@ class DownloadManager:
             )
             await self._store.save_download(episode_session, row)
         self._progress.pop(episode_session, None)
-        logger.info(
-            "download complete (direct): %s (%d bytes)", episode_session, size_bytes
-        )
+        logger.info("download complete (direct): %s (%d bytes)", episode_session, size_bytes)
         if self.on_finished is not None:
             try:
                 self.on_finished(episode_session, dict(metadata))
@@ -744,9 +712,7 @@ class DownloadManager:
                 if not os.path.exists(key_path):
                     body = await self._get_bytes(key_uri, headers)
                     if body is not None:
-                        await anyio.to_thread.run_sync(
-                            self._atomic_write, key_path, body
-                        )
+                        await anyio.to_thread.run_sync(self._atomic_write, key_path, body)
 
             # 3. Download segments (resume-aware).
             base_url = media_url.rsplit("/", 1)[0]
@@ -755,9 +721,7 @@ class DownloadManager:
             progress = self._progress[episode_session]
             progress["total"] = total
 
-            done, queue = await anyio.to_thread.run_sync(
-                _scan_segments, segs_dir, uris
-            )
+            done, queue = await anyio.to_thread.run_sync(_scan_segments, segs_dir, uris)
             progress["done"] = done
             workers = [
                 asyncio.create_task(
@@ -805,9 +769,7 @@ class DownloadManager:
             self._write_manifest(manifest_path, manifest)
             if self._store is not None:
                 row = dict(manifest.get("metadata") or metadata)
-                size_bytes = await anyio.to_thread.run_sync(
-                    _calculate_dir_size, segs_dir
-                )
+                size_bytes = await anyio.to_thread.run_sync(_calculate_dir_size, segs_dir)
                 row.update(
                     {
                         "state": ROW_COMPLETE,
@@ -836,9 +798,7 @@ class DownloadManager:
             if manifest.get("state") != STATE_COMPLETED:
                 # A paused job keeps its STOPPED state.
                 manifest["state"] = (
-                    STATE_STOPPED
-                    if episode_session in self._stop_reason
-                    else STATE_QUEUED
+                    STATE_STOPPED if episode_session in self._stop_reason else STATE_QUEUED
                 )
                 self._write_manifest(manifest_path, manifest)
 
@@ -853,7 +813,7 @@ class DownloadManager:
         cancel: asyncio.Event,
     ):
         # HLS jobs run one worker per segment PARALLEL to the cross-job
-        # limiter: without this, N queued episodes fetched N×6 segments
+        # limiter: without this, N queued episodes fetched Nx6 segments
         # concurrently and bounded nothing.
         async with self._job_limiter:
             # One permanently-failing segment (404) used to be re-queued
@@ -876,9 +836,7 @@ class DownloadManager:
                     if tries >= MAX_SEGMENT_ATTEMPTS:
                         # Fail the job: _run's except records the error and
                         # the row becomes retryable, not permanently stuck.
-                        raise RuntimeError(
-                            f"segment {name} failed {tries} times: {ex}"
-                        ) from ex
+                        raise RuntimeError(f"segment {name} failed {tries} times: {ex}") from ex
                     logger.warning(
                         "segment %s failed (attempt %d/%d): %s",
                         name,
@@ -891,10 +849,8 @@ class DownloadManager:
                     continue
                 progress["done"] += 1
                 if self.on_progress is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         self.on_progress(episode_session, dict(progress))
-                    except Exception:
-                        pass
 
     async def _resolve_playlist(self, url: str, headers: dict) -> tuple[str, str]:
         """Return the media playlist URL + body (top variant for a master)."""
@@ -1038,9 +994,7 @@ class DownloadManager:
 
     @staticmethod
     def _write_manifest(path: str, manifest: dict) -> None:
-        DownloadManager._atomic_write_text(
-            path, json.dumps(manifest, indent=2, default=str)
-        )
+        DownloadManager._atomic_write_text(path, json.dumps(manifest, indent=2, default=str))
 
     @staticmethod
     def _atomic_write_text(path: str, text: str) -> None:

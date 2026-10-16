@@ -11,14 +11,14 @@ import flet as ft
 
 from components.banner_ad import build_banner_ad
 from components.empty_state import EmptyState
-from components.offline_state import empty_or_offline
 from components.focus_styles import (
     attach_focus_zoom,
     card_button_style,
     card_focus_scale,
 )
-from components.result_card import result_card as _result_card
+from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
+from components.result_card import result_card as _result_card
 from core.artwork import LANDSCAPE
 from core.constants import (
     LBL_CF_BLOCKED_SEARCH,
@@ -231,9 +231,7 @@ def SearchScreen() -> ft.Control:
             ),
             ft.Container(content=field, expand=True),
             ft.FilledButton(
-                content=ft.ProgressRing(
-                    width=16, height=16, stroke_width=2, color=ft.Colors.WHITE
-                )
+                content=ft.ProgressRing(width=16, height=16, stroke_width=2, color=ft.Colors.WHITE)
                 if searching
                 else "Search",
                 disabled=searching,
@@ -323,9 +321,7 @@ def SearchScreen() -> ft.Control:
                         weight=ft.FontWeight.W_600,
                         color=ft.Colors.ON_SURFACE,
                     ),
-                    ft.Text(
-                        state.search_error, size=12, color=ft.Colors.ON_SURFACE_VARIANT
-                    ),
+                    ft.Text(state.search_error, size=12, color=ft.Colors.ON_SURFACE_VARIANT),
                     ft.OutlinedButton(content="Retry", on_click=_submit),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -338,12 +334,8 @@ def SearchScreen() -> ft.Control:
         pager = ft_pager(
             page=state.search_page,
             has_more=state.search_has_more,
-            on_prev=lambda e: controller.load_search(
-                state.search_query, state.search_page - 1
-            ),
-            on_next=lambda e: controller.load_search(
-                state.search_query, state.search_page + 1
-            ),
+            on_prev=lambda e: controller.load_search(state.search_query, state.search_page - 1),
+            on_next=lambda e: controller.load_search(state.search_query, state.search_page + 1),
             is_loading=state.is_loading,
         )
         results = ft.Column(
@@ -418,9 +410,7 @@ def SearchScreen() -> ft.Control:
                                             color=ft.Colors.ON_SURFACE_VARIANT,
                                         ),
                                         alignment=ft.Alignment.CENTER,
-                                        bgcolor=ft.Colors.with_opacity(
-                                            0.1, ft.Colors.ON_SURFACE
-                                        ),
+                                        bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
                                     ),
                                     width=120,
                                     height=68 if grid_mode == LANDSCAPE else 170,
@@ -440,12 +430,12 @@ def SearchScreen() -> ft.Control:
                             spacing=6,
                             width=120,
                         ),
-                        style=card_button_style(
-                            padding=4, radius=12, overlay_alpha=0.18
-                        ),
+                        style=card_button_style(padding=4, radius=12, overlay_alpha=0.18),
                         animate_scale=card_focus_scale(1.03),
-                        on_click=lambda e, s=row.get("anime_session", ""): (
-                            controller.open_anime(s) if s else None
+                        on_click=lambda e, row=row: (
+                            controller.open_anime(row.get("anime_session"))
+                            if row.get("anime_session")
+                            else None
                         ),
                     )
                 )
@@ -460,9 +450,7 @@ def SearchScreen() -> ft.Control:
                         weight=ft.FontWeight.W_700,
                         color=ft.Colors.ON_SURFACE,
                     ),
-                    ft.Row(
-                        controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO
-                    ),
+                    ft.Row(controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO),
                 ],
                 spacing=8,
             )

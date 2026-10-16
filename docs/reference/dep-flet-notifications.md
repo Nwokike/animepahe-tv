@@ -58,14 +58,17 @@ Handler typing warning (from `METADATA`): "Typed handlers must use `ft.EventHand
 
 ```python
 class ResponseType(str, Enum):
-    TAP = "tap"; ACTION = "action"; DISMISSED = "dismissed"
+    TAP = "tap"
+    ACTION = "action"
+    DISMISSED = "dismissed"
+
 
 @dataclass
 class NotificationEvent(ft.Event[ft.EventControlType]):
     id: int = 0
-    action_id: str = ""   # "" for plain tap; button id for actions
+    action_id: str = ""  # "" for plain tap; button id for actions
     payload: str = ""
-    input: str = ""       # inline-reply text when the action had an input
+    input: str = ""  # inline-reply text when the action had an input
     response_type: str = ResponseType.TAP.value
     # + inherited `data` field: Windows action inputs arrive there, keyed by
     # input id (Windows leaves `input` null). (base.py:31-32)
@@ -116,20 +119,21 @@ Progress (no separate class — flat kwargs on `show`/`schedule`/`periodically_s
 
 ```python
 @dataclass(kw_only=True)
-class NotificationActionInput:          # actions.py:9-28
-    label: str = ""                     # placeholder / button title over the text field
-    choices: list[str] = []             # quick-reply suggestions
+class NotificationActionInput:  # actions.py:9-28
+    label: str = ""  # placeholder / button title over the text field
+    choices: list[str] = []  # quick-reply suggestions
     allow_free_form_input: bool = True
     allowed_mime_types: list[str] = []
 
+
 @dataclass(kw_only=True)
-class NotificationAction:               # actions.py:31-55
-    id: str                             # required; arrives as NotificationEvent.action_id
-    title: str                          # required; button label
-    destructive: bool = False           # iOS/macOS render
-    foreground: bool = True             # bring app to foreground on press
-    cancel_notification: bool = True    # Android: dismiss the notification
-    input: Optional[NotificationActionInput] = None   # inline reply; text -> NotificationEvent.input
+class NotificationAction:  # actions.py:31-55
+    id: str  # required; arrives as NotificationEvent.action_id
+    title: str  # required; button label
+    destructive: bool = False  # iOS/macOS render
+    foreground: bool = True  # bring app to foreground on press
+    cancel_notification: bool = True  # Android: dismiss the notification
+    input: Optional[NotificationActionInput] = None  # inline reply; text -> NotificationEvent.input
 ```
 
 "Categories": there is no `Category` class. The equivalents are `AndroidOptions.category` ("AndroidNotificationCategory value", `options.py:128`), `LinuxOptions.category` (free string, `options.py:239`), and channel groups on Android. Not wrapped: action `semanticAction`/`invisible`/`contextual` (`METADATA` Limitations).
@@ -212,19 +216,19 @@ String-constant classes (`options.py:16-78`): `Priority` MIN/LOW/DEFAULT/HIGH/MA
 ```python
 @dataclass(kw_only=True)
 class NotificationChannel:
-    id: str                             # required, ValueError if empty
-    name: str                           # required, ValueError if empty
+    id: str  # required, ValueError if empty
+    name: str  # required, ValueError if empty
     description: str = ""
     group_id: Optional[str] = None
     importance: Importance = Importance.DEFAULT
     bypass_dnd: bool = False
     play_sound: bool = True
-    sound: Optional[str] = None         # raw resource name, e.g. "alert"
+    sound: Optional[str] = None  # raw resource name, e.g. "alert"
     enable_vibration: bool = True
     vibration_pattern: Optional[list[int]] = None
     show_badge: bool = True
     enable_lights: bool = False
-    led_color: Optional[str] = None     # #RRGGBB, validated
+    led_color: Optional[str] = None  # #RRGGBB, validated
 ```
 
 "Sound and vibration are fixed at channel creation; to change them you create a new channel with a new id." (`channels.py:13-17`).

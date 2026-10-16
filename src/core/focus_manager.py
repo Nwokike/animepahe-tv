@@ -1,3 +1,5 @@
+import contextlib
+
 import flet as ft
 
 _BACK_KEYS = ("Escape", "Go Back", "Browser Back", "Backspace", "Back", "BrowserBack")
@@ -50,12 +52,10 @@ class FocusManager:
                     self.page.run_task(_await_coroutine, result)
             except Exception:
                 pass
-        if e.key in _BACK_KEYS and not self._is_text_editing(e):
-            if self._back_handler:
-                try:
-                    self._back_handler()
-                except Exception:
-                    pass  # never break key dispatch
+        if e.key in _BACK_KEYS and not self._is_text_editing(e) and self._back_handler:
+            # Never break key dispatch on a handler failure.
+            with contextlib.suppress(Exception):
+                self._back_handler()
 
     @staticmethod
     def _is_text_editing(e: ft.KeyboardEvent) -> bool:
@@ -79,10 +79,8 @@ class FocusManager:
         async def _on_focus(e):
             control_key = getattr(e.control, "key", None)
             if control_key and hasattr(scrollable, "scroll_to"):
-                try:
+                with contextlib.suppress(Exception):
                     await scrollable.scroll_to(scroll_key=control_key, duration=200)
-                except Exception:
-                    pass
 
         return _on_focus
 

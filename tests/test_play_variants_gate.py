@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import main as app_main  # noqa: E402
+import main as app_main
 
 
 class _Proxy:
@@ -53,9 +53,7 @@ def test_direct_files_are_never_probed_for_variants():
 def test_m3u8_urls_still_probe_through_the_proxy():
     proxy = _Proxy()
     controller = _controller(proxy)
-    out = asyncio.run(
-        controller._fetch_variants("https://cdn.example/master.m3u8?token=1")
-    )
+    out = asyncio.run(controller._fetch_variants("https://cdn.example/master.m3u8?token=1"))
     assert proxy.calls == ["https://cdn.example/master.m3u8?token=1"]
     assert out and out[0]["label"] == "1080p"
 

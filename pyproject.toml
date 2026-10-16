@@ -59,10 +59,28 @@ filterwarnings = [
 log_cli = false
 
 [tool.ruff]
+# Deliberately below the dev interpreter (3.14), same rule as KTV Player:
+# with target-version 3.14 ruff's pyupgrade rules strip the parentheses
+# from `except (A, B):` into the PEP 758 form, which only parses on 3.14+.
+# Pinning the linter lower keeps every source file importable on 3.12 —
+# including Android and desktop builds produced with an older bundled
+# interpreter — and ruff then reports any PEP 758 slip as invalid-syntax.
+target-version = "py312"
 line-length = 100
-target-version = "py314"
 
 [tool.ruff.lint]
-ignore = ["E501"]
+extend-select = [
+    "B",   # flake8-bugbear: real bug patterns (mutable defaults, etc.)
+    "RUF", # ruff-specific: dead code, redundant constructs
+    "SIM", # flake8-simplify: collapsible branches, yoda conditions
+    "UP",  # pyupgrade: modern syntax within the py312 target
+]
+# The house pattern, as in KTV Player: every provider/scraper boundary
+# catches broadly on purpose (a dead mirror, a changed selector and a CDN
+# tantrum must all degrade to "no answer", never kill a screen), and the
+# best-effort cleanup paths (a cookie jar that will not clear, a dialog
+# that is already gone) are silence-by-design. BLE001 and S110 are the
+# two ways ruff states that; both are audited and ignored.
+extend-ignore = ["E501", "BLE001", "S110"]
 
 

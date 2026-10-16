@@ -35,7 +35,7 @@ and points Windows/Linux support at
 
 ```python
 @ft.control("WebView")
-class WebView(ft.LayoutControl): ...   # webview.py:17-18
+class WebView(ft.LayoutControl): ...  # webview.py:17-18
 ```
 
 MRO (verified live): `WebView -> LayoutControl -> Control -> BaseControl -> object`.
@@ -177,30 +177,45 @@ in `e.data`. Handler type matters:
 
 ```python
 @dataclass
-class WebViewScrollEvent(ft.Event["WebView"]):   # types.py:62-80
-    x: float   # horizontal offset, origin at leftmost of the WebView
-    y: float   # vertical offset, origin at topmost of the WebView
+class WebViewScrollEvent(ft.Event["WebView"]):  # types.py:62-80
+    x: float  # horizontal offset, origin at leftmost of the WebView
+    y: float  # vertical offset, origin at topmost of the WebView
     # fires on scroll-position change; iOS + Android only
+
 
 @dataclass
 class WebViewConsoleMessageEvent(ft.Event["WebView"]):  # types.py:83-93
-    message: str                  # text written to the console
+    message: str  # text written to the console
     severity_level: LogLevelSeverity  # ERROR/WARNING/DEBUG/INFO/LOG
     # fires when JS writes to console; iOS/Android/macOS only
 
+
 @dataclass
-class WebViewJavaScriptEvent(ft.Event["WebView"]):      # types.py:96-108
+class WebViewJavaScriptEvent(ft.Event["WebView"]):  # types.py:96-108
     message: str  # text of the alert() message
-    url: str      # URL of the page requesting the dialog
+    url: str  # URL of the page requesting the dialog
     # fires when the page calls alert(); iOS/Android/macOS only
 ```
 
 Enums (`types.py:20-60`):
 
 ```python
-class RequestMethod(Enum): GET = "get"; POST = "post"
-class JavaScriptMode(Enum): UNRESTRICTED = "unrestricted"; DISABLED = "disabled"
-class LogLevelSeverity(Enum): ERROR="error"; WARNING="warning"; DEBUG="debug"; INFO="info"; LOG="log"
+class RequestMethod(Enum):
+    GET = "get"
+    POST = "post"
+
+
+class JavaScriptMode(Enum):
+    UNRESTRICTED = "unrestricted"
+    DISABLED = "disabled"
+
+
+class LogLevelSeverity(Enum):
+    ERROR = "error"
+    WARNING = "warning"
+    DEBUG = "debug"
+    INFO = "info"
+    LOG = "log"
 ```
 
 `LogLevelSeverity` maps `console.error/warning/debug/info/log` (per docstrings,

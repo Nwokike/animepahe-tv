@@ -11,9 +11,20 @@
 ## Module surface (`webview/__init__.py`)
 
 ```python
-__all__ = ('active_window', 'start', 'create_window', 'token', 'renderer',
-           'screens', 'settings', 'Event', 'JavascriptException',
-           'WebViewException', 'Screen', 'Window')
+__all__ = (
+    "active_window",
+    "start",
+    "create_window",
+    "token",
+    "renderer",
+    "screens",
+    "settings",
+    "Event",
+    "JavascriptException",
+    "WebViewException",
+    "Screen",
+    "Window",
+)
 ```
 
 - `windows: list[Window]` — every created window, in creation order.
@@ -30,24 +41,33 @@ __all__ = ('active_window', 'start', 'create_window', 'token', 'renderer',
 Global knobs:
 
 ```python
-settings = ImmutableDict({
-    'ALLOW_DOWNLOADS': False,
-    'ALLOW_FILE_URLS': True,
-    'DRAG_REGION_SELECTOR': '.pywebview-drag-region',
-    'DRAG_REGION_DIRECT_TARGET_ONLY': False,
-    'DEFAULT_HTTP_PORT': 42001,
-    'OPEN_EXTERNAL_LINKS_IN_BROWSER': True,
-    'OPEN_DEVTOOLS_IN_DEBUG': True,
-    'REMOTE_DEBUGGING_PORT': None,   # EdgeChromium appends --remote-debugging-port=<n>
-    'IGNORE_SSL_ERRORS': False,      # EdgeChromium attaches AlwaysAllow cert-error handler
-    'SHOW_DEFAULT_MENUS': True,
-    'WEBVIEW2_RUNTIME_PATH': None,   # custom WebView2 runtime folder (relative ok)
-})
-_state = ImmutableDict({             # set via webview.start(...) kwargs
-    'debug': False, 'storage_path': None, 'private_mode': True,
-    'user_agent': None, 'http_server': False, 'ssl': False,
-    'icon': None, 'menu': None,
-})
+settings = ImmutableDict(
+    {
+        "ALLOW_DOWNLOADS": False,
+        "ALLOW_FILE_URLS": True,
+        "DRAG_REGION_SELECTOR": ".pywebview-drag-region",
+        "DRAG_REGION_DIRECT_TARGET_ONLY": False,
+        "DEFAULT_HTTP_PORT": 42001,
+        "OPEN_EXTERNAL_LINKS_IN_BROWSER": True,
+        "OPEN_DEVTOOLS_IN_DEBUG": True,
+        "REMOTE_DEBUGGING_PORT": None,  # EdgeChromium appends --remote-debugging-port=<n>
+        "IGNORE_SSL_ERRORS": False,  # EdgeChromium attaches AlwaysAllow cert-error handler
+        "SHOW_DEFAULT_MENUS": True,
+        "WEBVIEW2_RUNTIME_PATH": None,  # custom WebView2 runtime folder (relative ok)
+    }
+)
+_state = ImmutableDict(
+    {  # set via webview.start(...) kwargs
+        "debug": False,
+        "storage_path": None,
+        "private_mode": True,
+        "user_agent": None,
+        "http_server": False,
+        "ssl": False,
+        "icon": None,
+        "menu": None,
+    }
+)
 ```
 
 Log level via `PYWEBVIEW_LOG` env var (default `INFO`); `debug=True` forces `DEBUG`.
@@ -223,8 +243,21 @@ completes raises after 20 s.
 ### Events (`window.events`, `event.py`)
 
 ```python
-closed, closing(+veto), loaded, before_load(+veto), before_show(+veto),
-initialized(+veto), shown, minimized, maximized, restored, resized,
+(
+    closed,
+    closing(+veto),
+    loaded,
+    before_load(+veto),
+    before_show(+veto),
+)
+(
+    initialized(+veto),
+    shown,
+    minimized,
+    maximized,
+    restored,
+    resized,
+)
 moved, request_sent, response_received, _pywebviewready(internal)
 ```
 

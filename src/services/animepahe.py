@@ -1,10 +1,11 @@
+import asyncio
+import base64
 import logging
 import re
 import time
-import base64
-import asyncio
+
 from core.html_extract import extract_anime_cards, extract_data_src_elements
-from core.state import Anime, Episode, Source, LatestRelease
+from core.state import Anime, Episode, LatestRelease, Source
 from services.ddos_solver import DDoSSolver
 
 logger = logging.getLogger(__name__)
@@ -49,9 +50,7 @@ class AnimePaheScraper:
                     ct = resp.headers.get("content-type", "image/jpeg")
                     return f"data:{ct};base64,{encoded}"
                 else:
-                    logger.warning(
-                        "Failed to proxy image %s: status=%d", url, resp.status_code
-                    )
+                    logger.warning("Failed to proxy image %s: status=%d", url, resp.status_code)
             except Exception as ex:
                 logger.error("Error proxying image %s: %s", url, ex)
         return url
@@ -129,16 +128,11 @@ class AnimePaheScraper:
             data = resp.json()
             logger.info("LATEST got JSON keys=%s", list(data.keys()))
         except ValueError as ex:
-            logger.error(
-                "LATEST JSON decode failed: %s — body start: %s", ex, resp.text[:300]
-            )
+            logger.error("LATEST JSON decode failed: %s — body start: %s", ex, resp.text[:300])
             return [], False
 
         # Resolve snapshots to base64 in parallel to bypass client-side Cloudflare blocks
-        tasks = [
-            self._get_image_base64(item.get("snapshot", ""))
-            for item in data.get("data", [])
-        ]
+        tasks = [self._get_image_base64(item.get("snapshot", "")) for item in data.get("data", [])]
         snapshots = await asyncio.gather(*tasks)
 
         results = []
@@ -204,10 +198,7 @@ class AnimePaheScraper:
             async with sem:
                 return await self._get_image_base64(url)
 
-        tasks = [
-            _bounded_poster(item.get("poster", ""))
-            for item in data.get("data", [])
-        ]
+        tasks = [_bounded_poster(item.get("poster", "")) for item in data.get("data", [])]
         posters = await asyncio.gather(*tasks)
 
         results = []
@@ -233,12 +224,8 @@ class AnimePaheScraper:
     async def _search_html(self, query: str, page: int = 1) -> tuple[list[Anime], bool]:
         logger.info("SEARCH_HTML q=%s page=%d", query, page)
         try:
-            resp = await self.ddos.get(
-                f"{BASE}/", params={"search": query, "page": str(page)}
-            )
-            logger.info(
-                "SEARCH_HTML status=%s len=%s", resp.status_code, len(resp.text)
-            )
+            resp = await self.ddos.get(f"{BASE}/", params={"search": query, "page": str(page)})
+            logger.info("SEARCH_HTML status=%s len=%s", resp.status_code, len(resp.text))
             if resp.status_code != 200:
                 logger.warning("SEARCH_HTML not 200, body start: %s", resp.text[:200])
                 return [], False
@@ -274,14 +261,10 @@ class AnimePaheScraper:
                 )
             )
         has_more = has_next
-        logger.info(
-            "SEARCH_HTML parsed %d results, has_more=%s", len(results), has_more
-        )
+        logger.info("SEARCH_HTML parsed %d results, has_more=%s", len(results), has_more)
         return results, has_more
 
-    async def episodes(
-        self, anime_session: str, page: int = 1
-    ) -> tuple[list[Episode], bool]:
+    async def episodes(self, anime_session: str, page: int = 1) -> tuple[list[Episode], bool]:
         cache_key = f"episodes_{anime_session}_{page}"
         cached = self._get_mem(cache_key, ttl=600)
         if cached:
@@ -302,9 +285,7 @@ class AnimePaheScraper:
         self._set_mem(cache_key, result, ttl=600)
         return result
 
-    async def _episodes_api(
-        self, anime_session: str, page: int = 1
-    ) -> tuple[list[Episode], bool]:
+    async def _episodes_api(self, anime_session: str, page: int = 1) -> tuple[list[Episode], bool]:
         logger.info("EPISODES_API session=%s page=%d", anime_session, page)
         resp = await self._fetch_api(
             {
@@ -327,10 +308,7 @@ class AnimePaheScraper:
             logger.error("EPISODES_API JSON decode failed: %s", ex)
             return [], False
         # Resolve snapshots to base64 in parallel to bypass client-side Cloudflare blocks
-        tasks = [
-            self._get_image_base64(item.get("snapshot", ""))
-            for item in data.get("data", [])
-        ]
+        tasks = [self._get_image_base64(item.get("snapshot", "")) for item in data.get("data", [])]
         snapshots = await asyncio.gather(*tasks)
 
         results = []
@@ -350,14 +328,10 @@ class AnimePaheScraper:
                 )
             )
         has_more = data.get("current_page", 1) < data.get("last_page", 1)
-        logger.info(
-            "EPISODES_API parsed %d results, has_more=%s", len(results), has_more
-        )
+        logger.info("EPISODES_API parsed %d results, has_more=%s", len(results), has_more)
         return results, has_more
 
-    async def _episodes_html(
-        self, anime_session: str, page: int = 1
-    ) -> tuple[list[Episode], bool]:
+    async def _episodes_html(self, anime_session: str, page: int = 1) -> tuple[list[Episode], bool]:
         logger.warning("EPISODES_HTML not implemented for session=%s", anime_session)
         return [], False
 
@@ -381,16 +355,12 @@ class AnimePaheScraper:
             self._set_mem(cache_key, results, ttl=300)
         return results
 
-    async def _sources_data_src(
-        self, anime_session: str, episode_session: str
-    ) -> list[Source]:
+    async def _sources_data_src(self, anime_session: str, episode_session: str) -> list[Source]:
         url = f"{BASE}/play/{anime_session}/{episode_session}"
         logger.info("SOURCES_DATA_SRC fetching %s", url)
         try:
             resp = await self.ddos.get(url)
-            logger.info(
-                "SOURCES_DATA_SRC status=%s len=%s", resp.status_code, len(resp.text)
-            )
+            logger.info("SOURCES_DATA_SRC status=%s len=%s", resp.status_code, len(resp.text))
             if resp.status_code != 200:
                 logger.warning("SOURCES_DATA_SRC not 200, body: %s", resp.text[:200])
                 return []
@@ -424,7 +394,7 @@ class AnimePaheScraper:
         # rides the Source as the download route.
         # The anchors are direct children — the first </div> closes the
         # menu itself.
-        download_m = re.search(r'id="pickDownload"(.*?)</div>', resp.text, re.S)
+        download_m = re.search(r'id="pickDownload"(.*?)</div>', resp.text, re.DOTALL)
         if download_m:
             menu = _parse_pick_download(download_m.group(1))
             # Match by QUALITY first: the menu's order (720p, 1080p in the
@@ -442,11 +412,7 @@ class AnimePaheScraper:
                     ),
                     None,
                 )
-                if (
-                    index is None
-                    and position < len(sources)
-                    and position not in claimed
-                ):
+                if index is None and position < len(sources) and position not in claimed:
                     # Same quality not found (or the menu names a quality
                     # the buttons don't): the same position is the fallback.
                     index = position
@@ -461,16 +427,12 @@ class AnimePaheScraper:
         logger.info("SOURCES_DATA_SRC found %d kwik sources", len(sources))
         return sources
 
-    async def _sources_regex(
-        self, anime_session: str, episode_session: str
-    ) -> list[Source]:
+    async def _sources_regex(self, anime_session: str, episode_session: str) -> list[Source]:
         url = f"{BASE}/play/{anime_session}/{episode_session}"
         logger.info("SOURCES_REGEX fetching %s", url)
         try:
             resp = await self.ddos.get(url)
-            logger.info(
-                "SOURCES_REGEX status=%s len=%s", resp.status_code, len(resp.text)
-            )
+            logger.info("SOURCES_REGEX status=%s len=%s", resp.status_code, len(resp.text))
             if resp.status_code != 200:
                 return []
         except Exception as ex:
@@ -510,7 +472,7 @@ def _parse_pick_download(html: str) -> list[dict]:
     resolutionMenu buttons, which is how the sizes attach to renditions."""
     entries: list[dict] = []
     for href, raw_label in re.findall(
-        r'href="(https://pahe\.win/[^"]+)"[^>]*>(.*?)</a>', html, re.S
+        r'href="(https://pahe\.win/[^"]+)"[^>]*>(.*?)</a>', html, re.DOTALL
     ):
         label = re.sub(r"<[^>]+>", "", raw_label or "")
         label = re.sub(r"\s+", " ", label).strip()

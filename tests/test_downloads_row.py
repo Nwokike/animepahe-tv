@@ -15,9 +15,9 @@ os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import flet as ft  # noqa: E402
+import flet as ft
 
-from screens.downloads_screen import _episode_row  # noqa: E402
+from screens.downloads_screen import _episode_row
 
 
 class _Controller:
@@ -103,7 +103,7 @@ def _row(progress=None, state="partial", **row):
 
 
 def test_a_running_job_shows_the_bar_inside_the_row_and_offers_pause():
-    controller, row = _row({"state": "downloading", "done": 5, "total": 20, "percent": 25})
+    _controller, row = _row({"state": "downloading", "done": 5, "total": 20, "percent": 25})
     bar = _bar(row)
     assert bar is not None
     assert bar.value == 0.25
@@ -114,7 +114,7 @@ def test_a_running_job_shows_the_bar_inside_the_row_and_offers_pause():
 
 
 def test_an_unknown_length_is_indeterminate_not_zero():
-    controller, row = _row({"state": "downloading", "done": 3, "total": 0, "percent": None})
+    _controller, row = _row({"state": "downloading", "done": 3, "total": 0, "percent": None})
     bar = _bar(row)
     assert bar is not None
     assert bar.value is None  # indeterminate
@@ -122,13 +122,13 @@ def test_an_unknown_length_is_indeterminate_not_zero():
 
 
 def test_a_queued_job_waits_and_can_still_be_cancelled():
-    controller, row = _row({"state": "queued", "done": 0, "total": 0})
+    _controller, row = _row({"state": "queued", "done": 0, "total": 0})
     assert any("Waiting" in text for text in _texts(row))
     assert sorted(b.tooltip for b in _buttons(row)) == ["Cancel", "Pause"]
 
 
 def test_a_paused_job_offers_resume_and_delete_never_pause():
-    controller, row = _row({"state": "stopped", "bytes": 2048})
+    _controller, row = _row({"state": "stopped", "bytes": 2048})
     assert any("Paused" in text for text in _texts(row))
     assert sorted(b.tooltip for b in _buttons(row)) == ["Delete", "Resume"]
     # the partial size is shown, not a percentage
@@ -136,13 +136,13 @@ def test_a_paused_job_offers_resume_and_delete_never_pause():
 
 
 def test_a_failed_job_offers_retry_and_delete():
-    controller, row = _row({"state": "failed"})
+    _controller, row = _row({"state": "failed"})
     assert any("Failed" in text for text in _texts(row))
     assert sorted(b.tooltip for b in _buttons(row)) == ["Delete", "Retry"]
 
 
 def test_a_complete_job_offers_play_and_delete_and_no_bar():
-    controller, row = _row(None, state="complete", size_bytes=293000000)
+    _controller, row = _row(None, state="complete", size_bytes=293000000)
     assert _bar(row) is None
     assert sorted(b.tooltip for b in _buttons(row)) == ["Delete", "Play"]
     assert any("279" in text for text in _texts(row))  # 293000000 bytes

@@ -114,6 +114,7 @@ def guarded_host(url: str) -> bool:
     host = urlsplit(url).hostname or ""
     return any(host == h or host.endswith("." + h) for h in GUARDED_IMAGE_HOSTS)
 
+
 _SOF_MARKERS = frozenset(
     (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF)
 )

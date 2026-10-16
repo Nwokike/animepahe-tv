@@ -8,14 +8,15 @@ shows, and the pick closes its own state so no dialog can strand.
 import os
 import sys
 import tempfile
+from typing import ClassVar
 
 _TMP = tempfile.mkdtemp(prefix="animepahe-dlq-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from main import _source_choices  # noqa: E402
-from core.state import Source, state  # noqa: E402
+from core.state import Source, state
+from main import _source_choices
 
 
 def _src(resolution, audio="jpn", fansub="", size="", url="https://x/e.mkv"):
@@ -217,7 +218,7 @@ def test_the_providers_own_download_route_is_not_reresolved():
     captured = {}
 
     class _Downloads:
-        active_jobs = []
+        active_jobs: ClassVar[list] = []
 
         async def detect_kind(self, url, headers):
             return (kind, filename)
@@ -274,7 +275,7 @@ def test_a_stream_source_is_still_resolved_normally():
     captured = {}
 
     class _Downloads:
-        active_jobs = []
+        active_jobs: ClassVar[list] = []
 
         async def detect_kind(self, url, headers):
             return ("hls", "")
@@ -370,8 +371,18 @@ def test_the_batch_queues_each_episode_independently():
     controller._resolve_anime = _anime
 
     eps = [
-        Episode(id=i, anime_id=1, episode=i, title=f"E{i}", snapshot="", disc="",
-                audio="jpn", duration="", session=f"e{i}", filler=False)
+        Episode(
+            id=i,
+            anime_id=1,
+            episode=i,
+            title=f"E{i}",
+            snapshot="",
+            disc="",
+            audio="jpn",
+            duration="",
+            session=f"e{i}",
+            filler=False,
+        )
         for i in range(1, 6)
     ]
     state.episodes = eps
@@ -429,8 +440,18 @@ def test_the_batch_skips_already_complete_and_active():
     controller._resolve_anime = _anime
 
     eps = [
-        Episode(id=i, anime_id=1, episode=i, title=f"E{i}", snapshot="", disc="",
-                audio="jpn", duration="", session=f"e{i}", filler=False)
+        Episode(
+            id=i,
+            anime_id=1,
+            episode=i,
+            title=f"E{i}",
+            snapshot="",
+            disc="",
+            audio="jpn",
+            duration="",
+            session=f"e{i}",
+            filler=False,
+        )
         for i in range(1, 4)
     ]
     state.episodes = eps

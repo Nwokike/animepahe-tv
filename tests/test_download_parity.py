@@ -3,6 +3,8 @@
 Dispatch is by what the media IS — never by which source it came from.
 Fake transport only; no network.
 """
+# ruff: noqa: ASYNC230 — fixture writes inside async tests run on a
+# private event loop with no UI to starve; to_thread would only add noise.
 
 import asyncio
 import os
@@ -123,15 +125,12 @@ def test_detect_kind_returns_the_servers_own_filename(tmp_path):
 
 def test_filename_from_disposition_reads_the_rfc5987_form():
     """Drive encodes non-ASCII names as filename*=UTF-8''..."""
-    from services.downloads import _filename_from_disposition
-
     from urllib.parse import quote
 
+    from services.downloads import _filename_from_disposition
+
     name = "スタッフ.mkv"
-    assert (
-        _filename_from_disposition(f"attachment; filename*=UTF-8''{quote(name)}")
-        == name
-    )
+    assert _filename_from_disposition(f"attachment; filename*=UTF-8''{quote(name)}") == name
     assert _filename_from_disposition("attachment; filename=ep01.mkv") == "ep01.mkv"
     for junk in (None, "", "attachment", "inline"):
         assert _filename_from_disposition(junk) == ""
@@ -323,9 +322,7 @@ def test_job_paths_are_stable_and_legal_on_every_platform(tmp_path):
     mgr = DownloadManager(store=None, downloads_dir=str(tmp_path))
     first = mgr._job_dir("kayoanime:961", "f274")
     assert mgr._job_dir("kayoanime:961", "f274") == first  # stable
-    assert mgr._job_dir("anikato:5789", "slug|7") == mgr._job_dir(
-        "anikato:5789", "slug|7"
-    )
+    assert mgr._job_dir("anikato:5789", "slug|7") == mgr._job_dir("anikato:5789", "slug|7")
     # the directory is actually creatable now
     os.makedirs(first, exist_ok=True)
     assert os.path.isdir(first)

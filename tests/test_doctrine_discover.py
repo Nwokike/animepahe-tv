@@ -72,7 +72,8 @@ def _controller(router):
 
 def test_discover_filters_are_asked_of_the_chosen_source():
     router = _Router(
-        "kayoanime", browse_spec=[{"key": "genre", "label": "Genre", "kind": "choice", "options": []}]
+        "kayoanime",
+        browse_spec=[{"key": "genre", "label": "Genre", "kind": "choice", "options": []}],
     )
     controller = _controller(router)
     asyncio.run(controller.load_discover_filters())

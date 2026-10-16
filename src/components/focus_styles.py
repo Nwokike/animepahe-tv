@@ -16,6 +16,8 @@ styled flat, exactly as KTV Player does it.
 
 from __future__ import annotations
 
+import contextlib
+
 import flet as ft
 
 
@@ -52,9 +54,7 @@ def card_button_style(
         color=ft.Colors.ON_SURFACE,
         side={
             ft.ControlState.FOCUSED: ft.BorderSide(2.5, primary),
-            ft.ControlState.HOVERED: ft.BorderSide(
-                2.0, ft.Colors.with_opacity(0.6, primary)
-            ),
+            ft.ControlState.HOVERED: ft.BorderSide(2.0, ft.Colors.with_opacity(0.6, primary)),
             ft.ControlState.PRESSED: ft.BorderSide(2.5, primary),
             ft.ControlState.DISABLED: ft.BorderSide(
                 1.0, ft.Colors.with_opacity(0.12, ft.Colors.ON_SURFACE_VARIANT)
@@ -123,10 +123,9 @@ def attach_focus_zoom(button: ft.Control, scale: float = 1.04) -> ft.Control:
 def _call(handler, e) -> None:
     if handler is None:
         return
-    try:
+    # A prior handler's failure must not break focus dispatch.
+    with contextlib.suppress(Exception):
         handler(e)
-    except Exception:
-        pass  # a prior handler's failure must not break focus dispatch
 
 
 def _safe_scale(button: ft.Control, value: float) -> None:

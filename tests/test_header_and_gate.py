@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import screens.home_screen as home  # noqa: E402
+import screens.home_screen as home
 
 
 class _State:

@@ -77,9 +77,7 @@ def DiscoverScreen() -> ft.Control:
         controller.load_discover(selections, 1)
 
     ft.use_effect(
-        lambda: (
-            controller.load_discover_filters() if not state.discover_filters else None
-        ),
+        lambda: controller.load_discover_filters() if not state.discover_filters else None,
         [],
     )
 
@@ -88,9 +86,7 @@ def DiscoverScreen() -> ft.Control:
             ft.Text("Discover", size=22, weight=ft.FontWeight.W_700),
             ft.Container(expand=True),
             ft.Text(
-                f"via {state.discover_source.capitalize()}"
-                if state.discover_source
-                else "",
+                f"via {state.discover_source.capitalize()}" if state.discover_source else "",
                 size=12,
                 color=ft.Colors.ON_SURFACE_VARIANT,
             ),
@@ -128,9 +124,7 @@ def DiscoverScreen() -> ft.Control:
 
     chips = ft.Column(
         [
-            _filter_choices(
-                spec, (state.discover_selections or {}).get(spec["key"]), _pick
-            )
+            _filter_choices(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
             for spec in filters
         ],
         spacing=10,

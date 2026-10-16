@@ -19,13 +19,13 @@ import urllib.parse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import pytest  # noqa: E402
+import pytest
 
-from components.artwork_card import card_media  # noqa: E402
-from components.result_card import result_card  # noqa: E402
-from core.artwork import PORTRAIT, PROBE_REFERERS  # noqa: E402
-from core.state import Anime  # noqa: E402
-from services.hls_proxy import (  # noqa: E402
+from components.artwork_card import card_media
+from components.result_card import result_card
+from core.artwork import PORTRAIT, PROBE_REFERERS
+from core.state import Anime
+from services.hls_proxy import (
     MAX_IMAGE_BYTES,
     PLACEHOLDER_PNG,
     HLSProxy,
@@ -76,9 +76,7 @@ def test_web_wraps_every_host_with_the_provider_referer():
     assert image_url("data:image/png;base64,AAAA") == "data:image/png;base64,AAAA"
     # Unknown provider: wrapped, but with no fabricated referer.
     wrapped = image_url("https://cdn/x.jpg", "")
-    assert "referer" not in urllib.parse.parse_qs(
-        urllib.parse.urlparse(wrapped).query
-    )
+    assert "referer" not in urllib.parse.parse_qs(urllib.parse.urlparse(wrapped).query)
 
 
 def test_native_wraps_only_guarded_hosts():
@@ -163,7 +161,7 @@ def test_non_image_upstream_is_forwarded_as_bytes():
 
 def test_failures_serve_a_quiet_placeholder_and_negative_cache():
     """Non-200 image responses are page errors in the renderer, and one
-    walled host re-fetched on every render — failures now answer a 1×1
+    walled host re-fetched on every render — failures now answer a 1x1
     transparent PNG (200) and are negative-cached, so a blocked host is
     quiet and cheap instead of hundreds of page errors per session."""
     proxy = HLSProxy()

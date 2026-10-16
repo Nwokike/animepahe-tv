@@ -22,16 +22,16 @@ import sys
 _TMP = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import flet as ft  # noqa: E402
-import pytest  # noqa: E402
+import flet as ft
+import pytest
 
-from components.focus_styles import attach_focus_zoom  # noqa: E402
-from components.player.immersive_player import (  # noqa: E402
+from components.focus_styles import attach_focus_zoom
+from components.player.immersive_player import (
     ImmersivePlayer,
     _stream_variants,
 )
-from core.focus_manager import FocusManager  # noqa: E402
-from hooks.use_focus_scope import focus_scope  # noqa: E402
+from core.focus_manager import FocusManager
+from hooks.use_focus_scope import focus_scope
 
 
 class _FakePage:
@@ -110,9 +110,7 @@ def test_focus_scope_tolerates_no_page_context():
 def _key(key, control=None):
     """ft.KeyboardEvent(name, control, key, shift, ctrl, alt, meta) — the
     first two are required positionals."""
-    return ft.KeyboardEvent(
-        "keydown", control or ft.Container(), key, False, False, False, False
-    )
+    return ft.KeyboardEvent("keydown", control or ft.Container(), key, False, False, False, False)
 
 
 def test_backspace_while_typing_does_not_navigate_away():
@@ -321,7 +319,7 @@ async def test_snapshot_confirmation_rides_the_result(tmp_path):
 
     player._snapshot_directory = _dir
     messages = []
-    import core.notify as notify
+    from core import notify
 
     original = notify.show_snack
     notify.show_snack = lambda page, msg, **kw: messages.append(msg)
@@ -338,7 +336,7 @@ async def test_snapshot_confirmation_rides_the_result(tmp_path):
 async def test_snapshot_failure_is_surfaced():
     player = _player(video=_Video(screenshot=None))  # backend can't capture
     messages = []
-    import core.notify as notify
+    from core import notify
 
     original = notify.show_snack
     notify.show_snack = lambda page, msg, **kw: messages.append(msg)

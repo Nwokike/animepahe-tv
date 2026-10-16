@@ -46,9 +46,7 @@ async def resolve_mode(
 ) -> tuple[str, str | None]:
     """(mode, strong_detection). ``strong`` is a detected supermajority worth
     remembering; None means the default stood."""
-    shapes = await artwork_probe.shapes_for(
-        sources[:PROBE_COUNT], provider=provider, cache=cache
-    )
+    shapes = await artwork_probe.shapes_for(sources[:PROBE_COUNT], provider=provider, cache=cache)
     strong = majority_shape(shapes)
     if strong:
         return strong, strong
@@ -65,7 +63,13 @@ def use_grid_mode(surface: str, sources: list[str], provider: str, state) -> str
     learned, set_learned = ft.use_state({})
     mode, set_mode = ft.use_state(None)
     key = "|".join(
-        (surface, provider, str(len(sources)), sources[0] if sources else "", sources[-1] if sources else "")
+        (
+            surface,
+            provider,
+            str(len(sources)),
+            sources[0] if sources else "",
+            sources[-1] if sources else "",
+        )
     )
 
     def _settle():

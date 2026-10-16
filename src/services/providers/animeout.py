@@ -10,6 +10,9 @@ clears — the code is durable and lights up the moment it does.
 
 import logging
 import re
+from typing import ClassVar
+
+import primp
 
 from core.config import (
     ANIMEOUT_API,
@@ -18,7 +21,6 @@ from core.config import (
     CACHE_TTL_SEARCH,
 )
 from core.state import Anime, Episode, LatestRelease, Source
-import primp
 from services.providers.base import (
     all_episodes,
     close_client,
@@ -31,6 +33,26 @@ from services.providers.base import (
 logger = logging.getLogger("animepahe.provider.animeout")
 
 _FILE_HOST = "public.animeout.xyz"
+
+# The post body's own cover image. AnimeOut embeds it as
+# ``/staff/img/{id}.jpg``; probe 2026-10-16: 71/72 posts across four
+# catalogue pages carry one and every tested URL served 200 — while the
+# WP media library's ``wp-content/uploads`` posters answer a Cloudflare
+# 403 to every programmatic client (primp included). Never prefer the
+# library URL; it is the one genuinely walled path.
+_CONTENT_IMG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+def _poster_from_content(html: str) -> str:
+    """The first image inside a post body, https-normalized, or ""."""
+    match = _CONTENT_IMG_RE.search(html or "")
+    if not match:
+        return ""
+    src = match.group(1).strip()
+    if src.startswith("http://"):
+        src = "https://" + src[len("http://") :]
+    return src
+
 
 # Map from resolved public.animeout.xyz target URLs to their exact
 # ddl.animeout.com/public.php?url=... page referer. The browser sends this exact
@@ -50,7 +72,12 @@ def _clean_title(raw: str) -> tuple[str, int, str]:
         media_type = "Movie"
     elif "ova" in lower or "special" in lower:
         media_type = "OVA"
-    return title.strip(" -–—")[:200], year, media_type
+    return (
+        title.strip(" -–—")  # noqa: RUF001 — dashes are strip chars, not typos
+        [:200],
+        year,
+        media_type,
+    )
 
 
 def _title_relevance(query: str, title: str) -> int:
@@ -76,7 +103,7 @@ class AnimeOutProvider:
     # a Cloudflare JS challenge, and the clearance decides availability at
     # runtime (no clearance -> sources() returns [] and the router moves on,
     # exactly as a provider with no answer). See AnimeOutSolver.
-    capabilities = {"files": True, "episodes": True, "episode_stills": False}
+    capabilities: ClassVar[dict] = {"files": True, "episodes": True, "episode_stills": False}
 
     def __init__(self, client=None, solver=None):
         self._client = client or primp.AsyncClient(
@@ -121,8 +148,21 @@ class AnimeOutProvider:
     # ------------------------------------------------------------------
 
     async def _posts_to_anime(self, posts: list[dict]) -> list[Anime]:
-        media_ids = [p["featured_media"] for p in posts if p.get("featured_media")]
+        if not isinstance(posts, list):
+            # An out-of-range page answers a {code, message} object, not a
+            # list — iterate nothing rather than crash the row builder.
+            return []
+        # Posters come from the post BODY (the /staff/img cover — 200 for
+        # every probe). The media library is asked only for the rare post
+        # whose body carries no image; its wp-content URLs are the walled
+        # path, so that fallback is honest but usually dark.
         poster_map: dict[int, str] = {}
+        media_ids = [
+            p["featured_media"]
+            for p in posts
+            if p.get("featured_media")
+            and not _poster_from_content((p.get("content") or {}).get("rendered", ""))
+        ]
         if media_ids:
             try:
                 resp = await self._client.get(
@@ -138,11 +178,12 @@ class AnimeOutProvider:
                 poster_map = {}
         results = []
         for post in posts:
-            title, year, media_type = _clean_title(
-                post.get("title", {}).get("rendered", "")
-            )
+            title, year, media_type = _clean_title(post.get("title", {}).get("rendered", ""))
             if not title:
                 continue
+            poster = _poster_from_content(
+                (post.get("content") or {}).get("rendered", "")
+            ) or poster_map.get(post.get("featured_media"), "")
             results.append(
                 Anime(
                     id=int(post.get("id") or 0),
@@ -153,7 +194,7 @@ class AnimeOutProvider:
                     season="",
                     year=year,
                     score=0.0,
-                    poster=poster_map.get(post.get("featured_media"), ""),
+                    poster=poster,
                     session=make_session("animeout", str(post.get("id") or "")),
                 )
             )
@@ -221,7 +262,7 @@ class AnimeOutProvider:
         params: dict = {
             "per_page": "24",
             "page": str(page),
-            "_fields": "id,title,featured_media",
+            "_fields": "id,title,featured_media,content",
         }
         categories = filters.get("categories")
         if categories:
@@ -249,7 +290,7 @@ class AnimeOutProvider:
                 "page": str(page),
                 "orderby": "date",
                 "order": "desc",
-                "_fields": "id,title,featured_media",
+                "_fields": "id,title,featured_media,content",
             },
         )
         if resp.status_code != 200:
@@ -270,7 +311,7 @@ class AnimeOutProvider:
                 "search": query,
                 "per_page": "12",
                 "page": str(page),
-                "_fields": "id,title,featured_media",
+                "_fields": "id,title,featured_media,content",
             },
         )
         if resp.status_code != 200:
@@ -278,9 +319,7 @@ class AnimeOutProvider:
         posts = resp.json()
         scored = [
             (
-                _title_relevance(
-                    query, _clean_title(p.get("title", {}).get("rendered", ""))[0]
-                ),
+                _title_relevance(query, _clean_title(p.get("title", {}).get("rendered", ""))[0]),
                 p,
             )
             for p in posts
@@ -296,7 +335,8 @@ class AnimeOutProvider:
         if not native.isdigit():
             return None
         resp = await self._client.get(
-            f"{ANIMEOUT_API}/posts/{native}", params={"_fields": "id,title,excerpt"}
+            f"{ANIMEOUT_API}/posts/{native}",
+            params={"_fields": "id,title,excerpt,featured_media,content"},
         )
         if resp.status_code != 200:
             return None
@@ -433,7 +473,7 @@ def _episodes_from_excerpt(post: dict) -> int:
     stay 0 so the UI hides the count instead of printing a fabricated 0."""
     excerpt = (post.get("excerpt") or {}).get("rendered") or ""
     text = re.sub(r"<[^>]+>", " ", excerpt)
-    m = re.search(r"Episodes?\s*:\s*(\d+)", text, re.I)
+    m = re.search(r"Episodes?\s*:\s*(\d+)", text, re.IGNORECASE)
     return int(m.group(1)) if m else 0
 
 
@@ -442,10 +482,10 @@ def _episode_number(filename: str) -> int:
     order (S01E12, "- 12", "Episode 12", bare) — different eras of posts
     use different conventions. 0 when nothing matches."""
     m = (
-        re.search(r"\bS\d{1,2}E(\d{1,4})\b", filename, re.I)
-        or re.search(r"-\s*(\d{1,4})\s*\d*\s*\[", filename, re.I)
-        or re.search(r"[Ee]pisode\s*(\d{1,4})", filename, re.I)
-        or re.search(r"\b(\d{1,4})\b", filename, re.I)
+        re.search(r"\bS\d{1,2}E(\d{1,4})\b", filename, re.IGNORECASE)
+        or re.search(r"-\s*(\d{1,4})\s*\d*\s*\[", filename, re.IGNORECASE)
+        or re.search(r"[Ee]pisode\s*(\d{1,4})", filename, re.IGNORECASE)
+        or re.search(r"\b(\d{1,4})\b", filename, re.IGNORECASE)
     )
     return int(m.group(1)) if m else 0
 
@@ -455,7 +495,7 @@ def _parse_episode_pairs(html: str) -> list[tuple[int, str]]:
     INCLUDING multiple qualities of the same episode. Posts serve e.g.
     both [1080pp] and [720p] links for one episode; dropping the second
     here is what made the promised 1080p/720p choice impossible."""
-    hrefs = re.findall(r"href=['\"](https?://[^'\"]+\.mkv)['\"]", html, re.I)
+    hrefs = re.findall(r"href=['\"](https?://[^'\"]+\.mkv)['\"]", html, re.IGNORECASE)
     pairs: list[tuple[int, str]] = []
     for href in hrefs:
         filename = href.rsplit("/", 1)[-1]
@@ -508,10 +548,10 @@ def _variant_map(pairs: list[tuple[int, str]]) -> dict[int, list[str]]:
 def _parse_filename(url: str) -> tuple[int, str, str]:
     name = url.rsplit("/", 1)[-1]
     resolution = 0
-    m = re.search(r"(\d{3,4})p", name, re.I)
+    m = re.search(r"(\d{3,4})p", name, re.IGNORECASE)
     if m:
         resolution = int(m.group(1))
-    m = re.search(r"\[(\d{3,4})pp?\]", name, re.I)
+    m = re.search(r"\[(\d{3,4})pp?\]", name, re.IGNORECASE)
     if m and not resolution:
         resolution = int(m.group(1))
     audio = "jpn"
@@ -530,7 +570,7 @@ def _parse_filename(url: str) -> tuple[int, str, str]:
         if not g or not re.search(r"[A-Za-z]{2,}", g):
             continue
         if (
-            re.fullmatch(r"\d{3,4}p{1,2}", g, re.I)
+            re.fullmatch(r"\d{3,4}p{1,2}", g, re.IGNORECASE)
             or g.lower() in _CODECS
             or re.fullmatch(r"[0-9A-F]{6,}", g)
         ):

@@ -43,7 +43,7 @@ class SharedServices:
                 timeout=timeout,
             )
             return True
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # A hand-off to another app never returns on some platforms.
             return True
         except Exception as ex:

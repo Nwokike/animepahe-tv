@@ -19,7 +19,7 @@ _KEYS = {"Back", "Escape", "BrowserBack", "Go Back", "Browser Back", "Backspace"
 
 def focus_scope(content, on_back) -> ft.Control:
     """Wrap content in an autofocused KeyboardListener that routes
-    Back/Escape to on_back."""
+    Back/Escape to on_back and delegates playback shortcuts to content.handle_key."""
 
     def _handler(e):
         if e.key in _KEYS:
@@ -46,6 +46,27 @@ def focus_scope(content, on_back) -> ft.Control:
                         await result
 
                     page.run_task(_run)
+            return
+
+        # Forward desktop/TV playback shortcuts (Space, arrows, j/k/l, volume,
+        # fullscreen, skip, etc.) to the player when the child supports it.
+        handler = getattr(content, "handle_key", None)
+        if handler is not None and callable(handler):
+            try:
+                page = ft.context.page
+            except RuntimeError:
+                page = None
+            if inspect.iscoroutinefunction(handler):
+                if page:
+                    page.run_task(handler, e)
+            else:
+                result = handler(e)
+                if asyncio.iscoroutine(result) and page:
+
+                    async def _run_key():
+                        await result
+
+                    page.run_task(_run_key)
 
     return ft.KeyboardListener(
         content=content,

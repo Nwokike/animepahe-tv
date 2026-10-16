@@ -11,12 +11,12 @@ its own anime by session — today it reads state.episodes like the old view.
 
 import flet as ft
 
-from components.artwork_card import card_frame, card_media
+from components.artwork_card import art_fallback, card_frame, card_media
 from components.banner_ad import build_banner_ad
-from components.offline_state import empty_or_offline
 from components.focus_styles import attach_focus_zoom
+from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
-from core.artwork import LANDSCAPE
+from core.artwork import LANDSCAPE, PORTRAIT
 from core.theme import AppColors
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
@@ -94,9 +94,7 @@ def _episode_card(
                                     weight=ft.FontWeight.W_700,
                                     color=AppColors.WARNING,
                                 ),
-                                padding=ft.Padding.symmetric(
-                                    horizontal=5, vertical=1
-                                ),
+                                padding=ft.Padding.symmetric(horizontal=5, vertical=1),
                                 border_radius=4,
                                 border=ft.Border.all(
                                     1,
@@ -155,7 +153,12 @@ def _episode_card(
         [
             card_frame(
                 mode=mode,
-                media=card_media(ep.snapshot or fallback_src, mode, provider=provider),
+                media=card_media(
+                    ep.snapshot or fallback_src,
+                    mode,
+                    title=f"Episode {ep.episode}",
+                    provider=provider,
+                ),
                 overlay=overlay,
                 on_click=lambda e: on_play(anime_session, ep.session),
             ),
@@ -199,9 +202,7 @@ def AnimeDetailScreen() -> ft.Control:
     # The detected grid shape for the episode list (this backend's own art;
     # an episode with none falls back to the series poster below).
     episode_sources = grid_sources(episodes, lambda e: e.snapshot)
-    grid_mode = use_grid_mode(
-        "episodes", episode_sources, state.current_source_name, state
-    )
+    grid_mode = use_grid_mode("episodes", episode_sources, state.current_source_name, state)
 
     if not episodes and state.is_loading:
         return ft.Container(
@@ -253,12 +254,11 @@ def AnimeDetailScreen() -> ft.Control:
         ),
         content=ft.Image(src=image_url(poster, provider), fit=ft.BoxFit.COVER, expand=True)
         if poster
-        else ft.Container(
-            content=ft.Icon(
-                ft.Icons.MOVIE_ROUNDED, size=64, color=ft.Colors.ON_SURFACE_VARIANT
-            ),
-            alignment=ft.Alignment.CENTER,
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+        else art_fallback(
+            title,
+            mode=PORTRAIT,
+            badge=anime.get("type", "TV"),
+            show_title=True,
         ),
     )
 
@@ -300,9 +300,7 @@ def AnimeDetailScreen() -> ft.Control:
                 content="Play",
                 icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
                 height=40,
-                on_click=lambda e, s=ep.session: controller.play_episode(
-                    anime_session, s
-                ),
+                on_click=lambda e, s=ep.session: controller.play_episode(anime_session, s),
             ),
         ]
         if done:
@@ -337,9 +335,7 @@ def AnimeDetailScreen() -> ft.Control:
                     content="Download",
                     icon=ft.Icons.DOWNLOAD_ROUNDED,
                     height=40,
-                    on_click=lambda e, s=ep.session: controller.download_episode(
-                        anime_session, s
-                    ),
+                    on_click=lambda e, s=ep.session: controller.download_episode(anime_session, s),
                 )
             )
         # Broken-stream reporting: the watch page's own form works
@@ -370,7 +366,6 @@ def AnimeDetailScreen() -> ft.Control:
         No hooks: this dialog is built inside an event handler, so the
         note rides a plain cell (a setter call would raise — use_state is
         render-time only). Checked issues are scoped per dialog open."""
-        from core.tasks import spawn
 
         checked: set[str] = set()
         cell = {"note": ""}
@@ -383,11 +378,10 @@ def AnimeDetailScreen() -> ft.Control:
 
         def _send():
             controller.close_dialog()
-            spawn(
-                controller.report_broken_stream(
-                    anime_session, episode_session, sorted(checked), cell["note"]
-                ),
-                name="report-broken",
+            # Already spawned by the controller bridge — a second spawn()
+            # here would hand create_task a Task, not a coroutine.
+            controller.report_broken_stream(
+                anime_session, episode_session, sorted(checked), cell["note"]
             )
 
         controller.open_sheet(
@@ -414,9 +408,7 @@ def AnimeDetailScreen() -> ft.Control:
                             multiline=True,
                             min_lines=2,
                             max_lines=4,
-                            on_change=lambda e: cell.__setitem__(
-                                "note", e.control.value or ""
-                            ),
+                            on_change=lambda e: cell.__setitem__("note", e.control.value or ""),
                         ),
                     ],
                     tight=True,
@@ -465,12 +457,8 @@ def AnimeDetailScreen() -> ft.Control:
     pager = ft_pager(
         page=state.episodes_page,
         has_more=state.episodes_has_more,
-        on_prev=lambda e: controller.load_episodes(
-            anime_session, state.episodes_page - 1
-        ),
-        on_next=lambda e: controller.load_episodes(
-            anime_session, state.episodes_page + 1
-        ),
+        on_prev=lambda e: controller.load_episodes(anime_session, state.episodes_page - 1),
+        on_next=lambda e: controller.load_episodes(anime_session, state.episodes_page + 1),
         is_loading=state.is_loading,
     )
 
@@ -494,9 +482,7 @@ def AnimeDetailScreen() -> ft.Control:
     follow_button = attach_focus_zoom(
         ft.FilledButton(
             content=ft.Text("Following" if following else "Follow"),
-            icon=ft.Icons.FAVORITE_ROUNDED
-            if following
-            else ft.Icons.FAVORITE_BORDER_ROUNDED,
+            icon=ft.Icons.FAVORITE_ROUNDED if following else ft.Icons.FAVORITE_BORDER_ROUNDED,
             style=ft.ButtonStyle(
                 bgcolor=AppColors.PRIMARY if following else ft.Colors.TRANSPARENT,
                 color=ft.Colors.WHITE if following else ft.Colors.ON_SURFACE,
@@ -523,9 +509,7 @@ def AnimeDetailScreen() -> ft.Control:
             parts.append(f"★ {float(anime['score']):.1f}")
         # Studios as well as the aired range — both parsed, neither shown
         # before now.
-        studios = [
-            str(s).strip() for s in (anime.get("studios") or []) if str(s).strip()
-        ]
+        studios = [str(s).strip() for s in (anime.get("studios") or []) if str(s).strip()]
         if studios:
             parts.append("/".join(studios[:2]))
         if anime.get("aired"):
@@ -554,9 +538,7 @@ def AnimeDetailScreen() -> ft.Control:
                     padding=ft.Padding.symmetric(horizontal=10, vertical=5),
                     border_radius=14,
                     bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
-                    border=ft.Border.all(
-                        1, ft.Colors.with_opacity(0.25, ft.Colors.ON_SURFACE)
-                    ),
+                    border=ft.Border.all(1, ft.Colors.with_opacity(0.25, ft.Colors.ON_SURFACE)),
                 )
                 for g in genres[:8]
             ],
@@ -713,8 +695,6 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
     narrows it, picks a quality, and the batch queues as N independent
     jobs. No hooks here — this is built inside an event handler, so the
     UI state is a plain cell and a preset tap re-opens the sheet."""
-    from core.tasks import spawn
-
     ui = ui if ui is not None else {"preset": "highest"}
     episodes = list(episodes or [])
     nums = [e.episode for e in episodes]
@@ -737,15 +717,13 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
     def _send():
         start, end = _range()
         chosen = [
-            e.session
-            for e in episodes
-            if start <= e.episode <= end and e.session not in done
+            e.session for e in episodes if start <= e.episode <= end and e.session not in done
         ]
         controller.close_dialog()
-        spawn(
-            controller.download_series(anime_session, chosen, ui["preset"]),
-            name="download-series",
-        )
+        # The controller bridge already spawns this — wrapping it in a
+        # second spawn() fed a Task (not a coroutine) to create_task and
+        # crashed the button with TypeError on every tap.
+        controller.download_series(anime_session, chosen, ui["preset"])
 
     def _preset(value):
         ui["preset"] = value
@@ -754,9 +732,7 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
         # called .get() on the string). `downloads` is this builder's own
         # argument, so the re-open keeps the same completed-exclusion set.
         controller.open_sheet(
-            _build_series_download_dialog(
-                episodes, controller, anime_session, downloads, ui
-            )
+            _build_series_download_dialog(episodes, controller, anime_session, downloads, ui)
         )
 
     count = len([e for e in episodes if lo <= e.episode <= hi and e.session not in done])
@@ -805,9 +781,7 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
             spacing=10,
         ),
         actions=[
-            ft.TextButton(
-                content="Cancel", on_click=lambda e: controller.close_dialog()
-            ),
+            ft.TextButton(content="Cancel", on_click=lambda e: controller.close_dialog()),
             ft.FilledButton(content="Download", on_click=lambda e: _send()),
         ],
         actions_alignment=ft.MainAxisAlignment.END,

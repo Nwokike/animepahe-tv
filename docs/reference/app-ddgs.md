@@ -101,23 +101,27 @@ class AppColors:
 Page-resolving colour getters (`:34-80`) — every one follows this shape:
 
 ```python
-    @staticmethod
-    def _resolve_page(page: ft.Page | None) -> ft.Page | None:
-        """Return the active page, falling back to ``flet.context.page``."""
-        if page is not None:
-            return page
-        try:
-            from flet import context as flet_context
-            return flet_context.page
-        except Exception:
-            return None
+@staticmethod
+def _resolve_page(page: ft.Page | None) -> ft.Page | None:
+    """Return the active page, falling back to ``flet.context.page``."""
+    if page is not None:
+        return page
+    try:
+        from flet import context as flet_context
 
-    @staticmethod
-    def get_bg(page: ft.Page | None = None) -> str:
-        resolved = AppColors._resolve_page(page)
-        is_dark = is_dark_mode(resolved)
-        return AppColors.DARK_BG_1 if is_dark else AppColors.LIGHT_BG
-    # get_surface / get_surface_2 / get_border / get_text / get_text_dim identical
+        return flet_context.page
+    except Exception:
+        return None
+
+
+@staticmethod
+def get_bg(page: ft.Page | None = None) -> str:
+    resolved = AppColors._resolve_page(page)
+    is_dark = is_dark_mode(resolved)
+    return AppColors.DARK_BG_1 if is_dark else AppColors.LIGHT_BG
+
+
+# get_surface / get_surface_2 / get_border / get_text / get_text_dim identical
 ```
 
 Dark-mode predicate (`:83-101`):
@@ -128,14 +132,14 @@ def is_dark_mode(page: ft.Page | None) -> bool:
     if page is None:
         try:
             from flet import context as flet_context
+
             page = flet_context.page
         except Exception:
             return True  # fallback to dark
     if page is None:
         return True
     return page.theme_mode == ft.ThemeMode.DARK or (
-        page.theme_mode == ft.ThemeMode.SYSTEM
-        and page.platform_brightness == ft.Brightness.DARK
+        page.theme_mode == ft.ThemeMode.SYSTEM and page.platform_brightness == ft.Brightness.DARK
     )
 ```
 
@@ -147,11 +151,13 @@ GLASS_BORDER_COLOR = ft.Colors.with_opacity(0.10, ft.Colors.WHITE)
 LIGHT_GLASS_BG = ft.Colors.with_opacity(0.04, ft.Colors.BLACK)
 LIGHT_GLASS_BORDER = ft.Colors.with_opacity(0.08, ft.Colors.BLACK)
 
+
 def adaptive_glass_bg(page: ft.Page | None = None) -> str:
     """Return card background color appropriate for current theme."""
     if page and not is_dark_mode(page):
         return LIGHT_GLASS_BG
     return GLASS_BG
+
 
 def adaptive_glass_border(page: ft.Page | None = None) -> str:
     """Return card border color appropriate for current theme."""
@@ -221,7 +227,11 @@ Persistence path, in order:
 2. Stored value overrides: `DDGS:app_controller.py:333-339` —
    ```python
    t = await storage.get_theme()
-   self.page.theme_mode = {"dark": ft.ThemeMode.DARK, "system": ft.ThemeMode.SYSTEM, "light": ft.ThemeMode.LIGHT}.get(t, ft.ThemeMode.SYSTEM)
+   self.page.theme_mode = {
+       "dark": ft.ThemeMode.DARK,
+       "system": ft.ThemeMode.SYSTEM,
+       "light": ft.ThemeMode.LIGHT,
+   }.get(t, ft.ThemeMode.SYSTEM)
    state.theme_mode = self.page.theme_mode
    ```
    Default `"system"` (`DDGS:services/storage_service.py:89`, `STORAGE_THEME = "theme"` at `DDGS:core/constants.py:5`, `get_theme/set_theme` at `storage_service.py:256-260`).

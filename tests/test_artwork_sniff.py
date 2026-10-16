@@ -190,9 +190,7 @@ def test_majority_requires_three_votes_and_sixty_percent():
 
 def test_decide_mode_detection_beats_defaults():
     # The provider seed says landscape, but three portraits were detected.
-    assert (
-        decide_mode([PORTRAIT, PORTRAIT, PORTRAIT], "kayoanime", "latest") == PORTRAIT
-    )
+    assert decide_mode([PORTRAIT, PORTRAIT, PORTRAIT], "kayoanime", "latest") == PORTRAIT
     assert decide_mode([LANDSCAPE, LANDSCAPE, LANDSCAPE], "anikato", "latest") == LANDSCAPE
 
 

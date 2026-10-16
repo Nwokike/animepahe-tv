@@ -13,8 +13,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from services.providers.animeout import AnimeOutProvider  # noqa: E402
-from services.providers.kayoanime import KayoanimeProvider  # noqa: E402
+from services.providers.animeout import AnimeOutProvider
+from services.providers.kayoanime import KayoanimeProvider
 
 
 class _Resp:

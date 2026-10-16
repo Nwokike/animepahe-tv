@@ -5,6 +5,8 @@ Monokai-green text, last 500 lines of the in-memory log buffer, with
 copy/clear/close actions and a telemetry strip.
 """
 
+import contextlib
+
 import flet as ft
 
 from components.banner_ad import build_banner_ad
@@ -144,10 +146,8 @@ def SettingsScreen() -> ft.Control:
             from core.dialogs import close_app_dialog
 
             if page and not close_app_dialog(page):
-                try:
+                with contextlib.suppress(Exception):
                     page.pop_dialog()
-                except Exception:
-                    pass
 
         dlg = ft.AlertDialog(
             modal=False,
@@ -281,9 +281,7 @@ def SettingsScreen() -> ft.Control:
                         )
                     },
                 ),
-                on_click=lambda e, tk=token, md=mode_for_token(token): _pick_theme(
-                    tk, md
-                ),
+                on_click=lambda e, tk=token: _pick_theme(tk, mode_for_token(tk)),
             )
             for token, label, icon in _THEME_OPTIONS
         ],
@@ -305,16 +303,13 @@ def SettingsScreen() -> ft.Control:
 
         async def _read():
             stored = await get_store().get_backend()
-            names = set(
-                (controller_ref.router.provider_names if controller_ref else []) or []
-            )
+            names = set((controller_ref.router.provider_names if controller_ref else []) or [])
             # Show the provider actually serving; a legacy/empty stored
             # value never renders (a 1.0.x-era leftover is treated as
             # "no preference").
-            active = (
-                getattr(controller_ref, "router", None)
-                and controller_ref.router.pin
-            ) or (stored if stored in names else "")
+            active = (getattr(controller_ref, "router", None) and controller_ref.router.pin) or (
+                stored if stored in names else ""
+            )
             set_backend(active)
             set_source_status(controller_ref.sources_status())
 
@@ -332,9 +327,7 @@ def SettingsScreen() -> ft.Control:
         if hasattr(controller, "set_backend_pin"):
             controller.set_backend_pin(name)
 
-    provider_names = (
-        controller_ref.router.provider_names if controller_ref else []
-    ) or []
+    provider_names = (controller_ref.router.provider_names if controller_ref else []) or []
     backend_dropdown = ft.Dropdown(
         value=backend,
         # Providers only, in the app's fixed launch order — there is no
@@ -367,16 +360,12 @@ def SettingsScreen() -> ft.Control:
         latency = rec.get("latency_ms")
         latency_text = f"{latency:.0f} ms" if latency else "—"
         error = rec.get("last_error") or ""
-        subtitle = f"{state_name} · {latency_text}" + (
-            f" · {error[:60]}" if error else ""
-        )
+        subtitle = f"{state_name} · {latency_text}" + (f" · {error[:60]}" if error else "")
         tested = test_rows.get(name)
         if tested is not None:
             bits = ["probe OK" if tested.get("probe_ok") else "probe FAIL"]
             if tested.get("search_count") is not None:
-                bits.append(
-                    f"{tested['search_count']} results in {tested.get('search_ms')} ms"
-                )
+                bits.append(f"{tested['search_count']} results in {tested.get('search_ms')} ms")
             if tested.get("error"):
                 bits.append(tested["error"])
             subtitle = " · ".join(bits)
@@ -400,9 +389,7 @@ def SettingsScreen() -> ft.Control:
     source_section = [
         _section_header("CONTENT SOURCE"),
         _settings_card([backend_row]),
-        _settings_card([*status_rows, test_button])
-        if status_rows
-        else ft.Container(height=0),
+        _settings_card([*status_rows, test_button]) if status_rows else ft.Container(height=0),
     ]
 
     return ft.Column(

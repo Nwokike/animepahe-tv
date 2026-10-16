@@ -138,6 +138,13 @@ def _anime_dict(anime) -> dict:
     }
 
 
+def _write_bytes_file(path: str, data: bytes) -> None:
+    """Blocking write for asyncio.to_thread — keeps the notification poster
+    mirror off the UI loop (ASYNC230)."""
+    with open(path, "wb") as f:
+        f.write(data)
+
+
 class AppController:
     """Owns services + data actions. Navigation lives in AppShell."""
 
@@ -185,11 +192,11 @@ class AppController:
         # tries AniKato, AnimeOut, AnimePahe, then the rest; the first one
         # that answers serves the session. Per-request failover, never
         # locked; no user-facing "automatic" concept exists.
-        from services.providers.base import DEFAULT_OWNER, PROVIDER_ORDER, owner_of
+        from services.animeout_solver import AnimeOutSolver
         from services.providers.anikato import AniKatoProvider
         from services.providers.animeout import AnimeOutProvider
-        from services.animeout_solver import AnimeOutSolver
         from services.providers.animepahe_provider import AnimePaheProvider
+        from services.providers.base import DEFAULT_OWNER, PROVIDER_ORDER, owner_of
         from services.providers.kayoanime import KayoanimeProvider
         from services.router import ProviderRouter
 
@@ -491,6 +498,9 @@ class AppController:
         """Clear the Cloudflare session + caches, then reload the home feed."""
         state.cf_blocked = False
         state.latest_version += 1
+        # Verify is the user's explicit act on the wall — the solver window
+        # may open for it (the 1.0.9 behavior).
+        self._gate_solver(True)
         # The Verify button spins for the whole re-challenge: it can take
         # several seconds on a cold WebView solve.
         state.cf_retrying = True
@@ -533,14 +543,10 @@ class AppController:
                 episodes, has_more = await self.router.episodes(anime_session, page_num)
                 state.current_source_name = self.router.last_winner or ""
                 if gen != self._episodes_gen:
-                    logger.info(
-                        "load_episodes discarding stale page for %s", anime_session
-                    )
+                    logger.info("load_episodes discarding stale page for %s", anime_session)
                     return
                 if not session_alive():
-                    logger.info(
-                        "load_episodes session=%s dropped (session gone)", anime_session
-                    )
+                    logger.info("load_episodes session=%s dropped (session gone)", anime_session)
                     return
                 logger.info(
                     "load_episodes session=%s page=%d got %d",
@@ -587,9 +593,7 @@ class AppController:
             return
         if gen != self._episodes_gen:
             return
-        matched = next(
-            (a for a in results if a.session == anime_session and a.poster), None
-        )
+        matched = next((a for a in results if a.session == anime_session and a.poster), None)
         if matched is None or "/snapshots/" in (matched.poster or ""):
             return
         merged = dict(state.selected_anime or {})
@@ -600,7 +604,24 @@ class AppController:
 
     def _ddos(self):
         """The Cloudflare solver, when this build has one."""
-        return getattr(self.scraper, "ddos", None) if self.scraper else None
+        scraper = getattr(self, "scraper", None)
+        return getattr(scraper, "ddos", None) if scraper else None
+
+    def _gate_solver(self, allowed: bool) -> None:
+        """Open or close the verification-window gate for the session.
+
+        The 1.0.9 behavior, restored deliberately: once AnimePahe is the
+        resolved source (a pin at launch, a manual switch to it) or the user
+        presses Verify, a wall that answers AnimePahe's own fetches opens
+        the solver window — the clearance it captures serves the rest of
+        the session. Background work (health probes, the episode checker)
+        never flips the gate: only resolve/pin/Verify/Play do. Switching
+        away closes it again so another source's session can never pop a
+        pahe window.
+        """
+        solver = self._ddos()
+        if solver is not None:
+            solver.solve_allowed = allowed
 
     def _may_solve(self, anime_session: str | None) -> bool:
         """A verification window opens only for a deliberate action on
@@ -610,9 +631,9 @@ class AppController:
         solver = self._ddos()
         if solver is None:
             return False
-        if anime_session and self._owner_of(anime_session) != self._default_owner:
-            return False
-        return True
+        return not (
+            anime_session and self._owner_of(anime_session) != self._default_owner
+        )
 
     async def play_episode(self, anime_session: str, episode_session: str):
         # Resolve the stream, then open the in-app player. The ktv:// deep
@@ -624,13 +645,16 @@ class AppController:
             return
         async with self._play_lock:
             solver = self._ddos()
+            # Restore the gate — not force it shut — so a session already
+            # pinned to animepahe keeps its ability to solve after play.
+            previous = solver.solve_allowed if solver is not None else False
             if self._may_solve(anime_session) and solver is not None:
                 solver.solve_allowed = True
             try:
                 await self._play_episode(anime_session, episode_session)
             finally:
                 if solver is not None:
-                    solver.solve_allowed = False
+                    solver.solve_allowed = previous
 
     async def _play_episode(self, anime_session: str, episode_session: str):
         state.current_anime_session = anime_session
@@ -670,9 +694,7 @@ class AppController:
         self._play_gen += 1
         self._end_resolve()
 
-    async def _play_episode_resolve(
-        self, anime_session: str, episode_session: str, gen: int
-    ):
+    async def _play_episode_resolve(self, anime_session: str, episode_session: str, gen: int):
         anime = await self._resolve_anime(anime_session)
         if gen != self._play_gen:
             return
@@ -715,9 +737,7 @@ class AppController:
         try:
             sources = await self.router.sources(anime_session, episode_session)
         except Exception as ex:
-            logger.error(
-                "sources(%s/%s) failed: %s", anime_session, episode_session, ex
-            )
+            logger.error("sources(%s/%s) failed: %s", anime_session, episode_session, ex)
             self._show_error_snackbar("Couldn't load the stream sources.")
             sources = []
         if gen != self._play_gen:
@@ -735,9 +755,7 @@ class AppController:
                 self._owner_of(anime_session),
                 episode_session,
             )
-            self._show_error_snackbar(
-                "This source has no playable stream for this episode."
-            )
+            self._show_error_snackbar("This source has no playable stream for this episode.")
             return
         # SUB (JPN) group first, DUB (ENG) after — each best-first.
         # Dubs exist as separate renditions; today they render mixed.
@@ -824,9 +842,7 @@ class AppController:
                 return None
         return url or None
 
-    async def _fetch_variants(
-        self, m3u8: str, headers: dict | None = None
-    ) -> list[dict]:
+    async def _fetch_variants(self, m3u8: str, headers: dict | None = None) -> list[dict]:
         """Master-playlist variants through the proxy (correct headers),
         falling back to a direct fetch when the proxy isn't running.
 
@@ -884,11 +900,7 @@ class AppController:
         if pending_external:
             # The old-app path: resolve the chosen source and hand it to KTV.
             source = next(
-                (
-                    s
-                    for s in getattr(self, "_external_sources", [])
-                    if s.url == choice["url"]
-                ),
+                (s for s in getattr(self, "_external_sources", []) if s.url == choice["url"]),
                 None,
             )
             if source is None:
@@ -920,9 +932,7 @@ class AppController:
                 pending["anime_session"],
                 provider_name=pending.get("provider"),
             )
-            variants = (
-                await self._fetch_variants(m3u8, choice.get("headers")) if m3u8 else []
-            )
+            variants = await self._fetch_variants(m3u8, choice.get("headers")) if m3u8 else []
         except Exception as ex:
             logger.error("quality choice resolve failed: %s", ex)
             self._show_error_snackbar("Couldn't switch to that quality.")
@@ -1106,9 +1116,11 @@ class AppController:
         state.discover_has_more = False
         state.discover_version += 1
         if not spec:
-            logger.info(
-                "discover: %s offers no browse surface", self.router.pin or "no source"
-            )
+            logger.info("discover: %s offers no browse surface", self.router.pin or "no source")
+        else:
+            # Populate the initial page immediately so Discover is never empty
+            # on first open (the user used to see a blank screen until tapping a chip).
+            await self.load_discover({}, 1)
 
     async def load_discover(self, selections: dict | None = None, page: int = 1):
         """Run the filtered browse. An empty result is a RESULT (nothing
@@ -1142,9 +1154,7 @@ class AppController:
             if time is None and tabs:
                 time = tabs[0]["time"]
             state.schedule_time = time or ""
-            state.schedule_entries = (
-                await provider.schedule_entries(time) if time else []
-            )
+            state.schedule_entries = await provider.schedule_entries(time) if time else []
         except Exception as ex:
             logger.warning("schedule load failed: %s", ex)
             state.schedule_tabs = []
@@ -1170,7 +1180,7 @@ class AppController:
 
         def _close_schedule():
             try:
-                setattr(self.page, "_app_dialog", None)
+                self.page._app_dialog = None
                 self.page.pop_dialog()
             except Exception:
                 pass
@@ -1227,12 +1237,10 @@ class AppController:
                 padding=ft.Padding.symmetric(horizontal=12, vertical=8),
                 border_radius=8,
                 ink=True,
-                on_click=lambda e, s=entry.get("slug", ""): _open_entry(s),
+                on_click=lambda e, entry=entry: _open_entry(entry.get("slug", "")),
             )
             for entry in state.schedule_entries
-        ] or [
-            ft.Text("No airings this day.", size=13, color=ft.Colors.ON_SURFACE_VARIANT)
-        ]
+        ] or [ft.Text("No airings this day.", size=13, color=ft.Colors.ON_SURFACE_VARIANT)]
 
         show_app_dialog(
             self.page,
@@ -1254,9 +1262,7 @@ class AppController:
                     tight=True,
                     spacing=8,
                 ),
-                actions=[
-                    ft.TextButton(content="Close", on_click=lambda e: _close_schedule())
-                ],
+                actions=[ft.TextButton(content="Close", on_click=lambda e: _close_schedule())],
                 actions_alignment=ft.MainAxisAlignment.END,
             ),
         )
@@ -1347,17 +1353,14 @@ class AppController:
         from core.tasks import spawn
 
         cache_dir = app_cache_dir("posters")
-        path = os.path.join(
-            cache_dir, notifications.stable_filename(anime_session)
-        )
+        path = os.path.join(cache_dir, notifications.stable_filename(anime_session))
 
         async def _fetch():
             try:
                 client = self.kwik._get_client()
                 resp = await client.get(poster_url, timeout=15)
                 if resp.status_code == 200 and resp.content:
-                    with open(path, "wb") as f:
-                        f.write(resp.content)
+                    await asyncio.to_thread(_write_bytes_file, path, resp.content)
                     self._trim_poster_cache()
             except Exception as ex:
                 logger.debug("poster cache failed: %s", ex)
@@ -1420,6 +1423,11 @@ class AppController:
                 self.router.set_pin(preference)
             else:
                 self.router.set_pin(await self._ordered_backend())
+            # The solver gate follows the resolved source: a resolved
+            # AnimePahe MAY open its verification window for the first
+            # fetch (the 1.0.9 behavior — solve early, then the clearance
+            # serves the whole session); every other source closes it.
+            self._gate_solver(self.router.pin == "animepahe")
             # The header names the ACTIVE source from the moment it is
             # resolved — a failing first fetch (AnimePahe's wall) must not
             # blank the badge. load_latest still updates it on success.
@@ -1450,6 +1458,10 @@ class AppController:
         immediately and persists; the switch goes through the startup gate:
         splash → resolve → first fetch."""
         self.router.set_pin(name)
+        # The solver gate follows the choice: switching TO animepahe opens
+        # it (the wall's window may appear for the first fetch), switching
+        # away closes it so another source's session can never pop one.
+        self._gate_solver(self.router.pin == "animepahe")
         # The header/badge name the choice immediately — even if this
         # source's first fetch fails (the gate card still offers Verify).
         state.current_source_name = self.router.pin or ""
@@ -1540,9 +1552,7 @@ class AppController:
 
         state.selected_source = sources[0]
         if len(choices) <= 1:
-            await self._resolve_and_launch_external(
-                sources[0], anime_session, episode_session
-            )
+            await self._resolve_and_launch_external(sources[0], anime_session, episode_session)
             return
         state.quality_choices = choices
         state.quality_dialog_open = True
@@ -1557,9 +1567,7 @@ class AppController:
         }
         state.episodes_version += 1
 
-    async def _resolve_and_launch_external(
-        self, source, anime_session: str, episode_session: str
-    ):
+    async def _resolve_and_launch_external(self, source, anime_session: str, episode_session: str):
         """Resolve one kwik source and hand the m3u8 to KTV, exactly as the
         old app did (TimeoutError counts as launch success)."""
         self._resolve_stage(self._play_gen, "Resolving stream…")
@@ -1621,7 +1629,7 @@ class AppController:
     async def download_series(
         self, anime_session: str, episode_sessions: list[str], preset: str = "highest"
     ) -> int:
-        """"Download the series": every episode in the range, queued.
+        """ "Download the series": every episode in the range, queued.
 
         Each episode is its INDEPENDENT job — one failing (a walled link,
         a dead host) does not stop the rest, exactly Media3's per-request
@@ -1716,9 +1724,7 @@ class AppController:
         # (store, manifest, full disk) must not leave the row's spinner
         # spinning for the rest of the session.
         try:
-            await self._begin_download(
-                choices[0], anime_session, episode_session, ep, anime
-            )
+            await self._begin_download(choices[0], anime_session, episode_session, ep, anime)
         finally:
             self._finish_download_start(episode_session)
 
@@ -1808,9 +1814,7 @@ class AppController:
             row["filename"] = server_name
             await self.store.save_download(episode_session, row)
         if kind == "file":
-            await self.downloads.start_direct(
-                episode_session, resolved, source_headers, metadata
-            )
+            await self.downloads.start_direct(episode_session, resolved, source_headers, metadata)
         else:
             from components.player.immersive_player import KWIK_USER_AGENT
 
@@ -1819,9 +1823,7 @@ class AppController:
                     "User-Agent": KWIK_USER_AGENT,
                     "Referer": "https://kwik.cx/",
                 }
-            await self.downloads.start(
-                episode_session, resolved, source_headers, metadata
-            )
+            await self.downloads.start(episode_session, resolved, source_headers, metadata)
 
     def _finish_download_start(self, episode_session: str) -> None:
         state.starting_downloads.discard(episode_session)
@@ -1844,12 +1846,8 @@ class AppController:
         """Resume (or retry) from the job's own manifest."""
         rows = await self.store.get_downloads()
         row = rows.get(episode_session) or {}
-        job_dir = self.downloads._job_dir(
-            row.get("anime_session", "unknown"), episode_session
-        )
-        manifest = self.downloads._read_manifest(
-            os.path.join(job_dir, "manifest.json")
-        )
+        job_dir = self.downloads._job_dir(row.get("anime_session", "unknown"), episode_session)
+        manifest = self.downloads._read_manifest(os.path.join(job_dir, "manifest.json"))
         state.download_progress = _with_job_state(
             state.download_progress, episode_session, "downloading"
         )
@@ -1947,9 +1945,7 @@ class AppController:
             if state_name not in ("downloading", "queued", "paused", "failed"):
                 continue
             percent = row.get("percent")
-            body = (
-                f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
-            )
+            body = f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
             if state_name == "paused":
                 body = "Paused"
             elif state_name == "failed":
@@ -2166,9 +2162,7 @@ class AppController:
 
         from core.notify import show_snack
 
-        show_snack(
-            self.page, "Recent searches cleared", action_label="Undo", on_action=_undo
-        )
+        show_snack(self.page, "Recent searches cleared", action_label="Undo", on_action=_undo)
 
 
 async def main(page: ft.Page):
@@ -2195,33 +2189,23 @@ async def main(page: ft.Page):
     methods.load_discover = lambda selections=None, page=1: spawn(
         controller.load_discover(selections, page), name="load-discover"
     )
-    methods.retry_cloudflare = lambda: spawn(
-        controller.retry_cloudflare(), name="retry-cf"
-    )
+    methods.retry_cloudflare = lambda: spawn(controller.retry_cloudflare(), name="retry-cf")
     methods.load_episodes = lambda session, page_num=1: spawn(
         controller.load_episodes(session, page_num), name="load-episodes"
     )
-    methods.open_schedule = lambda: spawn(
-        controller.open_schedule(), name="open-schedule"
-    )
+    methods.open_schedule = lambda: spawn(controller.open_schedule(), name="open-schedule")
     methods.open_random = lambda: spawn(controller.open_random(), name="open-random")
-    methods.load_anime = lambda session: spawn(
-        controller.load_anime(session), name="load-anime"
-    )
+    methods.load_anime = lambda session: spawn(controller.load_anime(session), name="load-anime")
     methods.play_episode = lambda anime_session, episode_session: spawn(
         controller.play_episode(anime_session, episode_session), name="play-episode"
     )
-    methods.download_series = (
-        lambda anime_session, episode_sessions, preset="highest": spawn(
-            controller.download_series(anime_session, episode_sessions, preset),
-            name="download-series",
-        )
+    methods.download_series = lambda anime_session, episode_sessions, preset="highest": spawn(
+        controller.download_series(anime_session, episode_sessions, preset),
+        name="download-series",
     )
-    methods.report_broken_stream = (
-        lambda anime_session, episode_session, issues, note="": spawn(
-            controller.report_broken_stream(anime_session, episode_session, issues, note),
-            name="report-broken",
-        )
+    methods.report_broken_stream = lambda anime_session, episode_session, issues, note="": spawn(
+        controller.report_broken_stream(anime_session, episode_session, issues, note),
+        name="report-broken",
     )
     methods.load_search = lambda query, page=1: spawn(
         controller.load_search(query, page), name="load-search"
@@ -2235,9 +2219,7 @@ async def main(page: ft.Page):
     methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
     # Sync action: no spawn() — create_task(None) would raise.
     methods.cancel_resolve = lambda: controller.cancel_resolve()
-    methods.toggle_follow = lambda row: spawn(
-        controller.toggle_follow(row), name="toggle-follow"
-    )
+    methods.toggle_follow = lambda row: spawn(controller.toggle_follow(row), name="toggle-follow")
     methods.record_search_selection = lambda anime: spawn(
         controller.record_search_selection(anime), name="record-search-selection"
     )
@@ -2253,30 +2235,16 @@ async def main(page: ft.Page):
     methods.choose_download_quality = lambda index: spawn(
         controller.choose_download_quality(index), name="choose-download-quality"
     )
-    methods.cancel_download = lambda e: spawn(
-        controller.cancel_download(e), name="cancel-download"
-    )
-    methods.pause_download = lambda e: spawn(
-        controller.pause_download(e), name="pause-download"
-    )
-    methods.resume_download = lambda e: spawn(
-        controller.resume_download(e), name="resume-download"
-    )
-    methods.retry_download = lambda e: spawn(
-        controller.retry_download(e), name="retry-download"
-    )
-    methods.delete_download = lambda e: spawn(
-        controller.delete_download(e), name="delete-download"
-    )
-    methods.play_downloaded = lambda e: spawn(
-        controller.play_downloaded(e), name="play-downloaded"
-    )
+    methods.cancel_download = lambda e: spawn(controller.cancel_download(e), name="cancel-download")
+    methods.pause_download = lambda e: spawn(controller.pause_download(e), name="pause-download")
+    methods.resume_download = lambda e: spawn(controller.resume_download(e), name="resume-download")
+    methods.retry_download = lambda e: spawn(controller.retry_download(e), name="retry-download")
+    methods.delete_download = lambda e: spawn(controller.delete_download(e), name="delete-download")
+    methods.play_downloaded = lambda e: spawn(controller.play_downloaded(e), name="play-downloaded")
 
     # The shell's player branch reaches the controller through this handle
     # (its ControllerMethods copy is the shell-owned navigation half).
-    methods.test_all_sources = lambda: spawn(
-        controller.test_all_sources(), name="test-all-sources"
-    )
+    methods.test_all_sources = lambda: spawn(controller.test_all_sources(), name="test-all-sources")
     methods.sources_status = controller.sources_status
     methods.set_backend_pin = lambda name: spawn(
         controller.set_backend_pin(name), name="set-backend-pin"
@@ -2284,9 +2252,7 @@ async def main(page: ft.Page):
     methods.open_backend_picker = lambda: spawn(
         controller.open_backend_picker(), name="open-backend-picker"
     )
-    methods.pin_backend = lambda name: spawn(
-        controller.pin_backend(name), name="pin-backend"
-    )
+    methods.pin_backend = lambda name: spawn(controller.pin_backend(name), name="pin-backend")
     methods._app_controller = controller
     controller.shell = methods
 
@@ -2297,9 +2263,7 @@ async def main(page: ft.Page):
         ad_service = build_ad_service(
             page,
             on_initialized=lambda e: spawn(show_app_open(page), name="app-open"),
-            on_init_failed=lambda e: logger.warning(
-                "ad init failed: %s", getattr(e, "data", e)
-            ),
+            on_init_failed=lambda e: logger.warning("ad init failed: %s", getattr(e, "data", e)),
         )
         if ad_service is not None and not isinstance(ad_service, ft.Container):
             page.services.append(ad_service)

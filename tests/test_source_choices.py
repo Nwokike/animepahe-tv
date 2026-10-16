@@ -16,9 +16,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core.state import Source  # noqa: E402
-from main import _source_choices  # noqa: E402
-from services.providers.kayoanime import KayoanimeProvider  # noqa: E402
+from core.state import Source
+from main import _source_choices
+from services.providers.kayoanime import KayoanimeProvider
 
 
 def test_duplicate_logical_renditions_collapse():
@@ -57,17 +57,13 @@ def test_unknown_resolution_never_prints_zero_p():
 def test_kayoanime_is_one_source_with_a_download_route():
     provider = KayoanimeProvider(client=None)
     provider._quality = {"77": 1080}
-    sources = asyncio.run(
-        provider.sources("kayoanime:77", "1mkuqtOVMUJ6Q6hwmRyojGaYcTm_tsYBs")
-    )
+    sources = asyncio.run(provider.sources("kayoanime:77", "1mkuqtOVMUJ6Q6hwmRyojGaYcTm_tsYBs"))
     assert len(sources) == 1
     source = sources[0]
     # Play = the keyed route (206 with seek); download = the keyless route.
     assert source.url.startswith("https://www.googleapis.com/drive/v3/files/")
     assert "alt=media" in source.url
-    assert source.download_url.startswith(
-        "https://drive.usercontent.google.com/download"
-    )
+    assert source.download_url.startswith("https://drive.usercontent.google.com/download")
     assert "confirm=t" in source.download_url
     assert source.resolution == 1080
     assert source.headers["Referer"] == "https://drive.google.com/"

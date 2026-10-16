@@ -20,18 +20,19 @@ import tempfile
 _TMP = tempfile.mkdtemp(prefix="animepahe-player-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
-import pytest  # noqa: E402
+import flet as ft
+import pytest
 
-import flet as ft  # noqa: E402
-
-import core.notify as notify  # noqa: E402
-import core.tasks as tasks  # noqa: E402
-from components.player.immersive_player import (  # noqa: E402
+from components.player.immersive_player import (
+    _BOX_FITS,
     FIT_OPTIONS,
     ImmersivePlayer,
-    _BOX_FITS,
 )
-from services.store import JsonStore  # noqa: E402
+from core import (
+    notify,
+    tasks,
+)
+from services.store import JsonStore
 
 
 class _Chip:
@@ -116,9 +117,7 @@ async def test_settings_round_trip_and_cold_read(tmp_path):
 
     # Corrupt file: defaults, never a crash.
     path.write_text("{not json", encoding="utf-8")
-    assert (
-        JsonStore(filename=str(path)).get_setting("video_fit", "contain") == "contain"
-    )
+    assert JsonStore(filename=str(path)).get_setting("video_fit", "contain") == "contain"
 
 
 @pytest.mark.asyncio
@@ -225,9 +224,7 @@ async def test_will_unmount_is_sync_and_still_saves_the_position():
 
     class _Store:
         async def save_position(self, key, position, duration, rate):
-            saved.update(
-                key=key, position=position, duration=duration, rate=rate
-            )
+            saved.update(key=key, position=position, duration=duration, rate=rate)
 
     class _SavingVideo(_Video):
         async def get_current_position(self):

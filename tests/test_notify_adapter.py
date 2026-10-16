@@ -12,9 +12,9 @@ import tempfile
 _TMP = tempfile.mkdtemp(prefix="animepahe-notify-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
-import pytest  # noqa: E402
+import pytest
 
-import core.notifications as notifications  # noqa: E402
+from core import notifications
 
 
 class _Event:
@@ -99,9 +99,7 @@ async def test_ensure_channel_is_quiet_when_the_service_refuses(fake):
 
 
 @pytest.mark.asyncio
-async def test_show_new_episode_carries_the_payload_channel_and_big_picture(
-    fake, tmp_path
-):
+async def test_show_new_episode_carries_the_payload_channel_and_big_picture(fake, tmp_path):
     poster = tmp_path / "poster.img"
     poster.write_bytes(b"img")
 
@@ -134,9 +132,7 @@ async def test_show_new_episode_carries_the_payload_channel_and_big_picture(
 async def test_show_new_episode_without_a_poster_omits_the_style(fake):
     """AndroidIcon requires exactly one source, so a missing poster must
     mean NO style rather than a broken one."""
-    await notifications.show_new_episode(
-        anime_session="s1", title="T", episode=1, poster_path=None
-    )
+    await notifications.show_new_episode(anime_session="s1", title="T", episode=1, poster_path=None)
     assert fake.shown[0]["style"] is None
 
 
@@ -200,9 +196,7 @@ def test_on_tap_dispatches_the_payload_and_ignores_foreign_ones(monkeypatch):
 
 
 def test_handle_payload_decodes_ours_and_rejects_everything_else():
-    assert (
-        notifications.handle_payload("animepahe://anime/kayoanime:12") == "kayoanime:12"
-    )
+    assert notifications.handle_payload("animepahe://anime/kayoanime:12") == "kayoanime:12"
     for junk in (
         None,
         "",

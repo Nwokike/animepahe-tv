@@ -13,6 +13,8 @@ becomes the frosted fill: the same image blown up and blurred behind, a
 darkened scrim, and the true-aspect copy centered on top — shown, never cut.
 """
 
+import re
+
 import flet as ft
 
 from components.focus_styles import (
@@ -21,14 +23,163 @@ from components.focus_styles import (
     card_focus_scale,
 )
 from core.artwork import LANDSCAPE, PORTRAIT
+from core.theme import AppColors
 from core.tokens import CARD_ASPECT_LANDSCAPE, CARD_ASPECT_PORTRAIT
 from services.artwork_probe import cached_shape
 from services.hls_proxy import image_url
 
-__all__ = ["aspect_for", "card_media", "card_frame"]
+__all__ = [
+    "art_fallback",
+    "aspect_for",
+    "card_frame",
+    "card_media",
+    "monogram",
+]
 
 FROSTED_BLUR = 18
 FROSTED_SCRIM_OPACITY = 0.45
+
+# The no-art panel's proportions, in one place so every surface matches.
+ART_TILE = 46
+ART_TILE_RADIUS = 14
+ART_TILE_ACCENT = 0.16
+ART_TILE_BORDER = 0.35
+ART_WATERMARK_OPACITY = 0.10
+ART_WASH_OPACITY = 0.16
+
+
+def monogram(title: str) -> str:
+    """One or two initials from a title — "Black Clover" -> "BC". Empty
+    input is a valid input (the panel draws a neutral glyph instead)."""
+    words = [w for w in re.split(r"[^0-9A-Za-z]+", title or "") if w]
+    if not words:
+        return ""
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return (words[0][0] + words[1][0]).upper()
+
+
+def art_fallback(
+    title: str = "",
+    *,
+    mode: str = PORTRAIT,
+    badge: str = "",
+    show_title: bool = False,
+) -> ft.Control:
+    """The no-artwork panel: a deliberate typographic cover.
+
+    Shown when an item has no image at all or its URL cannot load. Every
+    layer sets an app-palette colour — no Material-default tint can leak
+    through (the purple/blank box the owner rejected), and no broken-image
+    glyph is ever drawn. The title's initials become the mark; the card's
+    own overlay (or the details column, via ``show_title``) carries the
+    words, so the panel never duplicates them unless asked."""
+    mono = monogram(title)
+    tile = ft.Container(
+        width=ART_TILE,
+        height=ART_TILE,
+        border_radius=ART_TILE_RADIUS,
+        bgcolor=ft.Colors.with_opacity(ART_TILE_ACCENT, AppColors.PRIMARY),
+        border=ft.Border.all(1, ft.Colors.with_opacity(ART_TILE_BORDER, AppColors.PRIMARY)),
+        alignment=ft.Alignment.CENTER,
+        content=(
+            ft.Text(mono, size=16, weight=ft.FontWeight.W_800, color=AppColors.PRIMARY)
+            if mono
+            else ft.Icon(ft.Icons.LIVE_TV_ROUNDED, size=20, color=AppColors.PRIMARY)
+        ),
+    )
+    layers: list[ft.Control] = [
+        # The brand wash: a quiet diagonal of the app's own rose, so the
+        # panel reads as designed rather than as a missing image.
+        ft.Container(
+            gradient=ft.LinearGradient(
+                begin=ft.Alignment.TOP_LEFT,
+                end=ft.Alignment.BOTTOM_RIGHT,
+                colors=[
+                    ft.Colors.with_opacity(ART_WASH_OPACITY, AppColors.PRIMARY),
+                    ft.Colors.TRANSPARENT,
+                ],
+            ),
+            expand=True,
+        ),
+    ]
+    if mode == LANDSCAPE:
+        # The card's overlay already prints title + episode at the left
+        # and the play glyph at the right — the initials ride the centre
+        # as a watermark instead of a tile, so nothing collides.
+        layers.append(
+            ft.Container(
+                alignment=ft.Alignment.CENTER,
+                content=ft.Text(
+                    mono or "•",
+                    size=64,
+                    weight=ft.FontWeight.W_900,
+                    color=ft.Colors.with_opacity(ART_WATERMARK_OPACITY, ft.Colors.ON_SURFACE),
+                ),
+            )
+        )
+    elif show_title:
+        # A text-first cover for surfaces with no overlay of their own
+        # (the detail screen's poster box): mark, title, metadata chip.
+        layers.append(
+            ft.Container(
+                alignment=ft.Alignment.CENTER,
+                padding=14,
+                content=ft.Column(
+                    [
+                        tile,
+                        ft.Text(
+                            title or "Untitled",
+                            size=14,
+                            weight=ft.FontWeight.W_700,
+                            color=ft.Colors.ON_SURFACE,
+                            text_align=ft.TextAlign.CENTER,
+                            max_lines=3,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Container(
+                            content=ft.Text(
+                                badge,
+                                size=10,
+                                weight=ft.FontWeight.W_700,
+                                color=AppColors.PRIMARY,
+                            ),
+                            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                            border_radius=8,
+                            bgcolor=ft.Colors.with_opacity(0.14, AppColors.PRIMARY),
+                            visible=bool(badge),
+                        ),
+                    ],
+                    spacing=10,
+                    tight=True,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+            )
+        )
+    else:
+        layers.append(
+            ft.Container(
+                alignment=ft.Alignment.TOP_CENTER,
+                padding=ft.Padding.only(top=18),
+                content=tile,
+            )
+        )
+        layers.append(
+            ft.Container(
+                alignment=ft.Alignment.BOTTOM_RIGHT,
+                padding=ft.Padding.only(right=10, bottom=10),
+                content=ft.Icon(
+                    ft.Icons.MOVIE_FILTER_ROUNDED,
+                    size=36,
+                    color=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+                ),
+            )
+        )
+    return ft.Container(
+        content=ft.Stack(controls=layers, expand=True),
+        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH,
+        expand=True,
+    )
 
 
 def aspect_for(mode: str) -> float:
@@ -39,6 +190,7 @@ def card_media(
     src: str,
     mode: str,
     *,
+    title: str = "",
     placeholder: ft.Control | None = None,
     error_content: ft.Control | None = None,
     opacity: float = 1.0,
@@ -46,24 +198,27 @@ def card_media(
 ) -> ft.Control:
     """The image layer for one card cell.
 
-    ``placeholder`` shows when the item has no art at all (every provider
-    shows something — the caller passes the backend's own fallback per the
-    house law); ``error_content`` shows when a URL fails to load.
-    ``provider`` feeds the display route's referer when the platform wraps
-    the image (web CORS / guarded hosts)."""
+    No art at all, and art whose URL cannot load, both fall to the same
+    rich typographic panel (``art_fallback``) — the caller can still pass
+    its own ``placeholder``/``error_content`` to override either, but the
+    default is never a blank or broken-image box. ``title`` feeds the
+    panel's monogram; ``provider`` feeds the display route's referer when
+    the platform wraps the image (web CORS / guarded hosts)."""
+    fallback = art_fallback(title, mode=mode)
     if not src:
-        return placeholder or ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH)
+        return placeholder or fallback
     # Shape comes from the RAW URL (the shape memo keys on it); only the
     # control's src goes through the display route.
     shape = cached_shape(src)
     display = image_url(src, provider)
+    error = error_content or fallback
     if shape not in (LANDSCAPE, PORTRAIT) or shape == mode:
         return ft.Image(
             src=display,
             fit=ft.BoxFit.COVER,
             expand=True,
             opacity=opacity,
-            error_content=error_content,
+            error_content=error,
         )
     # Mismatch: frosted fill — blurred blow-up behind, scrim, true-aspect copy.
     return ft.Stack(
@@ -80,7 +235,7 @@ def card_media(
                     fit=ft.BoxFit.CONTAIN,
                     expand=True,
                     opacity=opacity,
-                    error_content=error_content,
+                    error_content=error,
                 ),
                 alignment=ft.Alignment.CENTER,
                 padding=12,

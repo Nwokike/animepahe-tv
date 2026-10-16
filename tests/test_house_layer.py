@@ -117,11 +117,11 @@ def test_empty_state_without_action_has_no_button():
 
 def test_tokens_are_a_4pt_grid():
     from core.tokens import (
-        SPACING_XS,
-        SPACING_SM,
-        SPACING_MD,
         SPACING_LG,
+        SPACING_MD,
+        SPACING_SM,
         SPACING_XL,
+        SPACING_XS,
     )
 
     for token in (

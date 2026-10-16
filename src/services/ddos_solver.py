@@ -1,7 +1,9 @@
 import asyncio
 import logging
 from urllib.parse import urlparse
+
 import primp
+
 from core.state import state
 from services.store import get_store
 from services.webview_solver import WebViewSolver
@@ -43,9 +45,8 @@ def _looks_like_cf_challenge(text: str, status_code: int) -> bool:
     lowered = text.lower()
     # An HTML page from the API is always suspicious — the API returns JSON.
     # Combined with a marker it is almost certainly a challenge page.
-    if "<html" in lowered:
-        if any(marker in lowered for marker in _CF_BODY_MARKERS):
-            return True
+    if "<html" in lowered and any(marker in lowered for marker in _CF_BODY_MARKERS):
+        return True
     # Direct marker hit anywhere (covers title-only challenge pages too).
     return any(marker in lowered for marker in _CF_BODY_MARKERS)
 
@@ -92,9 +93,7 @@ class DDoSSolver:
         try:
             from jnius import autoclass  # type: ignore[import-not-found]
         except ImportError:
-            logger.debug(
-                "DDoS _clear_webview_cookies: jnius unavailable (desktop), skipping"
-            )
+            logger.debug("DDoS _clear_webview_cookies: jnius unavailable (desktop), skipping")
             return False
         try:
             CookieManager = autoclass("android.webkit.CookieManager")
@@ -151,14 +150,10 @@ class DDoSSolver:
         # 3. Trigger WebViewSolver
         page = getattr(state, "page", None)
         if page is None:
-            logger.error(
-                "DDoS state.page is not set, cannot solve Cloudflare challenge"
-            )
+            logger.error("DDoS state.page is not set, cannot solve Cloudflare challenge")
             return False
 
-        stored = (
-            await self._store.get_clearance() if self._store is not None else None
-        )
+        stored = await self._store.get_clearance() if self._store is not None else None
         prior_ua = (stored or {}).get("user_agent") or self._user_agent or None
         try:
             cookies, ua = await WebViewSolver.solve_challenge(
@@ -207,9 +202,7 @@ class DDoSSolver:
     ) -> primp.AsyncResponse:
         if method == "GET":
             return await client.get(url, headers=headers, params=params, **kwargs)
-        return await client.request(
-            method, url, headers=headers, params=params, **kwargs
-        )
+        return await client.request(method, url, headers=headers, params=params, **kwargs)
 
     async def _ensure_solved(self) -> None:
         """One solve gate for every caller (the get() rewrite branch and
@@ -256,9 +249,7 @@ class DDoSSolver:
         )
 
         resp = await self._request("GET", client, url, merged, params, **kwargs)
-        logger.debug(
-            "DDoS GET %s -> status=%s len=%s", url, resp.status_code, len(resp.text)
-        )
+        logger.debug("DDoS GET %s -> status=%s len=%s", url, resp.status_code, len(resp.text))
 
         # Detect a Cloudflare challenge in ANY of its forms (not just 403).
         # This covers the common "HTTP 200 + JS interstitial" case that used to

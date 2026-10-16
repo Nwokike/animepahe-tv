@@ -15,13 +15,11 @@ import textwrap
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import main as app_main  # noqa: E402
+import main as app_main
 
 
 def test_playback_resolution_has_no_automatic_title_hop():
-    source = textwrap.dedent(
-        inspect.getsource(app_main.AppController._play_episode_resolve)
-    )
+    source = textwrap.dedent(inspect.getsource(app_main.AppController._play_episode_resolve))
     assert "sources_for_title_any" not in source, (
         "owner-empty playback must never ask another backend on its own"
     )

@@ -112,12 +112,13 @@ identical to the above.)
 Streaming pattern (from the class docstring, lines 202–217):
 
 ```python
-unpacker = Unpacker()                       # or Unpacker(file_like)
+unpacker = Unpacker()  # or Unpacker(file_like)
 while True:
     buf = sock.recv(1024**2)
-    if not buf: break
-    unpacker.feed(buf)                      # raises BufferFull if over max_buffer_size
-    for o in unpacker:                      # __next__ consumes; StopIteration on OutOfData
+    if not buf:
+        break
+    unpacker.feed(buf)  # raises BufferFull if over max_buffer_size
+    for o in unpacker:  # __next__ consumes; StopIteration on OutOfData
         process(o)
 ```
 

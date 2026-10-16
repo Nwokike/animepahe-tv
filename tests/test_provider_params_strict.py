@@ -34,11 +34,9 @@ class StrictParamsClient:
         self.calls: list[tuple[str, dict]] = []
 
     async def get(self, url, params=None, headers=None, **kwargs):
-        for key, value in (params or {}).items():
+        for value in (params or {}).values():
             if not isinstance(value, str):
-                raise TypeError(
-                    f"'{type(value).__name__}' object is not an instance of 'str'"
-                )
+                raise TypeError(f"'{type(value).__name__}' object is not an instance of 'str'")
         self.calls.append((url, dict(params or {})))
         return _StrictResp(200, [])
 

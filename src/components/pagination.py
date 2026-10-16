@@ -28,17 +28,13 @@ def page_pill(
                     ft.Icon(
                         icon,
                         size=16,
-                        color=ft.Colors.ON_SURFACE_VARIANT
-                        if not enabled
-                        else ft.Colors.ON_SURFACE,
+                        color=ft.Colors.ON_SURFACE_VARIANT if not enabled else ft.Colors.ON_SURFACE,
                     ),
                     ft.Text(
                         label,
                         size=13,
                         weight=ft.FontWeight.W_500,
-                        color=ft.Colors.ON_SURFACE_VARIANT
-                        if not enabled
-                        else ft.Colors.ON_SURFACE,
+                        color=ft.Colors.ON_SURFACE_VARIANT if not enabled else ft.Colors.ON_SURFACE,
                     ),
                 ],
                 spacing=8,
@@ -61,12 +57,8 @@ def page_pill(
                     ),
                 },
                 overlay_color={
-                    ft.ControlState.FOCUSED: ft.Colors.with_opacity(
-                        0.2, AppColors.PRIMARY
-                    ),
-                    ft.ControlState.HOVERED: ft.Colors.with_opacity(
-                        0.1, AppColors.PRIMARY
-                    ),
+                    ft.ControlState.FOCUSED: ft.Colors.with_opacity(0.2, AppColors.PRIMARY),
+                    ft.ControlState.HOVERED: ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
                 },
                 elevation=0,
             ),

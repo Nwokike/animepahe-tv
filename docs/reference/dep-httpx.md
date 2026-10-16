@@ -285,10 +285,12 @@ Files: `base.py, default.py, mock.py, wsgi.py, asgi.py`.
   Handler receives a `Request`, returns a `Response`. **Yes — fake transports can
   be injected for tests**, verified live end-to-end:
   ```python
-  def h(req): return httpx.Response(200, json={"hello": "world"}, request=req)
-  with httpx.Client(transport=httpx.MockTransport(h),
-                     base_url="https://example.org") as c:
-      r = c.get("/x")   # 200 {'hello': 'world'}, history == []
+  def h(req):
+      return httpx.Response(200, json={"hello": "world"}, request=req)
+
+
+  with httpx.Client(transport=httpx.MockTransport(h), base_url="https://example.org") as c:
+      r = c.get("/x")  # 200 {'hello': 'world'}, history == []
   ```
   Sync handler in a sync `Client` works; in an `AsyncClient` the handler may be a
   plain or `async` function (`mock.py:29-43`: non-`Response` result is awaited).
@@ -306,10 +308,11 @@ Files: `base.py, default.py, mock.py, wsgi.py, asgi.py`.
 ## 6. Event hooks
 
 ```python
-def on_request(request: httpx.Request): ...        # mutate/inspect before send
-def on_response(response: httpx.Response): ...     # inspect after receive
-client = httpx.Client(event_hooks={"request": [on_request],
-                                   "response": [on_response]})
+def on_request(request: httpx.Request): ...  # mutate/inspect before send
+def on_response(response: httpx.Response): ...  # inspect after receive
+
+
+client = httpx.Client(event_hooks={"request": [on_request], "response": [on_response]})
 ```
 
 - Only the two keys `"request"` / `"response"` are kept

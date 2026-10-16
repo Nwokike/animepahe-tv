@@ -7,6 +7,7 @@ same "reach the developer" affordance, no personal contact details shipped
 in the binary.
 """
 
+import contextlib
 import logging
 
 import flet as ft
@@ -23,11 +24,9 @@ def show_support_dialog(page: ft.Page):
     shared = get_shared_services(page)
 
     def _dismiss():
-        setattr(page, "_app_dialog", None)
-        try:
+        page._app_dialog = None
+        with contextlib.suppress(Exception):
             page.pop_dialog()
-        except Exception:
-            pass
 
     async def _open(e):
         _dismiss()

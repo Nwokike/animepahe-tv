@@ -8,6 +8,7 @@ row to call.
 """
 
 import asyncio
+import contextlib
 import logging
 
 import flet as ft
@@ -29,11 +30,9 @@ def show_update_dialog(page: ft.Page, update_data: dict):
 
     def _dismiss_dialog():
         # Clear the Back-handler registration whether the pop lands or not.
-        setattr(page, "_app_dialog", None)
-        try:
+        page._app_dialog = None
+        with contextlib.suppress(Exception):
             page.pop_dialog()
-        except Exception:
-            pass
 
     def _schedule_reshow():
         nonlocal reshowing
@@ -46,10 +45,8 @@ def show_update_dialog(page: ft.Page, update_data: dict):
         nonlocal reshowing
         await asyncio.sleep(0.35)
         reshowing = False
-        try:
+        with contextlib.suppress(Exception):
             show_update_dialog(page, update_data)
-        except Exception:
-            pass
 
     async def open_download(e):
         apk_url = update_data.get("apk_url") or ""

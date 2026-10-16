@@ -20,6 +20,8 @@ import json
 import logging
 import re
 import time
+from html import unescape
+from typing import ClassVar
 from urllib.parse import quote
 
 import primp
@@ -56,15 +58,10 @@ AD_STUB_MIN_SEGMENTS = 3
 
 def is_ad_stub_playlist(text: str) -> bool:
     """True when EVERY media segment comes from the ad-stub host family."""
-    segments = [
-        line.strip() for line in text.splitlines() if line.strip().startswith("http")
-    ]
+    segments = [line.strip() for line in text.splitlines() if line.strip().startswith("http")]
     if len(segments) < AD_STUB_MIN_SEGMENTS:
         return False
-    return all(
-        any(suffix in segment for suffix in AD_STUB_HOST_SUFFIXES)
-        for segment in segments
-    )
+    return all(any(suffix in segment for suffix in AD_STUB_HOST_SUFFIXES) for segment in segments)
 
 
 def _vrf(value) -> str:
@@ -149,21 +146,18 @@ def _parse_watch(html: str) -> dict:
     id_m = re.search(r'data-id="(\d+)"', scope)
     poster_m = re.search(r'img itemprop="image" src="([^"]+)"', html)
     title_m = re.search(r'itemprop="name"[^>]*>([^<]+)<', html)
-    synopsis_m = re.search(
-        r'class="synopsis[^"]*">.*?<div class="content">(.*?)</div>', html, re.S
-    )
-    meta = re.search(r'class="bmeta"(.*?)class="w-side', html, re.S)
+    synopsis_m = re.search(r'class="synopsis[^"]*">.*?<div class="content">(.*?)</div>', html, re.DOTALL)
+    meta = re.search(r'class="bmeta"(.*?)class="w-side', html, re.DOTALL)
     meta_html = meta.group(1) if meta else ""
 
     def _meta_after(label: str) -> str:
         # "Type: <span>TV</span>" — label and value are siblings in one div.
-        m = re.search(label + r":\s*<span>(.*?)</span>", meta_html, re.S | re.I)
+        m = re.search(label + r":\s*<span>(.*?)</span>", meta_html, re.DOTALL | re.IGNORECASE)
         return _clean(m.group(1)) if m else ""
 
-    season_m = re.search(r"Premiered:\s*<span>(.*?)</span>", meta_html, re.S | re.I)
+    season_m = re.search(r"Premiered:\s*<span>(.*?)</span>", meta_html, re.DOTALL | re.IGNORECASE)
     genres = [
-        _clean(g)
-        for g in re.findall(r'href="[^"]*/genre/[^"]*"[^>]*>([^<]+)</a>', meta_html)
+        _clean(g) for g in re.findall(r'href="[^"]*/genre/[^"]*"[^>]*>([^<]+)</a>', meta_html)
     ]
     episodes_raw = _meta_after("Episodes")
     score_raw = _meta_after("MAL")
@@ -255,7 +249,7 @@ def _parse_schedule_day(html: str) -> list[dict]:
         r"<span>\s*Episode\s*(\d+)</span>.*?"
         r'd-title"[^>]*>([^<]+)<',
         html,
-        re.S,
+        re.DOTALL,
     ):
         entries.append(
             {
@@ -298,7 +292,7 @@ def _decrypt_manifest(enc: str) -> str:
 
 class AniKatoProvider:
     name = "anikato"
-    capabilities = {
+    capabilities: ClassVar[dict] = {
         "files": True,
         "episodes": True,
         "episode_stills": False,  # the episode list has zero <img> —
@@ -348,9 +342,7 @@ class AniKatoProvider:
 
         # primp's content arg is bytes — a str raises a TypeError in the
         # Rust layer, so encode here.
-        resp = await self._client.post(
-            url, headers=headers, content=urlencode(fields).encode()
-        )
+        resp = await self._client.post(url, headers=headers, content=urlencode(fields).encode())
         if resp.status_code != 200:
             raise RuntimeError(f"anikato POST {resp.status_code} for {url}")
         return resp.text
@@ -418,9 +410,7 @@ class AniKatoProvider:
         cached = self._cache_get(key)
         if cached is not None:
             return cached
-        genres = await self._genre_filters()
-        types = await self._path_filters("/type", "type")
-        statuses = await self._path_filters("/status", "status")
+        genres, types, statuses, seasons = await self._discover_filter_options()
         spec: list[dict] = []
         if genres:
             spec.append(
@@ -432,9 +422,7 @@ class AniKatoProvider:
                 }
             )
         if types:
-            spec.append(
-                {"key": "type", "label": "Type", "kind": "choice", "options": types}
-            )
+            spec.append({"key": "type", "label": "Type", "kind": "choice", "options": types})
         if statuses:
             spec.append(
                 {
@@ -442,6 +430,15 @@ class AniKatoProvider:
                     "label": "Status",
                     "kind": "choice",
                     "options": statuses,
+                }
+            )
+        if seasons:
+            spec.append(
+                {
+                    "key": "season",
+                    "label": "Season",
+                    "kind": "choice",
+                    "options": seasons,
                 }
             )
         spec.append(
@@ -465,48 +462,63 @@ class AniKatoProvider:
         self._cache_put(key, spec, CACHE_TTL_LATEST)
         return spec
 
-    async def _genre_filters(self) -> list[dict]:
-        """The genre slugs live on the home nav as /genre/{slug} anchors."""
-        try:
-            html = await self._get_text(f"{BASE}/home")
-        except Exception as ex:
-            logger.debug("anikato genre discovery failed: %s", ex)
-            return []
-        seen: set[str] = set()
-        options: list[dict] = []
-        for slug, label in re.findall(
-            r'href="[^"]*/genre/([a-z0-9\-]+)"[^>]*>([^<]{2,40})<', html
-        ):
-            if slug in seen:
-                continue
-            seen.add(slug)
-            options.append({"value": slug, "label": _clean(label)})
-        return options
+    async def _discover_filter_options(
+        self,
+    ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+        """Parse the site's real form controls from /filter HTML.
 
-    async def _path_filters(self, path: str, key: str) -> list[dict]:
-        """The /type/{t} and /status/{s} route families — their nav lists
-        the valid values."""
+        AniKato's server expects the form input names and IDs (genre[]=1,
+        term_type[]=Movie, status[]=..., season[]=...), not the slug
+        endpoints (/genre/action). Querying the form directly discovers the
+        exact 53 genres, 8 types, 3 statuses and 4 seasons with real labels.
+        """
         try:
-            html = await self._get_text(f"{BASE}/home")
+            html = await self._get_text(f"{BASE}/filter")
         except Exception as ex:
-            logger.debug("anikato %s discovery failed: %s", key, ex)
-            return []
-        options: list[dict] = []
-        for value, label in re.findall(
-            r'href="[^"]*' + re.escape(path) + r'/([a-z0-9\-]+)"[^>]*>([^<]{2,40})<',
-            html,
-        ):
-            options.append({"value": value, "label": _clean(label)})
-        return options
+            logger.debug("anikato filter discovery failed: %s", ex)
+            return ([], [], [], [])
+
+        def parse_group(input_name: str) -> list[dict]:
+            pattern = (
+                rf'<input[^>]+name=["\']{re.escape(input_name)}["\'][^>]*'
+                rf'value=["\']([^"\']+)["\'][^>]*>\s*<label[^>]*>\s*([^<]+)\s*</label>'
+            )
+            opts: list[dict] = []
+            seen: set[str] = set()
+            for val, lbl in re.findall(pattern, html):
+                val = val.strip()
+                # Labels carry HTML entities ("Action &amp; Adventure") —
+                # decode them for display.
+                lbl = unescape(_clean(lbl))
+                if val and val not in seen:
+                    seen.add(val)
+                    opts.append({"value": val, "label": lbl})
+            return opts
+
+        genres = parse_group("genre[]")
+        types = parse_group("term_type[]")
+        statuses = parse_group("status[]")
+        seasons = parse_group("season[]")
+        return (genres, types, statuses, seasons)
 
     async def browse(self, filters: dict, page: int) -> tuple[list[Anime], bool]:
         from urllib.parse import quote
 
         params = [f"page={page}"]
-        for key in ("genre", "type", "status", "sort"):
-            value = filters.get(key)
+        # Map user-friendly keys to AniKato's form input names:
+        # genre -> genre[], type -> term_type[], status -> status[], season -> season[]
+        form_keys = {
+            "genre": "genre[]",
+            "type": "term_type[]",
+            "status": "status[]",
+            "season": "season[]",
+        }
+        for filter_key, param_name in form_keys.items():
+            value = filters.get(filter_key)
             if value:
-                params.append(f"{key}={quote(str(value))}")
+                params.append(f"{quote(param_name)}={quote(str(value))}")
+        if filters.get("sort"):
+            params.append(f"sort={quote(str(filters['sort']))}")
         for key in ("ep_min", "ep_max"):
             value = filters.get(key)
             if value:
@@ -555,9 +567,7 @@ class AniKatoProvider:
         self._cache_put(key, data, CACHE_TTL_EPISODES)
         return data
 
-    async def _episode_entries(
-        self, anime_id: int
-    ) -> list[tuple[int, str, bool, bool, int]]:
+    async def _episode_entries(self, anime_id: int) -> list[tuple[int, str, bool, bool, int]]:
         key = f"eplist_{anime_id}"
         cached = self._cache_get(key)
         if cached is not None:
@@ -571,9 +581,7 @@ class AniKatoProvider:
                 xhr=True,
             )
         except Exception:
-            body = await self._get_text(
-                f"{BASE}/ajax/episode/list/{anime_id}?style=list", xhr=True
-            )
+            body = await self._get_text(f"{BASE}/ajax/episode/list/{anime_id}?style=list", xhr=True)
         data = json.loads(body)
         if data.get("status") != 200:
             raise RuntimeError(f"anikato episode list: {data.get('result')}")
@@ -710,7 +718,7 @@ class AniKatoProvider:
         try:
             resp = await self._client.get(embed_url, headers={"Referer": f"{BASE}/"})
             if resp.status_code == 200:
-                m = re.search(r'data-id=[\"\'](\d+)[\"\']', resp.text)
+                m = re.search(r"data-id=[\"\'](\d+)[\"\']", resp.text)
                 if m:
                     return m.group(1)
         except Exception as ex:
@@ -740,9 +748,7 @@ class AniKatoProvider:
             return resolved
         return None
 
-    async def _manifest_for(
-        self, realid: str, kind: str, s: str
-    ) -> tuple[str, list, dict]:
+    async def _manifest_for(self, realid: str, kind: str, s: str) -> tuple[str, list, dict]:
         """getSources -> (manifest URL, subtitle tracks, intro/outro).
         Nothing is reordered or filtered — the payload travels as served."""
         key = f"manifest_{realid}_{kind}_{s}"
@@ -795,9 +801,7 @@ class AniKatoProvider:
         every play — a bad verdict is never cached.
         """
         try:
-            resp = await self._client.get(
-                manifest, headers={"Referer": MEGAPLAY_REFERER}
-            )
+            resp = await self._client.get(manifest, headers={"Referer": MEGAPLAY_REFERER})
             if resp.status_code != 200:
                 return False
             lines = [
@@ -810,9 +814,7 @@ class AniKatoProvider:
             variant = lines[0]
             if not variant.startswith("http"):
                 variant = manifest.rsplit("/", 1)[0] + "/" + variant
-            media = await self._client.get(
-                variant, headers={"Referer": MEGAPLAY_REFERER}
-            )
+            media = await self._client.get(variant, headers={"Referer": MEGAPLAY_REFERER})
             if media.status_code != 200:
                 return False
             return not is_ad_stub_playlist(media.text)
@@ -854,13 +856,9 @@ class AniKatoProvider:
                 continue  # videojs shares the bare door's shape in our params
             tried_doors.add(door)
             try:
-                manifest, tracks, windows = await self._manifest_for(
-                    realid, megaplay_kind, s
-                )
+                manifest, tracks, windows = await self._manifest_for(realid, megaplay_kind, s)
             except Exception as ex:
-                logger.info(
-                    "anikato manifest failed (%s/%s): %s", realid, megaplay_kind, ex
-                )
+                logger.info("anikato manifest failed (%s/%s): %s", realid, megaplay_kind, ex)
                 continue
             if not manifest:
                 continue

@@ -26,8 +26,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core import notifications  # noqa: E402
-
+from core import notifications
 
 # ---------------------------------------------------------------------------
 # notifications
@@ -141,9 +140,7 @@ def test_update_service_survives_a_string_build_number(monkeypatch):
 def test_update_service_survives_a_malformed_config(monkeypatch):
     from services import update_service
 
-    monkeypatch.setattr(
-        update_service, "primp", _fake_primp(["not", "a", "dict"])
-    )
+    monkeypatch.setattr(update_service, "primp", _fake_primp(["not", "a", "dict"]))
     assert asyncio.run(update_service.UpdateService().check_for_update()) is None
 
 
@@ -174,9 +171,7 @@ def test_update_dialog_missing_apk_url_does_not_keyerror(monkeypatch):
     from components import update_dialog
 
     page = _FakeDialogPage()
-    monkeypatch.setattr(
-        update_dialog, "get_shared_services", lambda p: _SharedNoop()
-    )
+    monkeypatch.setattr(update_dialog, "get_shared_services", lambda p: _SharedNoop())
     captured = {}
     monkeypatch.setattr(
         update_dialog,
@@ -184,9 +179,7 @@ def test_update_dialog_missing_apk_url_does_not_keyerror(monkeypatch):
         lambda p, dlg: captured.setdefault("dlg", dlg),
     )
     # A payload with no apk_url used to raise KeyError mid-teardown.
-    update_dialog.show_update_dialog(
-        page, {"version": "2.0.0", "mandatory": True, "apk_url": ""}
-    )
+    update_dialog.show_update_dialog(page, {"version": "2.0.0", "mandatory": True, "apk_url": ""})
     dlg = captured["dlg"]
     # Drive the "Update Now" action (the FilledButton; mandatory keeps only it).
     update_now = dlg.actions[0]
@@ -208,9 +201,7 @@ def test_mandatory_update_reshows_after_a_back_dismissal(monkeypatch):
     from components import update_dialog
 
     page = _FakeDialogPage()
-    monkeypatch.setattr(
-        update_dialog, "get_shared_services", lambda p: _SharedNoop()
-    )
+    monkeypatch.setattr(update_dialog, "get_shared_services", lambda p: _SharedNoop())
     shown = []
     original = update_dialog.show_update_dialog
 
@@ -307,18 +298,14 @@ def test_launch_external_asks_the_os_before_the_launch(monkeypatch):
             return True
 
     shared = _Shared(can=False)
-    monkeypatch.setattr(
-        external_player, "get_shared_services", lambda p: shared
-    )
+    monkeypatch.setattr(external_player, "get_shared_services", lambda p: shared)
     dialogs = []
     monkeypatch.setattr(
         external_player,
         "show_ktv_install_dialog",
         lambda p: dialogs.append(p),
     )
-    ok = asyncio.run(
-        external_player.launch_external(None, "https://x/y.m3u8", "Title")
-    )
+    ok = asyncio.run(external_player.launch_external(None, "https://x/y.m3u8", "Title"))
     assert ok is False
     assert shared.launched is False
     assert len(dialogs) == 1  # the install dialog offered, not a silent no-op
@@ -343,9 +330,7 @@ def test_launch_external_launches_when_a_handler_exists(monkeypatch):
     shared = _Shared()
     monkeypatch.setattr(external_player, "get_shared_services", lambda p: shared)
     monkeypatch.setattr(external_player, "show_ktv_install_dialog", lambda p: None)
-    ok = asyncio.run(
-        external_player.launch_external(None, "https://x/y.m3u8", "Title")
-    )
+    ok = asyncio.run(external_player.launch_external(None, "https://x/y.m3u8", "Title"))
     assert ok is True and shared.launched
 
 

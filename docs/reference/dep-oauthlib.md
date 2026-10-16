@@ -54,13 +54,13 @@ From `oauthlib/oauth2/__init__.py` — the RFC 6749 client-side API:
 
 ```python
 from oauthlib.oauth2 import (
-    WebApplicationClient,      # authorization-code flow (confidential clients) — the one flet uses
-    MobileApplicationClient,   # implicit flow (public / browser clients)
-    LegacyApplicationClient,   # resource-owner-password-credentials flow
+    WebApplicationClient,  # authorization-code flow (confidential clients) — the one flet uses
+    MobileApplicationClient,  # implicit flow (public / browser clients)
+    LegacyApplicationClient,  # resource-owner-password-credentials flow
     BackendApplicationClient,  # client-credentials flow
     ServiceApplicationClient,  # JWT bearer (RFC 7523) client assertion
-    DeviceClient,              # device-code flow (RFC 8628)
-    Client,                    # base class, all shared logic lives here
+    DeviceClient,  # device-code flow (RFC 8628)
+    Client,  # base class, all shared logic lives here
 )
 ```
 
@@ -86,11 +86,18 @@ Server-side mirrors (`AuthorizationEndpoint`, `TokenEndpoint`,
 Verified live method list on `WebApplicationClient('id')`:
 
 ```python
-['add_token', 'parse_request_body_response', 'parse_request_uri_response',
- 'prepare_authorization_request', 'prepare_refresh_body',
- 'prepare_refresh_token_request', 'prepare_request_body',
- 'prepare_request_uri', 'prepare_token_request',
- 'prepare_token_revocation_request']
+[
+    "add_token",
+    "parse_request_body_response",
+    "parse_request_uri_response",
+    "prepare_authorization_request",
+    "prepare_refresh_body",
+    "prepare_refresh_token_request",
+    "prepare_request_body",
+    "prepare_request_uri",
+    "prepare_token_request",
+    "prepare_token_revocation_request",
+]
 ```
 
 Most useful signatures (from `rfc6749/clients/base.py` + `web_application.py`):
@@ -130,11 +137,12 @@ Token placement constants from `rfc6749/clients/__init__.py`:
 oauthlib side (`Client.prepare_refresh_body`, `base.py:430`):
 
 ```python
-def prepare_refresh_body(self, body='', refresh_token=None, scope=None, **kwargs):
+def prepare_refresh_body(self, body="", refresh_token=None, scope=None, **kwargs):
     refresh_token = refresh_token or self.refresh_token
     scope = self.scope if scope is None else scope
-    return prepare_token_request('refresh_token', body=body, scope=scope,
-                                 refresh_token=refresh_token, **kwargs)
+    return prepare_token_request(
+        "refresh_token", body=body, scope=scope, refresh_token=refresh_token, **kwargs
+    )
 ```
 
 i.e. it URL-encodes `grant_type=refresh_token&refresh_token=...`

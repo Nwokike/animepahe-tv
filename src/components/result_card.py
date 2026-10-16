@@ -19,26 +19,14 @@ def result_card(
     mode: str = PORTRAIT,
     provider: str = "",
 ) -> ft.Control:
+    # No art (or a failed URL) falls to the shared typographic panel with
+    # the title's own monogram — never a blank box, a purple Material
+    # default, or a broken-image glyph.
     media = card_media(
         anime.poster,
         mode,
+        title=anime.title,
         provider=provider,
-        placeholder=ft.Container(
-            content=ft.Icon(
-                ft.Icons.MOVIE_ROUNDED, size=48, color=ft.Colors.ON_SURFACE_VARIANT
-            ),
-            alignment=ft.Alignment.CENTER,
-            bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
-        ),
-        error_content=ft.Container(
-            content=ft.Icon(
-                ft.Icons.BROKEN_IMAGE_ROUNDED,
-                size=48,
-                color=ft.Colors.ON_SURFACE_VARIANT,
-            ),
-            alignment=ft.Alignment.CENTER,
-            bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
-        ),
         opacity=0.5 if now_playing else 1.0,
     )
     # score can be missing from the site payload — never format a None.
@@ -59,9 +47,7 @@ def result_card(
         ft.Container(
             alignment=ft.Alignment.CENTER,
             content=ft.Icon(
-                ft.Icons.EQUALIZER_ROUNDED
-                if now_playing
-                else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                ft.Icons.EQUALIZER_ROUNDED if now_playing else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
                 size=48,
                 color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
             ),

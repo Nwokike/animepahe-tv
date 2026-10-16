@@ -17,8 +17,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import main as app_main  # noqa: E402
-from core.state import Episode, state  # noqa: E402
+import main as app_main
+from core.state import Episode, state
 
 
 def _episode(session: str) -> Episode:

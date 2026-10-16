@@ -43,9 +43,7 @@ def test_the_splash_is_a_branded_full_screen_gate():
     assert isinstance(splash, ft.Container) and splash.expand is True
     assert any(isinstance(n, ft.Image) and n.src == "icon.png" for n in nodes)
     assert any(isinstance(n, ft.ProgressRing) for n in nodes)
-    assert any(
-        isinstance(n, ft.Text) and n.value == "Finding a source…" for n in nodes
-    )
+    assert any(isinstance(n, ft.Text) and n.value == "Finding a source…" for n in nodes)
 
 
 def test_appshell_shows_the_splash_after_all_hooks_and_before_any_content():

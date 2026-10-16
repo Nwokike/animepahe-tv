@@ -218,9 +218,7 @@ def test_animeout_walled_file_host_reports_no_stream_not_a_crash():
         }
     )
     provider = AnimeOutProvider(client=client)
-    sources = _run(
-        provider.sources("animeout:1033730", "http://nimbus.animeout.com/x - 01.mkv")
-    )
+    sources = _run(provider.sources("animeout:1033730", "http://nimbus.animeout.com/x - 01.mkv"))
     # The wall is external (CF on public.animeout.xyz today) — the chain
     # resolves, the host reports nothing, and nothing raises.
     assert sources == []
@@ -237,8 +235,8 @@ def test_animeout_sources_serves_every_quality_of_the_episode():
 
     def _public(tag: str, quality: str) -> str:
         return (
-            '<script>var url = "https://cdn.example/[AnimeOut] Show - 04 %s [%s][%s]'
-            '[SubsProvide][x265][RapidBot].mkv";</script>' % (quality, tag, quality)
+            f'<script>var url = "https://cdn.example/[AnimeOut] Show - 04 {quality} [{tag}][{quality}]'
+            '[SubsProvide][x265][RapidBot].mkv";</script>'
         )
 
     content = """
@@ -247,16 +245,10 @@ def test_animeout_sources_serves_every_quality_of_the_episode():
     """
     client = FakeClient(
         {
-            "/posts/99": FakeResponse(
-                200, json_data={"id": 99, "content": {"rendered": content}}
-            ),
+            "/posts/99": FakeResponse(200, json_data={"id": 99, "content": {"rendered": content}}),
             # the specific routes must precede the generic ones
-            "public.php?url=nimbus/AB12CD34": FakeResponse(
-                200, text=_public("AB12CD34", "1080pp")
-            ),
-            "public.php?url=nimbus/AB12CD35": FakeResponse(
-                200, text=_public("AB12CD35", "720p")
-            ),
+            "public.php?url=nimbus/AB12CD34": FakeResponse(200, text=_public("AB12CD34", "1080pp")),
+            "public.php?url=nimbus/AB12CD35": FakeResponse(200, text=_public("AB12CD35", "720p")),
             "AB12CD34": FakeResponse(200, text=_landing("AB12CD34")),
             "AB12CD35": FakeResponse(200, text=_landing("AB12CD35")),
             "public.php": FakeResponse(200, text=ANIMEOUT_PUBLIC_PAGE),

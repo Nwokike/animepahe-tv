@@ -8,18 +8,19 @@ re-probe short-circuits inside the process, and a missing clearance is a
 no-stream rather than an exception or a hammered request.
 """
 
+import asyncio
 import os
 import tempfile
 
 _TMP = tempfile.mkdtemp(prefix="animepahe-animeout-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
-import itertools  # noqa: E402
+import itertools
 
-import pytest  # noqa: E402
+import pytest
 
-from services.animeout_solver import AnimeOutSolver  # noqa: E402
-from services.store import JsonStore  # noqa: E402
+from services.animeout_solver import AnimeOutSolver
+from services.store import JsonStore
 
 
 class _Resp:
@@ -48,9 +49,7 @@ async def test_clearances_are_host_keyed(store):
     await store.save_clearance("cf=animeout", "UA/2.0", "public.animeout.xyz")
     # each host reads its own, and the default host is unchanged
     assert (await store.get_clearance())["cookies"] == "cf=animepahe"
-    assert (await store.get_clearance("public.animeout.xyz"))[
-        "cookies"
-    ] == "cf=animeout"
+    assert (await store.get_clearance("public.animeout.xyz"))["cookies"] == "cf=animeout"
 
 
 @pytest.mark.asyncio
@@ -59,8 +58,11 @@ async def test_the_pre_host_flat_record_still_migrates(store):
     and must keep working after the host split."""
     import json
 
-    with open(store.path, "w", encoding="utf-8") as f:
-        json.dump({"clearance": {"cookies": "cf=legacy", "user_agent": "UA/9"}}, f)
+    def _write() -> None:
+        with open(store.path, "w", encoding="utf-8") as f:
+            json.dump({"clearance": {"cookies": "cf=legacy", "user_agent": "UA/9"}}, f)
+
+    await asyncio.to_thread(_write)
     assert (await store.get_clearance())["cookies"] == "cf=legacy"
     assert await store.get_clearance("public.animeout.xyz") is None
     # writing a second host migrates the flat record instead of dropping it

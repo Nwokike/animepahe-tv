@@ -380,6 +380,9 @@ def aes_cbc_decrypt(key: bytes, iv: bytes, ciphertext: bytes) -> bytes:
     prev = iv
     for i in range(0, len(ciphertext), 16):
         block = ciphertext[i : i + 16]
-        out += bytes(a ^ b for a, b in zip(_decrypt_block(block, round_keys), prev))
+        out += bytes(
+            a ^ b
+            for a, b in zip(_decrypt_block(block, round_keys), prev, strict=True)
+        )
         prev = block
     return _unpad(bytes(out))

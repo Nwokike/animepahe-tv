@@ -17,9 +17,9 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import main as app_main  # noqa: E402
-from services.providers.base import PROVIDER_ORDER  # noqa: E402
-from state.app_state import state  # noqa: E402
+import main as app_main
+from services.providers.base import PROVIDER_ORDER
+from state.app_state import state
 
 
 @pytest.fixture(autouse=True)
@@ -152,9 +152,7 @@ def test_the_first_in_order_that_answers_serves():
 
 
 def test_anikato_down_falls_to_animeout():
-    controller = _controller(
-        health={"anikato": False, "animeout": True, "animepahe": True}
-    )
+    controller = _controller(health={"anikato": False, "animeout": True, "animepahe": True})
     asyncio.run(controller.resolve_startup())
     assert controller.router.pin == "animeout"
 

@@ -1,4 +1,6 @@
 """Tests for the durable store: history, continue watching, atomic writes."""
+# ruff: noqa: ASYNC230 — fixture writes inside async tests run on a
+# private event loop with no UI to starve; to_thread would only add noise.
 
 import itertools
 import json
@@ -11,7 +13,7 @@ import pytest
 _TMP = tempfile.mkdtemp(prefix="animepahe-store-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
-from services.store import (  # noqa: E402
+from services.store import (
     CONTINUE_WATCHING_LIMIT,
     SEARCH_HISTORY_LIMIT,
     JsonStore,
@@ -53,40 +55,30 @@ async def test_empty_and_whitespace_queries_ignored(store):
 
 @pytest.mark.asyncio
 async def test_record_watch_upsert_newest_first(store):
-    await store.record_watch(
-        {"anime_session": "aaa", "title": "Frieren", "episode_num": 3}
-    )
-    await store.record_watch(
-        {"anime_session": "bbb", "title": "Solo Leveling", "episode_num": 5}
-    )
+    await store.record_watch({"anime_session": "aaa", "title": "Frieren", "episode_num": 3})
+    await store.record_watch({"anime_session": "bbb", "title": "Solo Leveling", "episode_num": 5})
     entries = await store.get_continue_watching()
     assert list(entries) == ["bbb", "aaa"]  # newest first
 
     # Upserting the same anime keeps one row and refreshes its timestamp.
-    await store.record_watch(
-        {"anime_session": "aaa", "title": "Frieren", "episode_num": 4}
-    )
+    await store.record_watch({"anime_session": "aaa", "title": "Frieren", "episode_num": 4})
     entries = await store.get_continue_watching()
     assert len(entries) == 2
-    assert list(entries)[0] == "aaa"
+    assert next(iter(entries)) == "aaa"
     assert entries["aaa"]["episode_num"] == 4
 
     # There is no remove_watch API — a row leaves the shelf through the
     # cap (oldest first) or by a direct section write.
     entries = await store.get_continue_watching()
     assert list(entries) == ["aaa", "bbb"]
-    await store.put_section(
-        "continue_watching", {k: v for k, v in entries.items() if k != "aaa"}
-    )
+    await store.put_section("continue_watching", {k: v for k, v in entries.items() if k != "aaa"})
     assert list(await store.get_continue_watching()) == ["bbb"]
 
 
 @pytest.mark.asyncio
 async def test_continue_watching_capped(store):
     for i in range(CONTINUE_WATCHING_LIMIT + 5):
-        await store.record_watch(
-            {"anime_session": f"s{i}", "title": f"Anime {i}", "timestamp": i}
-        )
+        await store.record_watch({"anime_session": f"s{i}", "title": f"Anime {i}", "timestamp": i})
     entries = await store.get_continue_watching()
     assert len(entries) == CONTINUE_WATCHING_LIMIT
     # The five oldest (s0..s4) were evicted.
@@ -267,9 +259,7 @@ async def test_clearance_round_trip(store):
     assert entry["user_agent"] == "UA/1.0"
     # Survives a reload (fresh instance, same file) — the boot fix.
     reloaded = JsonStore(filename=os.path.basename(store.path))
-    assert (await reloaded.get_clearance())[
-        "cookies"
-    ] == "cf_clearance=abc; __cf_bm=xyz"
+    assert (await reloaded.get_clearance())["cookies"] == "cf_clearance=abc; __cf_bm=xyz"
     await store.clear_clearance()
     assert await store.get_clearance() is None
 

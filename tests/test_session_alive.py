@@ -88,6 +88,5 @@ def test_the_three_loaders_check_the_session_before_committing():
         assert "session_alive()" in source, f"{loader.__name__} lost its guard"
         tree = ast.parse(source)
         assert any(  # ui_set keeps the loading flag honest for the next session
-            isinstance(node, ast.Name) and node.id == "ui_set"
-            for node in ast.walk(tree)
+            isinstance(node, ast.Name) and node.id == "ui_set" for node in ast.walk(tree)
         ), f"{loader.__name__} no longer uses ui_set for its flag"

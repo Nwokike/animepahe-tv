@@ -164,15 +164,11 @@ def PromoHero() -> ft.Control:
                                             weight=ft.FontWeight.W_700,
                                             color=AppColors.PRIMARY,
                                         ),
-                                        padding=ft.Padding.symmetric(
-                                            horizontal=6, vertical=2
-                                        ),
+                                        padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                                         border_radius=6,
                                         border=ft.Border.all(
                                             1,
-                                            ft.Colors.with_opacity(
-                                                0.3, AppColors.PRIMARY
-                                            ),
+                                            ft.Colors.with_opacity(0.3, AppColors.PRIMARY),
                                         ),
                                     ),
                                 ],

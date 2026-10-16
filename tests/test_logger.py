@@ -13,9 +13,7 @@ def test_ring_buffer_and_format():
     handler = MemoryLogHandler(maxlen=5)
     handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
     for i in range(8):
-        handler.emit(
-            logging.LogRecord("t", logging.INFO, "p", 1, f"line{i}", None, None)
-        )
+        handler.emit(logging.LogRecord("t", logging.INFO, "p", 1, f"line{i}", None, None))
     logs = handler.get_logs()
     assert len(logs) == 5  # capped
     assert logs[0] == "INFO: line3"  # oldest kept

@@ -10,6 +10,7 @@ seconds, and a bare pause reads as a frozen app.
 """
 
 import base64
+import contextlib
 import logging
 import urllib.parse
 
@@ -45,11 +46,9 @@ def show_ktv_install_dialog(page: ft.Page):
 
     def _dismiss_dialog():
         # Clear the Back-handler registration whether the pop lands or not.
-        setattr(page, "_app_dialog", None)
-        try:
+        page._app_dialog = None
+        with contextlib.suppress(Exception):
             page.pop_dialog()
-        except Exception:
-            pass
 
     async def open_store(e):
         _dismiss_dialog()

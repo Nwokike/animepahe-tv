@@ -173,13 +173,13 @@ following the signatures is safe.
 
 ```python
 fya.YandexAdsService(
-    user_consent=True,        # Optional[bool], default None
-    location_tracking=None,   # Optional[bool], default None
-    age_restricted=None,      # Optional[bool], default None (Android only, COPPA)
-    logging=False,            # bool, default False
+    user_consent=True,  # Optional[bool], default None
+    location_tracking=None,  # Optional[bool], default None
+    age_restricted=None,  # Optional[bool], default None (Android only, COPPA)
+    logging=False,  # bool, default False
     debug_error_indicator=False,  # bool, default False
-    on_initialized=None,      # plain ControlEventHandler
-    on_init_failed=None,      # plain; e.data carries the error description
+    on_initialized=None,  # plain ControlEventHandler
+    on_init_failed=None,  # plain; e.data carries the error description
 )
 ```
 

@@ -19,8 +19,8 @@ import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import components.player.immersive_player as ip  # noqa: E402
-import core.shared_services as shared  # noqa: E402
+import components.player.immersive_player as ip
+import core.shared_services as shared
 
 SRT = b"1\n00:00:01,000 --> 00:00:02,000\nHello\n"
 
@@ -66,9 +66,7 @@ def _snacks(monkeypatch):
     import core.notify
 
     recorded = []
-    monkeypatch.setattr(
-        core.notify, "show_snack", lambda page, msg, **kw: recorded.append(msg)
-    )
+    monkeypatch.setattr(core.notify, "show_snack", lambda page, msg, **kw: recorded.append(msg))
     return recorded
 
 
@@ -91,9 +89,7 @@ def test_the_file_picker_is_appended_once():
 
 
 def test_picking_applies_the_file_text_as_the_track(monkeypatch):
-    picker = _Picker(
-        [types.SimpleNamespace(name="custom.srt", bytes=SRT)]
-    )
+    picker = _Picker([types.SimpleNamespace(name="custom.srt", bytes=SRT)])
     _with_picker(monkeypatch, picker)
     snacks = _snacks(monkeypatch)
     player = _player()

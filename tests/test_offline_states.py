@@ -15,9 +15,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import flet as ft  # noqa: E402
+import flet as ft
 
-from components.offline_state import empty_or_offline  # noqa: E402
+from components.offline_state import empty_or_offline
 
 
 class _State:

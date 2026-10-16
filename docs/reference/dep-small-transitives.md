@@ -50,7 +50,7 @@ def pattern(path, **options):
         return path.pattern
     if isinstance(path, list):
         parts = [pattern(p, **options) for p in path]
-        return '(?:%s)' % '|'.join(parts)
+        return "(?:%s)" % "|".join(parts)
     return tokens_to_pattern(parse(path), **options)
 ```
 

@@ -9,6 +9,8 @@ Each test kills one defect from the swarm audit:
   into a permanently unplayable row
 - an out-of-order master playlist pinning the LAST variant
 """
+# ruff: noqa: ASYNC230 — fixture writes inside async tests run on a
+# private event loop with no UI to starve; to_thread would only add noise.
 
 import asyncio
 import json
@@ -16,13 +18,14 @@ import os
 import sys
 import tempfile
 import time
+from typing import ClassVar
 
 _TMP = tempfile.mkdtemp(prefix="animepahe-dlcrashes-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from services.downloads import (  # noqa: E402
+from services.downloads import (
     MAX_PARALLEL_DOWNLOADS,
     STATE_COMPLETED,
     DownloadManager,
@@ -65,7 +68,7 @@ class _BoomResp:
     """A response whose body stream raises mid-transfer."""
 
     status_code = 200
-    headers = {}
+    headers: ClassVar[dict] = {}
 
     @property
     def text(self):
@@ -191,7 +194,7 @@ def test_a_stalled_segment_does_not_hang_the_job_forever():
 
 def test_hls_jobs_are_bounded_by_the_cross_job_limiter():
     """HLS jobs used to bypass _job_limiter entirely (only _run_direct
-    acquired it): N queued episodes ran N×6 concurrent fetches."""
+    acquired it): N queued episodes ran Nx6 concurrent fetches."""
 
     async def scenario(tmp):
         routes = [
@@ -222,8 +225,8 @@ def test_hls_jobs_are_bounded_by_the_cross_job_limiter():
         for ep in jobs:
             await _drain(mgr, ep, timeout=15.0)
 
-        # At most 3 jobs × up to 6 workers may fetch at once — never the
-        # unbounded 5×2.
+        # At most 3 jobs x up to 6 workers may fetch at once — never the
+        # unbounded 5x2.
         assert peak <= MAX_PARALLEL_DOWNLOADS * 6
 
     with tempfile.TemporaryDirectory() as tmp:

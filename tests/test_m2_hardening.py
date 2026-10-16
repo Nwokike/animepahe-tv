@@ -115,9 +115,7 @@ def test_mutable_collections_are_per_instance():
 def test_player_error_annotation_is_declared_once():
     """A duplicate annotation collapses into one dataclass field — count
     the SOURCE lines, not the fields."""
-    path = os.path.join(
-        os.path.dirname(__file__), "..", "src", "core", "state.py"
-    )
+    path = os.path.join(os.path.dirname(__file__), "..", "src", "core", "state.py")
     with open(path, encoding="utf-8") as f:
         source = f.read()
     assert source.count("player_error:") == 1

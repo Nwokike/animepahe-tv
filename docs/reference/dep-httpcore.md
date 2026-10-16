@@ -41,6 +41,7 @@ def request(
     extensions: Extensions | None = None,
 ) -> Response: ...
 
+
 @contextlib.contextmanager
 def stream(
     method: bytes | str,

@@ -105,4 +105,3 @@ def test_malformed_follows_rows_do_not_crash():
         # Search screen's filter: isinstance(row, dict) and row.get("anime_session")
         passes = isinstance(bad_row, dict) and bool(bad_row.get("anime_session"))
         assert not passes
-

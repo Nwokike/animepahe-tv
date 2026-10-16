@@ -174,16 +174,16 @@ class BrowserProvider(Protocol):
 
 
 __all__ = [
-    "Provider",
-    "BrowserProvider",
     "DEFAULT_OWNER",
     "EPISODES_PER_PAGE",
     "PROVIDER_ORDER",
+    "BrowserProvider",
+    "Provider",
     "all_episodes",
-    "make_session",
-    "page_slice",
-    "split_session",
-    "owner_of",
     "close_client",
+    "make_session",
+    "owner_of",
+    "page_slice",
     "releases_from_anime",
+    "split_session",
 ]

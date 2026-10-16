@@ -1,13 +1,20 @@
-import os
-import sys
-import json
 import asyncio
 import contextlib
+import json
 import logging
+import os
 import platform
+import sys
+
 import flet as ft
 
 logger = logging.getLogger(__name__)
+
+
+class VerificationError(RuntimeError):
+    """The Cloudflare verification window closed, timed out, or the solver
+    child failed. Callers catch it (or Exception) and report the reason."""
+
 
 # The child solver caps its own wait at ~2 minutes; this is the parent's
 # backstop for a wedged GUI thread. The mobile path gets its own budget
@@ -16,9 +23,7 @@ DESKTOP_SOLVER_TIMEOUT = 150.0
 MOBILE_SOLVER_TIMEOUT = 300.0
 
 
-def _desktop_argv(
-    python: str, script: str, url: str, user_agent: str | None
-) -> list[str]:
+def _desktop_argv(python: str, script: str, url: str, user_agent: str | None) -> list[str]:
     """The subprocess argv. The UA rides argv[2] when one is pinned — the
     clearance cookie is bound to the UA that solved the challenge, so the
     solve must present the same string the later API calls will."""
@@ -121,7 +126,7 @@ class WebViewSolver:
                     proc.returncode,
                     stderr_out,
                 )
-                raise Exception(f"Desktop solver failed: {stderr_out}")
+                raise VerificationError(f"Desktop solver failed: {stderr_out}")
 
             out = stdout_data.decode().strip()
 
@@ -134,21 +139,19 @@ class WebViewSolver:
                     break
 
             if not json_str:
-                raise Exception("Verification was closed or failed.")
+                raise VerificationError("Verification was closed or failed.")
 
             data = json.loads(json_str)
             # The child now exits non-zero with {"error": "closed"|"timeout"}
             # — surface it verbatim instead of the generic message.
             if data.get("error"):
-                raise Exception(f"Verification {data['error']}.")
+                raise VerificationError(f"Verification {data['error']}.")
             cookies = data.get("cookies") or ""
             ua = data.get("user_agent") or FALLBACK_UA
             return cookies, ua
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 page.pop_dialog()
-            except Exception:
-                pass
             page.update()
 
     @staticmethod
@@ -180,9 +183,7 @@ class WebViewSolver:
             try:
                 # getCookie is a blocking JNI call — off the event loop it
                 # used to stall the app's frames for the call's duration.
-                return await asyncio.to_thread(
-                    _cookie_manager.getCookie, current_url
-                ) or ""
+                return await asyncio.to_thread(_cookie_manager.getCookie, current_url) or ""
             except Exception as ex:
                 logger.error("CookieManager.getCookie error: %s", ex)
                 return ""
@@ -193,9 +194,7 @@ class WebViewSolver:
 
             lower_cookies = cookie_str.lower()
             target_markers = ("animepahe_session", "serverid", "xsrf-token", "latest")
-            has_target_cookie = any(
-                marker in lower_cookies for marker in target_markers
-            )
+            has_target_cookie = any(marker in lower_cookies for marker in target_markers)
 
             # Check title and current URL to avoid premature completion on challenge interstitial
             # flet_webview's WebView exposes get_title()/get_user_agent()
@@ -234,11 +233,7 @@ class WebViewSolver:
             is_target_site = (
                 has_target_cookie
                 or "animepahe" in title_lower
-                or (
-                    current_url
-                    and "animepahe" in current_url.lower()
-                    and not is_challenge_page
-                )
+                or (current_url and "animepahe" in current_url.lower() and not is_challenge_page)
             )
 
             if not is_target_site:
@@ -262,10 +257,8 @@ class WebViewSolver:
             msg = e.message
             if msg.startswith("COOKIE:"):
                 current_url = ""
-                try:
+                with contextlib.suppress(Exception):
                     current_url = (await webview.get_current_url()) or ""
-                except Exception:
-                    pass
                 await _try_resolve(msg[7:].strip(), current_url=current_url)
 
         async def on_url_change(e):
@@ -281,11 +274,7 @@ class WebViewSolver:
                 current_url = ""
             logger.info("WebView page started: %s", current_url)
             # When we land on animepahe, try native cookie reader if challenge token is not present
-            if (
-                _cookie_manager
-                and "animepahe" in current_url
-                and "__cf_chl" not in current_url
-            ):
+            if _cookie_manager and "animepahe" in current_url and "__cf_chl" not in current_url:
                 cookies = await _android_cookies(current_url)
                 if cookies:
                     await _try_resolve(cookies, current_url=current_url)
@@ -312,10 +301,8 @@ class WebViewSolver:
         async def poll_cookies():
             while not result_future.done():
                 current_url = ""
-                try:
+                with contextlib.suppress(Exception):
                     current_url = (await webview.get_current_url()) or ""
-                except Exception:
-                    pass
 
                 # Primary (and on Android, the ONLY path that works for
                 # cf_clearance): read native cookies via pyjnius. cf_clearance is
@@ -334,12 +321,10 @@ class WebViewSolver:
                 # document.title, which previously disturbed the Cloudflare
                 # challenge and caused the reload loop on Android TV.
                 if _cookie_manager is None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await webview.run_javascript(
                             "console.log('COOKIE:' + (document.cookie || ''))"
                         )
-                    except Exception:
-                        pass
 
                 # Poll every 1.5s instead of 0.5s. Native cookie reads are cheap
                 # and non-intrusive, so the longer interval does not slow down
@@ -383,9 +368,7 @@ class WebViewSolver:
 
         def on_cancel(e):
             if not result_future.done():
-                result_future.set_exception(
-                    Exception("Verification cancelled by user.")
-                )
+                result_future.set_exception(Exception("Verification cancelled by user."))
 
         dlg = ft.AlertDialog(
             title=ft.Text("Security Verification", weight=ft.FontWeight.BOLD),
@@ -458,9 +441,7 @@ class WebViewSolver:
         try:
             # A bounded wait: the user who never solves AND never cancels
             # must not pin the app open forever.
-            cookies, ua = await asyncio.wait_for(
-                result_future, timeout=MOBILE_SOLVER_TIMEOUT
-            )
+            cookies, ua = await asyncio.wait_for(result_future, timeout=MOBILE_SOLVER_TIMEOUT)
             return cookies, ua
         finally:
             # Await the cancelled poll task: dropping the reference left
@@ -472,8 +453,6 @@ class WebViewSolver:
                 page.on_keyboard_event = original_on_keyboard
             elif is_tv:
                 page.on_keyboard_event = None
-            try:
+            with contextlib.suppress(Exception):
                 page.pop_dialog()
-            except Exception:
-                pass
             page.update()

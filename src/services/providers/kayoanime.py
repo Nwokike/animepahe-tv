@@ -20,17 +20,18 @@ certified backend map (docs/reference/backend-kayoanime.md):
 
 import logging
 import re
+from typing import ClassVar
 
 import primp
 
 from core.config import (
-    KAYOANIME_API,
     CACHE_TTL_EPISODES,
     CACHE_TTL_LATEST,
     CACHE_TTL_SEARCH,
     DRIVE_API,
     DRIVE_REFERER,
     DRIVE_WEB_KEY,
+    KAYOANIME_API,
 )
 from core.state import Anime, Episode, LatestRelease, Source
 from services.providers.base import (
@@ -53,15 +54,21 @@ def _clean_title(raw: str) -> tuple[str, int, str]:
     year_match = re.search(r"\((\d{4})\)", text)
     year = int(year_match.group(1)) if year_match else 0
     title = re.sub(r"\(\d{4}\)", "", text).strip()
-    title = re.sub(r"\|\s*Kayoanime\s*$", "", title, flags=re.I).strip()
+    title = re.sub(r"\|\s*Kayoanime\s*$", "", title, flags=re.IGNORECASE).strip()
     # Strip pipe episode tags e.g. | Episode 3
-    title = re.sub(r"\|\s*Episode\s*\d+.*$", "", title, flags=re.I).strip()
+    title = re.sub(r"\|\s*Episode\s*\d+.*$", "", title, flags=re.IGNORECASE).strip()
     # Strip trailing quality / encoding / audio tags
-    title = re.sub(r"\s+(?:1080p|720p|480p)\b.*$", "", title, flags=re.I).strip()
+    title = re.sub(r"\s+(?:1080p|720p|480p)\b.*$", "", title, flags=re.IGNORECASE).strip()
     # Strip Episode N English Subbed / Dual Audio if present
-    title = re.sub(r"\s+Episode\s*\d+\s*(?:English\s*Subbed|Eng\s*Sub)?.*$", "", title, flags=re.I).strip()
-    title = re.sub(r"\s+(?:English\s*Subbed|Dual\s*Audio|Eng\s*Sub)\b.*$", "", title, flags=re.I).strip()
-    title = re.sub(r"\s+", " ", title).strip(" -–—")
+    title = re.sub(
+        r"\s+Episode\s*\d+\s*(?:English\s*Subbed|Eng\s*Sub)?.*$", "", title, flags=re.IGNORECASE
+    ).strip()
+    title = re.sub(
+        r"\s+(?:English\s*Subbed|Dual\s*Audio|Eng\s*Sub)\b.*$", "", title, flags=re.IGNORECASE
+    ).strip()
+    title = re.sub(r"\s+", " ", title).strip(
+        " -–—"  # noqa: RUF001 — dashes are strip chars, not typos
+    )
     lower = text.lower()
     media_type = "TV"
     if "movie" in lower or "gekijouban" in lower:
@@ -91,7 +98,7 @@ def _folder_pairs(content_html: str) -> list[tuple[str, str]]:
     for href, label in re.findall(
         r'<a\b[^>]*href="[^"]*drive\.google\.com/drive/folders/([A-Za-z0-9_\-]{20,})[^"]*"[^>]*>(.*?)</a>',
         content_html,
-        re.S,
+        re.DOTALL,
     ):
         clean = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", label)).strip()
         pairs.append((href, clean[:120]))
@@ -123,22 +130,22 @@ def _episode_key(filename: str) -> tuple[int, int] | None:
     multi-season posts (Dandadan S1 and S2 both had "episode 5"), and the
     dedupe silently kept only one of them."""
     name = filename.rsplit("/", 1)[-1]
-    if re.search(r"\bmovie\b", name, re.I):
+    if re.search(r"\bmovie\b", name, re.IGNORECASE):
         return None
-    se = re.search(r"\bS(\d{1,2})E(\d{1,3})(?:v\d+)?\b", name, re.I)
+    se = re.search(r"\bS(\d{1,2})E(\d{1,3})(?:v\d+)?\b", name, re.IGNORECASE)
     if se:
         return int(se.group(1)), int(se.group(2))
     trailing = re.search(
         r"-\s*(\d{1,4})(?:v\d+)?(?:\s*[\(\[][^\)\]]*[\)\]])*\s*\.(?:mkv|mp4)$",
         name,
-        re.I,
+        re.IGNORECASE,
     )
     if trailing:
         return 1, int(trailing.group(1))
     loose = re.search(
         r"\b(\d{1,4})(?:v\d+)?(?:\s*[\(\[][^\)\]]*[\)\]])*\s*\.(?:mkv|mp4)$",
         name,
-        re.I,
+        re.IGNORECASE,
     )
     if loose:
         return 1, int(loose.group(1))
@@ -148,13 +155,13 @@ def _episode_key(filename: str) -> tuple[int, int] | None:
 def _extract_resolution(title: str) -> int:
     """The post title's resolution ("1080p"/"720p") — the folders hold
     exactly one quality per post."""
-    m = re.search(r"(\d{3,4})p", title or "", re.I)
+    m = re.search(r"(\d{3,4})p", title or "", re.IGNORECASE)
     return int(m.group(1)) if m else 0
 
 
 class KayoanimeProvider:
     name = "kayoanime"
-    capabilities = {
+    capabilities: ClassVar[dict] = {
         "files": True,
         "episodes": True,
         "episode_stills": False,  # no per-episode stills exist — poster only
@@ -197,9 +204,7 @@ class KayoanimeProvider:
     # ------------------------------------------------------------------
 
     def _to_anime(self, post: dict) -> Anime:
-        title, year, media_type = _clean_title(
-            post.get("title", {}).get("rendered", "")
-        )
+        title, year, media_type = _clean_title(post.get("title", {}).get("rendered", ""))
         poster = self._poster(post)
         post_id = str(post.get("id") or "")
         return Anime(
@@ -345,9 +350,7 @@ class KayoanimeProvider:
         if resp.status_code != 200:
             raise RuntimeError(f"kayoanime HTTP {resp.status_code}")
         posts = resp.json()
-        scored = [
-            (_title_relevance(query, a.title), a) for a in map(self._to_anime, posts)
-        ]
+        scored = [(_title_relevance(query, a.title), a) for a in map(self._to_anime, posts)]
         scored.sort(key=lambda sa: -sa[0])
         result = ([a for _, a in scored], len(posts) >= 20)
         self._cache_put(key, result, CACHE_TTL_SEARCH)
@@ -379,9 +382,7 @@ class KayoanimeProvider:
         # The post title carries its one quality — the sources() path reads
         # this even when episodes() never ran (detail-then-play), so it is
         # populated here too, not only in _folders_for().
-        self._quality[post_id] = _extract_resolution(
-            post.get("title", {}).get("rendered", "")
-        )
+        self._quality[post_id] = _extract_resolution(post.get("title", {}).get("rendered", ""))
         self._cache_put(key, anime, CACHE_TTL_EPISODES)
         return anime
 
@@ -440,9 +441,7 @@ class KayoanimeProvider:
         pairs = _folder_pairs((post.get("content") or {}).get("rendered", ""))
         self._folders[post_id] = pairs
         # the post title carries its one quality — carried, never assumed
-        self._quality[post_id] = _extract_resolution(
-            post.get("title", {}).get("rendered", "")
-        )
+        self._quality[post_id] = _extract_resolution(post.get("title", {}).get("rendered", ""))
         return pairs
 
     async def _is_restricted(self, folder_id: str) -> bool:
@@ -485,9 +484,7 @@ class KayoanimeProvider:
                         restricted_folders.append((folder_id, label))
                     continue
             except Exception as ex:
-                logger.warning(
-                    "kayoanime folder %s (%s) failed: %s", folder_id, label, ex
-                )
+                logger.warning("kayoanime folder %s (%s) failed: %s", folder_id, label, ex)
                 continue
             for f in files:
                 ep_key = _episode_key(f.get("name", ""))
@@ -507,9 +504,7 @@ class KayoanimeProvider:
                         "size": size,
                     }
         self._files[post_id] = by_episode
-        self._gated[post_id] = [
-            (folder_id, label) for folder_id, label in restricted_folders
-        ]
+        self._gated[post_id] = [(folder_id, label) for folder_id, label in restricted_folders]
         results = [
             Episode(
                 id=i,
@@ -533,9 +528,7 @@ class KayoanimeProvider:
             logger.warning(
                 "kayoanime post %s: Group-gated folders: %s",
                 post_id,
-                ", ".join(
-                    f"{label or folder_id}" for folder_id, label in self._gated[post_id]
-                ),
+                ", ".join(f"{label or folder_id}" for folder_id, label in self._gated[post_id]),
             )
         return page_slice(results, page)
 
@@ -588,9 +581,7 @@ class KayoanimeProvider:
 
     async def episodes_for_title(self, title: str) -> list[Episode]:
         results, _ = await self.search(title, 1)
-        best = max(
-            results, key=lambda a: _title_relevance(title, a.title), default=None
-        )
+        best = max(results, key=lambda a: _title_relevance(title, a.title), default=None)
         if best is None or _title_relevance(title, best.title) == 0:
             return []
         episodes = await all_episodes(self, best.session)
@@ -598,9 +589,7 @@ class KayoanimeProvider:
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:
         results, _ = await self.search(title, 1)
-        best = max(
-            results, key=lambda a: _title_relevance(title, a.title), default=None
-        )
+        best = max(results, key=lambda a: _title_relevance(title, a.title), default=None)
         if best is None or _title_relevance(title, best.title) == 0:
             return []
         episodes = await all_episodes(self, best.session)

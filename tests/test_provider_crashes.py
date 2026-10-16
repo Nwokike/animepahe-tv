@@ -14,7 +14,6 @@ Each test kills one crash that shipped in the swarm audit:
 
 import asyncio
 
-
 # ---------------------------------------------------------------------------
 # anikato
 # ---------------------------------------------------------------------------
@@ -102,13 +101,13 @@ def test_anikato_report_sends_the_episode_number():
         return {"anime_id": 958}
 
     provider._watch_page = fake_watch
-    ok, message = asyncio.run(
+    ok, _message = asyncio.run(
         provider.report_broken(
             "anikato:naruto-eybxz", "naruto-eybxz|220", ["video_broken"], note="x"
         )
     )
     assert ok is True
-    url, body = posts[0]
+    _url, body = posts[0]
     assert "episode_id=220" in body
 
 
@@ -196,7 +195,12 @@ def test_kayoanime_one_failing_folder_does_not_abort_the_walk():
         },
     }
     files = [
-        {"id": "f1", "name": "[Kayoanime] Show - 007.mkv", "mimeType": "video/x-matroska", "size": "10000000"}
+        {
+            "id": "f1",
+            "name": "[Kayoanime] Show - 007.mkv",
+            "mimeType": "video/x-matroska",
+            "size": "10000000",
+        }
     ]
     provider = KayoanimeProvider(client=_KayClient(post, files))
     original = provider._list_folder
@@ -207,7 +211,7 @@ def test_kayoanime_one_failing_folder_does_not_abort_the_walk():
         return await original(folder_id)
 
     provider._list_folder = flaky
-    episodes, has_more = asyncio.run(provider.episodes("kayoanime:5", 1))
+    episodes, _has_more = asyncio.run(provider.episodes("kayoanime:5", 1))
     assert [e.episode for e in episodes] == [7]
 
 
@@ -219,11 +223,23 @@ def test_kayoanime_multiseason_post_keeps_both_seasons():
     post = {
         "id": 6,
         "title": {"rendered": "Dandadan"},
-        "content": {"rendered": '<a href="https://drive.google.com/drive/folders/GOODFOLDERGOODFOLDERGOOD12">Box</a>'},
+        "content": {
+            "rendered": '<a href="https://drive.google.com/drive/folders/GOODFOLDERGOODFOLDERGOOD12">Box</a>'
+        },
     }
     files = [
-        {"id": "f1", "name": "[Kayoanime] Dandadan - S01E05.mkv", "mimeType": "video/x-matroska", "size": "10000000"},
-        {"id": "f2", "name": "[Kayoanime] Dandadan - S02E05.mkv", "mimeType": "video/x-matroska", "size": "10000000"},
+        {
+            "id": "f1",
+            "name": "[Kayoanime] Dandadan - S01E05.mkv",
+            "mimeType": "video/x-matroska",
+            "size": "10000000",
+        },
+        {
+            "id": "f2",
+            "name": "[Kayoanime] Dandadan - S02E05.mkv",
+            "mimeType": "video/x-matroska",
+            "size": "10000000",
+        },
     ]
     provider = KayoanimeProvider(client=_KayClient(post, files))
     episodes, _ = asyncio.run(provider.episodes("kayoanime:6", 1))
@@ -256,8 +272,16 @@ def test_releases_from_anime_builds_the_grid_shape():
     from core.state import Anime
 
     anime = Anime(
-        id=7, title="Show", type="TV", episodes=12, status="", season="", year=2025,
-        score=8.0, poster="https://p/x.jpg", session="animeout:7",
+        id=7,
+        title="Show",
+        type="TV",
+        episodes=12,
+        status="",
+        season="",
+        year=2025,
+        score=8.0,
+        poster="https://p/x.jpg",
+        session="animeout:7",
     )
     releases = releases_from_anime([anime])
     assert isinstance(releases[0], LatestRelease)

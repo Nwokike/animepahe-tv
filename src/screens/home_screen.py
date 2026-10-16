@@ -46,9 +46,7 @@ def _release_card(
     provider: str = "",
 ) -> ft.Control:
     play_icon = ft.Icon(
-        ft.Icons.EQUALIZER_ROUNDED
-        if now_playing
-        else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+        ft.Icons.EQUALIZER_ROUNDED if now_playing else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
         size=40,
         color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
     )
@@ -70,9 +68,7 @@ def _release_card(
                         # A per-anime release (anikato's new-release
                         # grid) has no episode number — say "New
                         # release" rather than "Episode 0".
-                        f"Episode {release.episode}"
-                        if release.episode
-                        else "New release",
+                        f"Episode {release.episode}" if release.episode else "New release",
                         color=AppColors.PRIMARY,
                         weight=ft.FontWeight.BOLD,
                         size=12,
@@ -94,7 +90,9 @@ def _release_card(
     # plus the focus/blur scale are the focus ring.
     return card_frame(
         mode=mode,
-        media=card_media(release.snapshot, mode, provider=provider),
+        media=card_media(
+            release.snapshot, mode, title=release.anime_title, provider=provider
+        ),
         gradient=ft.Container(
             gradient=ft.LinearGradient(
                 begin=ft.Alignment.CENTER_LEFT,
@@ -155,9 +153,7 @@ def _version_pill(state, page) -> ft.Control:
         ),
         padding=ft.Padding.symmetric(horizontal=8, vertical=6),
         border_radius=6,
-        border=ft.Border.all(
-            1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT)
-        ),
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE_VARIANT)),
         tooltip="Version",
     )
 
@@ -191,9 +187,7 @@ def _backend_badge(state, controller) -> ft.Control:
         bgcolor=ft.Colors.with_opacity(0.1, colour),
         border=ft.Border.all(1, ft.Colors.with_opacity(0.35, colour)),
         ink=True,
-        tooltip=f"Served by {label} — tap to switch"
-        if label
-        else "Choosing a source…",
+        tooltip=f"Served by {label} — tap to switch" if label else "Choosing a source…",
         on_click=lambda e: controller.open_backend_picker(),
     )
 
@@ -305,18 +299,12 @@ _THEME_ICONS = {
 def _theme_cycle(page) -> tuple[str, object]:
     """3-way cycle: DARK -> LIGHT -> SYSTEM (Sherlock's pattern), on the
     shared order. The icon names the mode the tap lands on."""
-    mode = (
-        getattr(page, "theme_mode", ft.ThemeMode.SYSTEM)
-        if page
-        else ft.ThemeMode.SYSTEM
-    )
+    mode = getattr(page, "theme_mode", ft.ThemeMode.SYSTEM) if page else ft.ThemeMode.SYSTEM
     nxt = next_theme_mode(mode)
     return _THEME_ICONS.get(nxt, ft.Icons.DARK_MODE_ROUNDED), nxt
 
 
-def _continue_watching_row(
-    entries: dict, on_open, mode: str = LANDSCAPE
-) -> ft.Control | None:
+def _continue_watching_row(entries: dict, on_open, mode: str = LANDSCAPE) -> ft.Control | None:
     """Continue Watching shelf — newest first, capped."""
     if not entries:
         return None
@@ -377,8 +365,10 @@ def _continue_watching_row(
                         overlay_alpha=0.18,
                     ),
                     animate_scale=card_focus_scale(1.03),
-                    on_click=lambda e, s=record.get("anime_session", ""): (
-                        on_open(s) if s else None
+                    on_click=lambda e, record=record: (
+                        on_open(record.get("anime_session", ""))
+                        if record.get("anime_session")
+                        else None
                     ),
                 )
             )
@@ -404,9 +394,7 @@ def _cf_overlay_card(state, controller) -> ft.Control:
         content=ft.Column(
             [
                 ft.Container(
-                    content=ft.Icon(
-                        ft.Icons.SHIELD_ROUNDED, size=64, color=AppColors.PRIMARY
-                    ),
+                    content=ft.Icon(ft.Icons.SHIELD_ROUNDED, size=64, color=AppColors.PRIMARY),
                     alignment=ft.Alignment.CENTER,
                 ),
                 ft.Container(height=8),
@@ -547,7 +535,12 @@ def HomeScreen() -> ft.Control:
     except Exception:
         page = None
 
-    if not state.latest_releases and not state.is_loading and state.is_online and not state.cf_blocked:
+    if (
+        not state.latest_releases
+        and not state.is_loading
+        and state.is_online
+        and not state.cf_blocked
+    ):
         controller.load_latest()
 
     theme_icon, next_mode = _theme_cycle(page)
@@ -581,8 +574,7 @@ def HomeScreen() -> ft.Control:
             _release_card(
                 r,
                 controller.open_anime,
-                now_playing["anime"] == r.anime_session
-                and now_playing["episode"] == r.session,
+                now_playing["anime"] == r.anime_session and now_playing["episode"] == r.session,
                 col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
                 mode=grid_mode,
                 provider=state.latest_source or state.current_source_name,
@@ -596,12 +588,12 @@ def HomeScreen() -> ft.Control:
     pager = ft_pager(
         page=state.latest_page,
         has_more=state.latest_has_more,
-        on_prev=lambda e: controller.load_latest(state.latest_page - 1)
-        if not state.is_loading
-        else None,
-        on_next=lambda e: controller.load_latest(state.latest_page + 1)
-        if not state.is_loading
-        else None,
+        on_prev=lambda e: (
+            controller.load_latest(state.latest_page - 1) if not state.is_loading else None
+        ),
+        on_next=lambda e: (
+            controller.load_latest(state.latest_page + 1) if not state.is_loading else None
+        ),
         is_loading=state.is_loading,
     )
 
@@ -610,9 +602,7 @@ def HomeScreen() -> ft.Control:
             [
                 PromoHero(),
                 build_banner_ad(page, inline=True),
-                _continue_watching_row(
-                    state.continue_watching, controller.open_anime, grid_mode
-                )
+                _continue_watching_row(state.continue_watching, controller.open_anime, grid_mode)
                 or ft.Container(width=0, height=0),
                 ft.Text(
                     "Recent Episodes",

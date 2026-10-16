@@ -40,6 +40,7 @@ Notification shape (the reference's recommendations):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 logger = logging.getLogger("animepahe.notify")
@@ -146,10 +147,8 @@ def on_tap(handler) -> None:
         # Push the change: a handler assigned AFTER registration is not
         # sent to Dart until the control updates, so the taps silently
         # never arrived. Guarded — an unmounted service raises here.
-        try:
+        with contextlib.suppress(Exception):
             _service.update()
-        except Exception:
-            pass
     except Exception as ex:
         logger.info("on_tap install failed: %s", ex)
 
@@ -258,13 +257,9 @@ async def show_new_episode(
                 summary_text="New episode on your followed show",
             )
         await _service.show(
-            id=download_id(episode_session)
-            if download_complete
-            else stable_id(anime_session),
+            id=download_id(episode_session) if download_complete else stable_id(anime_session),
             title=f"{title} — Episode {episode}",
-            body="Download complete — tap to play"
-            if download_complete
-            else "Tap to watch",
+            body="Download complete — tap to play" if download_complete else "Tap to watch",
             payload=payload_for(anime_session),
             style=style,
             channel_id=CHANNEL_NEW_EPISODES,
@@ -312,16 +307,16 @@ async def show_progress(
 
 
 __all__ = [
+    "CHANNEL_NEW_EPISODES",
+    "anime_session_from",
     "download_id",
     "ensure_channel",
+    "handle_payload",
+    "on_tap",
+    "payload_for",
+    "request_permissions",
     "show_new_episode",
     "show_progress",
-    "request_permissions",
-    "on_tap",
-    "handle_payload",
-    "payload_for",
-    "anime_session_from",
-    "stable_id",
     "stable_filename",
-    "CHANNEL_NEW_EPISODES",
+    "stable_id",
 ]

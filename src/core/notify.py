@@ -15,6 +15,7 @@ it is, so popping when an ``AlertDialog`` sits above the lingering snack
 dismisses the user's dialog and still fails to deliver the snack.
 """
 
+import contextlib
 import logging
 
 import flet as ft
@@ -53,10 +54,8 @@ def show_snack(
     """Best-effort snackbar: logs failures, never raises."""
     # Always dispatch to in-player toast if registered (dual dispatch)
     if _toast is not None:
-        try:
+        with contextlib.suppress(Exception):
             _toast(message)
-        except Exception:
-            pass
 
     try:
         action = None

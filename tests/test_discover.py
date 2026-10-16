@@ -14,7 +14,7 @@ import tempfile
 _TMP = tempfile.mkdtemp(prefix="animepahe-discover-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
-import pytest  # noqa: E402
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -60,9 +60,7 @@ WP_CATEGORIES = [
         ("services.providers.kayoanime", "KayoanimeProvider", "kayoanime"),
     ],
 )
-async def test_wp_providers_discover_their_own_categories(
-    module_name, class_name, api_base
-):
+async def test_wp_providers_discover_their_own_categories(module_name, class_name, api_base):
     """The category list (with counts) is READ from the site, so a new
     bucket appears without a code change."""
     import importlib
@@ -106,30 +104,45 @@ async def test_wp_browse_maps_selections_onto_the_documented_params():
 
 @pytest.mark.asyncio
 async def test_anikato_filters_are_discovered_not_embedded():
-    """The genre slugs and the type/status option lists come off the home
-    page; only the sort enum (which has no page to read it from) is a
-    constant in the provider."""
+    """The option lists come off the site's OWN /filter form controls —
+    the input names and values the server actually accepts (genre[]=1,
+    term_type[]=Movie, status[]=..., season[]=...). The old slug scraping
+    read /genre/action links, which the filter endpoint ignores; every
+    genre click returned the unfiltered grid."""
     from services.providers.anikato import AniKatoProvider
 
-    home = (
-        '<a href="https://anikototv.to/genre/action">Action</a>'
-        '<a href="https://anikototv.to/genre/award-winning">Award Winning</a>'
-        '<a href="https://anikototv.to/type/tv">TV</a>'
-        '<a href="https://anikototv.to/status/finished-airing">Finished</a>'
+    form = (
+        '<input type="checkbox" id="genre-1" name="genre[]" value="1" />'
+        '<label for="genre-1"> Action </label>'
+        '<input type="checkbox" id="genre-2" name="genre[]" value="2344" />'
+        '<label for="genre-2"> Action &amp; Adventure </label>'
+        '<input type="checkbox" id="t-m" name="term_type[]" value="Movie" />'
+        '<label for="t-m"> Movie </label>'
+        '<input type="checkbox" id="s-fin" name="status[]" value="finished-airing" />'
+        '<label for="s-fin"> Finished Airing </label>'
+        '<input type="checkbox" id="se-fall" name="season[]" value="fall" />'
+        '<label for="se-fall"> Fall </label>'
     )
-    client = _Client({"/home": _Resp(text=home)})
+    client = _Client({"/filter": _Resp(text=form)})
     provider = AniKatoProvider(client=client)
     spec = await provider.filters()
 
     keys = {s["key"] for s in spec}
-    assert keys == {"genre", "type", "status", "sort", "ep_min"}
+    assert keys == {"genre", "type", "status", "season", "sort", "ep_min"}
     genre = next(s for s in spec if s["key"] == "genre")
     assert genre["options"] == [
-        {"value": "action", "label": "Action"},
-        {"value": "award-winning", "label": "Award Winning"},
+        {"value": "1", "label": "Action"},
+        {"value": "2344", "label": "Action & Adventure"},
     ]
-    status = next(s for s in spec if s["key"] == "status")
-    assert status["options"] == [{"value": "finished-airing", "label": "Finished"}]
+    assert next(s for s in spec if s["key"] == "type")["options"] == [
+        {"value": "Movie", "label": "Movie"}
+    ]
+    assert next(s for s in spec if s["key"] == "status")["options"] == [
+        {"value": "finished-airing", "label": "Finished Airing"}
+    ]
+    assert next(s for s in spec if s["key"] == "season")["options"] == [
+        {"value": "fall", "label": "Fall"}
+    ]
     assert next(s for s in spec if s["key"] == "sort")["options"]
 
 
@@ -140,13 +153,17 @@ async def test_anikato_browse_maps_the_filter_params():
     client = _Client({"/filter": _Resp(text="")})
     provider = AniKatoProvider(client=client)
     await provider.browse(
-        {"genre": "action", "type": "tv", "sort": "score", "ep_min": "12"}, 3
+        {"genre": "1", "type": "Movie", "status": "finished-airing",
+         "season": "fall", "sort": "score", "ep_min": "12"},
+        3,
     )
 
     (url, _params) = client.calls[-1]
-    # only the selections that have a value ride — no empty params
+    # The site's own form names ride once-encoded; only selections with a
+    # value ride — no empty params.
     assert url == (
-        "https://anikototv.to/filter?page=3&genre=action&type=tv&sort=score&ep_min=12"
+        "https://anikototv.to/filter?page=3&genre%5B%5D=1&term_type%5B%5D=Movie"
+        "&status%5B%5D=finished-airing&season%5B%5D=fall&sort=score&ep_min=12"
     )
 
 
@@ -206,7 +223,8 @@ def test_the_protocol_declares_the_optional_methods():
     them (runtime_checkable isinstance would then demand them and reject
     every provider without a browse surface). BrowserProvider carries the
     shape for the ones that do."""
-    from services.providers.base import BrowserProvider, Provider as _P
+    from services.providers.base import BrowserProvider
+    from services.providers.base import Provider as _P
 
     assert not hasattr(_P, "filters")
     assert not hasattr(_P, "browse")

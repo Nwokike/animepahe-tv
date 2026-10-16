@@ -1,5 +1,4 @@
-"""Theme — the 3-way persisted cycle (the gap nkiri's 2-way toggle left).
-"""
+"""Theme — the 3-way persisted cycle (the gap nkiri's 2-way toggle left)."""
 
 import os
 import sys

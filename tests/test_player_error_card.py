@@ -62,14 +62,10 @@ def _find_buttons(control):
     # flet 0.85.3: OutlinedButton does not inherit Button (only FilledButton
     # does), so both are matched explicitly.
     _BUTTONS = tuple(
-        c
-        for c in (getattr(ft, "OutlinedButton", None), getattr(ft, "Button", None))
-        if c
+        c for c in (getattr(ft, "OutlinedButton", None), getattr(ft, "Button", None)) if c
     )
     return [
-        c
-        for c in _walk(control)
-        if _BUTTONS and isinstance(c, _BUTTONS) and hasattr(c, "on_click")
+        c for c in _walk(control) if _BUTTONS and isinstance(c, _BUTTONS) and hasattr(c, "on_click")
     ]
 
 

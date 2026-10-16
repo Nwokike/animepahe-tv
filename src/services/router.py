@@ -20,6 +20,7 @@ docs/decisions.md):
   sessions ("animeout:123") route to their owner first.
 """
 
+import contextlib
 import logging
 import time
 
@@ -45,7 +46,7 @@ STARTUP_PROBE_TIMEOUT = 4.0  # probes are short — dead != slow
 class ProviderHealth:
     """Runtime-discovered health for one provider (surfaced in Settings)."""
 
-    __slots__ = ("state", "latency_ms", "last_error", "checked_at")
+    __slots__ = ("checked_at", "last_error", "latency_ms", "state")
 
     def __init__(self):
         self.state = "unknown"
@@ -59,7 +60,7 @@ class RouterError(Exception):
 
 
 class _Breaker:
-    __slots__ = ("state", "failures", "opened_at", "cooldown", "_now")
+    __slots__ = ("_now", "cooldown", "failures", "opened_at", "state")
 
     def __init__(self, now):
         self.state = CLOSED
@@ -99,11 +100,7 @@ def _is_empty(result) -> bool:
     """An answer counts as empty when its PAYLOAD is empty. Providers
     return (items, has_more) tuples or lists — tuples are always truthy,
     so inspect the first element."""
-    if (
-        isinstance(result, tuple)
-        and len(result) >= 1
-        and isinstance(result[0], (list, tuple))
-    ):
+    if isinstance(result, tuple) and len(result) >= 1 and isinstance(result[0], (list, tuple)):
         return not result[0]
     return not result
 
@@ -182,9 +179,7 @@ class ProviderRouter:
             )
             raise
         breaker.record_success()
-        self._record_health(
-            provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
-        )
+        self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
         return result
 
     async def _run(
@@ -252,13 +247,9 @@ class ProviderRouter:
         rest = eligible[1:]
         if not rest:
             if results_errors:
-                raise RouterError(f"all providers failed for {op}") from results_errors[
-                    0
-                ]
+                raise RouterError(f"all providers failed for {op}") from results_errors[0]
             return results_answers[first.name]
-        outcomes: dict[str, object] = (
-            dict(results_answers) if not results_errors else {}
-        )
+        outcomes: dict[str, object] = dict(results_answers) if not results_errors else {}
         errors: list[Exception] = list(results_errors)
         winner: Provider | None = None
 
@@ -287,11 +278,7 @@ class ProviderRouter:
             # cancelled the group) is not in outcomes, and that indexing
             # raised KeyError on the empty-then-raise path.
             last_answered_name = list(outcomes)[-1]
-            final_name = (
-                eligible[-1].name
-                if eligible[-1].name in outcomes
-                else last_answered_name
-            )
+            final_name = eligible[-1].name if eligible[-1].name in outcomes else last_answered_name
             self.last_winner = final_name
             return outcomes[final_name]
         if errors:
@@ -302,9 +289,7 @@ class ProviderRouter:
     # Public API — the router IS the app's data layer
     # ------------------------------------------------------------------
 
-    async def latest_releases(
-        self, page: int, *, owner: str | None = None
-    ) -> tuple[list, bool]:
+    async def latest_releases(self, page: int, *, owner: str | None = None) -> tuple[list, bool]:
         """Owner-only once a backend is chosen (the startup gate pins one):
         the app IS that backend, so its catalog never silently comes from
         another. With no pin (pre-resolve) the editorial race governs."""
@@ -312,13 +297,9 @@ class ProviderRouter:
             "latest_releases", page, owner=owner or self._pin, session_owned=True
         )
 
-    async def search(
-        self, query: str, page: int, *, owner: str | None = None
-    ) -> tuple[list, bool]:
+    async def search(self, query: str, page: int, *, owner: str | None = None) -> tuple[list, bool]:
         """Owner-only once a backend is chosen (see latest_releases)."""
-        return await self._run(
-            "search", query, page, owner=owner or self._pin, session_owned=True
-        )
+        return await self._run("search", query, page, owner=owner or self._pin, session_owned=True)
 
     async def episodes(self, session: str, page: int) -> tuple[list, bool]:
         return await self._run(
@@ -364,9 +345,7 @@ class ProviderRouter:
                 logger.info("episodes_for_title failed on %s: %s", provider.name, ex)
                 continue
             breaker.record_success()
-            self._record_health(
-                provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
-            )
+            self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
             if not _is_empty(result):
                 self.last_winner = provider.name
                 return (result, False)
@@ -401,9 +380,7 @@ class ProviderRouter:
                 logger.info("sources_for_title failed on %s: %s", provider.name, ex)
                 continue
             breaker.record_success()
-            self._record_health(
-                provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
-            )
+            self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
             if not _is_empty(result):
                 self.last_winner = provider.name
                 results = result
@@ -414,7 +391,7 @@ class ProviderRouter:
     # Discovery — the provider whose source has a browse surface
     # ------------------------------------------------------------------
 
-    def discover_provider(self, name: str | None = None) -> "Provider | None":
+    def discover_provider(self, name: str | None = None) -> Provider | None:
         """The provider that serves Discover: the named one when it can
         browse; when unpinned, Kayoanime serves as the primary backbone
         for discovery, falling back to the first browse-capable provider.
@@ -448,9 +425,7 @@ class ProviderRouter:
             return ("", [])
         return (provider.name, spec)
 
-    async def browse(
-        self, name: str, filters: dict, page: int
-    ) -> tuple[str, list, bool]:
+    async def browse(self, name: str, filters: dict, page: int) -> tuple[str, list, bool]:
         """Filtered catalog from the named provider. Same breaker-aware
         shape as the rest of the router: an empty answer is a RESULT."""
         provider = self.discover_provider(name)
@@ -473,9 +448,7 @@ class ProviderRouter:
             logger.info("browse failed on %s: %s", provider.name, ex)
             return ("", [], False)
         breaker.record_success()
-        self._record_health(
-            provider, ok=True, latency_ms=(self._clock() - started) * 1000.0
-        )
+        self._record_health(provider, ok=True, latency_ms=(self._clock() - started) * 1000.0)
         items, has_more = result
         if _is_empty(items):
             return (provider.name, [], False)
@@ -528,24 +501,20 @@ class ProviderRouter:
                 error=str(ex),
             )
             return False
-        self._record_health(
-            provider, ok=bool(ok), latency_ms=(self._clock() - started) * 1000.0
-        )
+        self._record_health(provider, ok=bool(ok), latency_ms=(self._clock() - started) * 1000.0)
         return bool(ok)
 
     async def close(self) -> None:
         for provider in self._providers:
-            try:
+            with contextlib.suppress(Exception):
                 await provider.close()
-            except Exception:
-                pass
 
 
 __all__ = [
+    "CLOSED",
+    "HALF_OPEN",
+    "OPEN",
+    "ProviderHealth",
     "ProviderRouter",
     "RouterError",
-    "ProviderHealth",
-    "CLOSED",
-    "OPEN",
-    "HALF_OPEN",
 ]

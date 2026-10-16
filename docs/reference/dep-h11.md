@@ -20,7 +20,17 @@ Public surface (`__init__.py:38-62`, `__all__`):
 ```python
 Connection, NEED_DATA, PAUSED
 ConnectionClosed, Data, EndOfMessage, Event, InformationalResponse, Request, Response
-CLIENT, CLOSED, DONE, ERROR, IDLE, MUST_CLOSE, SEND_BODY, SEND_RESPONSE, SERVER,
+(
+    CLIENT,
+    CLOSED,
+    DONE,
+    ERROR,
+    IDLE,
+    MUST_CLOSE,
+    SEND_BODY,
+    SEND_RESPONSE,
+    SERVER,
+)
 SWITCHED_PROTOCOL  # (MIGHT_SWITCH_PROTOCOL intentionally NOT re-exported)
 ProtocolError, LocalProtocolError, RemoteProtocolError
 PRODUCT_ID = "python-h11/0.16.0"
@@ -190,9 +200,11 @@ path, so `send(Request); send(EndOfMessage())` with no `Data` is the normal patt
 ## Keep-alive (`_connection.py:72-90, 299-308`)
 
 ```python
-def _keep_alive(event) -> bool:   # _connection.py:84-90
-    if b"close" in get_comma_header(event.headers, b"connection"): return False
-    if getattr(event, "http_version", b"1.1") < b"1.1": return False
+def _keep_alive(event) -> bool:  # _connection.py:84-90
+    if b"close" in get_comma_header(event.headers, b"connection"):
+        return False
+    if getattr(event, "http_version", b"1.1") < b"1.1":
+        return False
     return True
 ```
 

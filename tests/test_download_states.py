@@ -16,11 +16,11 @@ import tempfile
 _TMP = tempfile.mkdtemp(prefix="animepahe-dlstate-test-")
 os.environ["FLET_APP_STORAGE_DATA"] = _TMP
 
-import flet as ft  # noqa: E402
+import flet as ft
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from services.downloads import (  # noqa: E402
+from services.downloads import (
     MAX_PARALLEL_DOWNLOADS,
     STATE_COMPLETED,
     STATE_QUEUED,
@@ -112,9 +112,7 @@ def test_pause_keeps_the_partial_and_writes_stopped(tmp_path):
     """PAUSE is a stop reason, not a delete: the fetched bytes stay on disk
     and the manifest says stopped."""
     mgr = _manager(tmp_path)
-    job_dir = _job(
-        mgr, "sess", "ep1", state=STATE_QUEUED, url="https://x/f"
-    )
+    job_dir = _job(mgr, "sess", "ep1", state=STATE_QUEUED, url="https://x/f")
     with open(os.path.join(job_dir, "file.mkv.part"), "wb") as f:
         f.write(b"B" * 2048)
 
@@ -153,9 +151,7 @@ def test_a_paused_job_is_not_re_enqueued_until_resume(tmp_path):
 
 def test_resume_clears_the_reason_and_continues_from_the_partial(tmp_path):
     mgr = _manager(tmp_path, [("drive/file", lambda: _Resp(200, body=b"Z" * 1024))])
-    job_dir = _job(
-        mgr, "sess", "ep3", state=STATE_STOPPED, url="https://drive/file"
-    )
+    job_dir = _job(mgr, "sess", "ep3", state=STATE_STOPPED, url="https://drive/file")
     with open(os.path.join(job_dir, "file.mkv.part"), "wb") as f:
         f.write(b"Z" * 512)
 
@@ -168,16 +164,12 @@ def test_resume_clears_the_reason_and_continues_from_the_partial(tmp_path):
     assert "ep3" not in mgr._stop_reason
     assert _manifest(job_dir)["state"] == STATE_COMPLETED
     # the Range request carried the offset — a resume, not a restart
-    assert any(
-        r["headers"].get("Range") == "bytes=512-" for r in mgr._fake.requests
-    )
+    assert any(r["headers"].get("Range") == "bytes=512-" for r in mgr._fake.requests)
 
 
 def test_retry_re_queues_a_failed_job_from_the_manifest(tmp_path):
     mgr = _manager(tmp_path, [("drive/file", lambda: _Resp(200, body=b"Y" * 256))])
-    job_dir = _job(
-        mgr, "sess", "ep4", state="failed", url="https://drive/file"
-    )
+    job_dir = _job(mgr, "sess", "ep4", state="failed", url="https://drive/file")
 
     async def _scenario():
         mgr._jobs["ep4"] = {"dir": job_dir, "manifest": os.path.join(job_dir, "manifest.json")}
@@ -212,9 +204,7 @@ def test_one_progress_contract_for_both_paths(tmp_path):
     mgr.on_progress = lambda session, row: seen.append(dict(row))
 
     async def _scenario():
-        await mgr.start_direct(
-            "ep5", "https://drive/file", {}, {"anime_session": "sess"}
-        )
+        await mgr.start_direct("ep5", "https://drive/file", {}, {"anime_session": "sess"})
         while mgr.active_jobs:
             await asyncio.sleep(0.02)
 

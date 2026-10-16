@@ -17,12 +17,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import flet as ft  # noqa: E402
+import flet as ft
 
-from core.state import Episode, LatestRelease  # noqa: E402
-from screens.anime_detail_screen import _build_series_download_dialog  # noqa: E402
-from screens.home_screen import _continue_watching_row, _release_card  # noqa: E402
-from services.providers.animeout import (  # noqa: E402
+from core.state import Episode, LatestRelease
+from screens.anime_detail_screen import _build_series_download_dialog
+from screens.home_screen import _continue_watching_row, _release_card
+from services.providers.animeout import (
     AnimeOutProvider,
     _episodes_from_excerpt,
 )
@@ -110,9 +110,7 @@ def test_animeout_anime_carries_the_count():
     post = {
         "id": 1029418,
         "title": {"rendered": "Accel World (2012)(Complete BD)"},
-        "excerpt": {
-            "rendered": "<p>Type: TV Series Episodes: 24 Aired: 2012-03-23</p>"
-        },
+        "excerpt": {"rendered": "<p>Type: TV Series Episodes: 24 Aired: 2012-03-23</p>"},
     }
     provider = AnimeOutProvider(client=_FakeClient(post))
     anime = asyncio.run(provider.anime("animeout:1029418"))
@@ -202,9 +200,7 @@ def test_metadata_row_keeps_its_zero_guard():
     """`_metadata_row` is nested inside the screen component, so this pins
     the structure: the "N Episodes" append must sit behind an
     `anime.get("episodes")` guard (the row renders nothing at 0)."""
-    path = os.path.join(
-        os.path.dirname(__file__), "..", "src", "screens", "anime_detail_screen.py"
-    )
+    path = os.path.join(os.path.dirname(__file__), "..", "src", "screens", "anime_detail_screen.py")
     with open(path, encoding="utf-8") as f:
         tree = ast.parse(f.read())
     fn = next(
@@ -213,7 +209,6 @@ def test_metadata_row_keeps_its_zero_guard():
         if isinstance(node, ast.FunctionDef) and node.name == "_metadata_row"
     )
     guarded = any(
-        isinstance(node, ast.If) and "episodes" in ast.unparse(node.test)
-        for node in ast.walk(fn)
+        isinstance(node, ast.If) and "episodes" in ast.unparse(node.test) for node in ast.walk(fn)
     )
     assert guarded

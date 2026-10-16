@@ -85,6 +85,7 @@ def test_episode_card_overflow_is_a_sibling_not_button_content():
     button, menu_slot = card.controls
     assert isinstance(button, ft.FilledButton)
     assert isinstance(menu_slot.content, ft.PopupMenuButton)
+
     # The button's own content tree carries no activatable menu.
     def _walk(control):
         yield control
@@ -139,9 +140,7 @@ def test_release_card_portrait_mode_swaps_the_shape():
 
 
 def test_episode_card_portrait_mode_swaps_the_shape():
-    card = _episode_card(
-        _Episode(), lambda a, e: None, "sess", now_playing=False, mode="portrait"
-    )
+    card = _episode_card(_Episode(), lambda a, e: None, "sess", now_playing=False, mode="portrait")
     assert card.controls[0].content.aspect_ratio == 0.67
 
 

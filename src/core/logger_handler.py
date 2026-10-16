@@ -57,9 +57,7 @@ in_memory_log_handler.setFormatter(
 # where the Cloudflare/kwik/resolve flow gets diagnosed.
 _console_handler = logging.StreamHandler(sys.stderr)
 _console_handler.setLevel(logging.INFO)
-_console_handler.setFormatter(
-    logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
-)
+_console_handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
 
 _root = logging.getLogger()
 if not any(isinstance(h, MemoryLogHandler) for h in _root.handlers):

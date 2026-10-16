@@ -167,3 +167,62 @@ Run it per backend after this lands; each row is a different app:
 Parked during this sweep: re-observe the AniKato content question (app vs
 the site's own iframe) — the next lever if it still differs is capturing the
 iframe's own network call (browser resource log).
+
+## 2026-10-16 — the owner's live run: pahe's wall, AnimeOut's real posters, Discover, keyboard
+
+### AnimeOut artwork: /staff/img IS the poster (closed)
+The wallet of `featured_media` posters lives on `wp-content/uploads`,
+which Cloudflare challenges for every programmatic client (403
+`cf-mitigated: challenge`; Jetpack's i0.wp.com proxy cannot fetch it
+either). The same cover is embedded in every post body as
+`http://www.animeout.xyz/staff/img/{id}.jpg` — **served 200 with no
+challenge** (primp chrome, no cookies needed; 71/72 posts across four
+catalogue pages carry one, all tested URLs 200, image/jpeg). The provider
+now extracts that first `<img src>` from `content.rendered` (https-
+normalized) and asks the media library only for the rare post whose body
+has none — whose URL is the walled one, honestly dark.
+
+### AnimePahe's Cloudflare: why the solve "succeeded" and still 403'd
+Diagnosis with the desktop stack (2026-10-16):
+- A fresh WebView2 (ephemeral profile) navigating `animepahe.pw` **or**
+  `/api` sits on "Performing security verification" past 30 s — the
+  interstitial never redirects; only `cf_clearance` appears in the jar.
+- The old solver's completion test required the site's own cookies
+  (`animepahe_session`/`serverid`/`xsrf-token`/`latest`) or a title that
+  names the site. The 2026-10-15 generalization dropped both, so an EMPTY
+  title (read racing a navigation) counted as success — the app persisted
+  a clearance from an unfinished challenge, and every retry 403'd. The
+  log signature: `Cookie jar has 1 entries … Returning verified
+  cf_clearance` immediately followed by the same "Just a moment…" 403.
+- primp cannot replay even a valid clearance on this host (all
+  impersonations, with the solving UA and without): the site's rule
+  rejects programmatic clients beyond the cookie. The browser itself is
+  the only client that passes today, and on Android's long-lived WebView
+  profile it does (the owner's phone) while a throwaway desktop profile
+  loops.
+Fixes shipped: positive completion signals restored (target cookies /
+site title / plain nginx landing), empty title is NEVER complete, the
+`get_cookies() -> None` poll race guarded, and the desktop solver now
+keeps a **persistent WebView2 profile** under `FLET_APP_STORAGE_DATA`
+(trust accumulates instead of resetting every run). The solver gate
+(`solve_allowed`) opens for a resolved/pinned AnimePahe, Verify, and
+play — the 1.0.9 behavior — and switching away closes it.
+
+### Discover was empty until a chip was tapped (closed)
+`load_discover_filters()` reset the grid and left it empty; the first
+page now loads immediately with no selections.
+
+### AniKato's Discover filters never filtered (closed)
+The site's filter form posts `genre[]=<id>`, `term_type[]=<Type>`,
+`status[]=<slug>`, `season[]=<season>`; the provider sent
+`genre=action&type=tv`, which the endpoint ignores — every filter tap
+returned the unfiltered grid. Options are now parsed from the `/filter`
+form itself (53 genres with numeric ids, 8 types, 3 statuses, 4 seasons,
+plus sort and ep_min), and browse encodes the real form names.
+
+### Player keyboard controls (closed)
+Parity with the house player: Space/k/MediaPlayPause toggles play-pause,
+Left/Right (and j/l) seek ±10 s, Up/Down adjust volume, m mutes,
+f toggles fullscreen, [ ]/p/n change episodes, < > cycle speed, 0–9 jump
+to 0–90 %, s skips the active intro/outro window. focus_scope forwards
+every non-Back key to the player's handler.

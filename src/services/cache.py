@@ -23,6 +23,12 @@ from core.storage import app_cache_dir
 logger = logging.getLogger(__name__)
 
 
+def _read_json_file(path: str):
+    """Blocking read for asyncio.to_thread (ASYNC230)."""
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _atomic_write_json(path: str, payload: dict) -> None:
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
     try:
@@ -51,8 +57,7 @@ class Cache:
             return
         self._loaded = True
         try:
-            with open(self.path, encoding="utf-8") as f:
-                raw = json.load(f)
+            raw = await asyncio.to_thread(_read_json_file, self.path)
             if isinstance(raw, dict):
                 self._data = raw
         except (OSError, ValueError):
@@ -118,20 +123,16 @@ class Cache:
         async def _sweep_loop():
             while True:
                 await asyncio.sleep(interval)
-                try:
+                with contextlib.suppress(Exception):
                     await self.sweep_expired()
-                except Exception:
-                    pass
 
         self._sweep_task = asyncio.create_task(_sweep_loop())
 
     async def close(self):
         if self._sweep_task:
             self._sweep_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._sweep_task
-            except asyncio.CancelledError:
-                pass
             self._sweep_task = None
         async with self._lock:
             await self._flush()

@@ -69,9 +69,7 @@ def test_every_spawned_method_is_awaitable_or_returns():
             continue
         # Is the assignment's value a spawn(...) of a controller method?
         spawned = any(
-            isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Name)
-            and n.func.id == "spawn"
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "spawn"
             for n in ast.walk(node.value)
         )
         if not spawned:

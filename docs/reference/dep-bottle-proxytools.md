@@ -51,8 +51,9 @@ Public API surface (top-level `class`/`def` in `bottle.py`, selected):
   ```python
   class ServerAdapter(object):
       quiet = False
-      def __init__(self, host='127.0.0.1', port=8080, **options): ...
-      def run(self, handler): ...   # live sig: (self, handler)
+
+      def __init__(self, host="127.0.0.1", port=8080, **options): ...
+      def run(self, handler): ...  # live sig: (self, handler)
   ```
 - Routing: `Router` (:299), `Route` (:502), errors `RouteError`, `RouteReset`,
   `RouterUnknownModeError`, `RouteSyntaxError`, `RouteBuildError`.
@@ -83,12 +84,19 @@ Reference lines: `import bottle` (:30); `ThreadedAdapter(bottle.ServerAdapter)`
 class ThreadedAdapter(bottle.ServerAdapter):
     def run(self, handler):
         if self.quiet:
+
             class QuietHandler(WSGIRequestHandler):
-                def log_request(*args, **_): pass
-            self.options['handler_class'] = QuietHandler
-        class ThreadAdapter(ThreadingMixIn, WSGIServer): pass
-        server = make_server(self.host, self.port, handler,
-                             server_class=ThreadAdapter, **self.options)
+                def log_request(*args, **_):
+                    pass
+
+            self.options["handler_class"] = QuietHandler
+
+        class ThreadAdapter(ThreadingMixIn, WSGIServer):
+            pass
+
+        server = make_server(
+            self.host, self.port, handler, server_class=ThreadAdapter, **self.options
+        )
         server.serve_forever()
 ```
 

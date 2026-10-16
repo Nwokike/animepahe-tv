@@ -26,9 +26,7 @@ def test_both_themes_carry_every_slot_the_ui_uses():
         assert nav is not None and nav.bgcolor, "the nav bar has no themed background"
         assert nav.indicator_color, "the nav bar has no selection indicator"
         appbar = theme.appbar_theme
-        assert appbar is not None and appbar.bgcolor, (
-            "the app bar has no themed background"
-        )
+        assert appbar is not None and appbar.bgcolor, "the app bar has no themed background"
         assert appbar.title_text_style is not None
         transitions = theme.page_transitions
         assert transitions is not None

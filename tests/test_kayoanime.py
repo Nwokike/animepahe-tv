@@ -27,10 +27,7 @@ def test_episode_key_three_shapes_plus_movie():
     # v2 suffixes on episodes (e.g. Clevatess S02E13v2)
     assert _episode_key("Clevatess - S02E13v2.mkv") == (2, 13)
     # Trailing parenthesized resolution/codec metadata
-    assert (
-        _episode_key("Shichisei no Subaru - 07 (1920x1080 HEVC2 EAC3).mkv")
-        == (1, 7)
-    )
+    assert _episode_key("Shichisei no Subaru - 07 (1920x1080 HEVC2 EAC3).mkv") == (1, 7)
     assert _episode_key("[Kayoanime] Naruto Shippuden - Movie 08 - Boruto.mkv") is None
     assert _episode_key("random-notes.txt") is None
 
@@ -38,18 +35,16 @@ def test_episode_key_three_shapes_plus_movie():
 def test_clean_title_removes_episode_and_blog_suffixes():
     from services.providers.kayoanime import _clean_title
 
-    t1, y1, _ = _clean_title("Magical Explorer Episode 3 English Subbed")
+    t1, _y1, _ = _clean_title("Magical Explorer Episode 3 English Subbed")
     assert t1 == "Magical Explorer"
 
-    t2, y2, _ = _clean_title(
-        "Though I Am an Inept Villainess (Season 1) 1080p Dual Audio HEVC"
-    )
+    t2, _y2, _ = _clean_title("Though I Am an Inept Villainess (Season 1) 1080p Dual Audio HEVC")
     assert t2 == "Though I Am an Inept Villainess (Season 1)"
 
-    t3, y3, _ = _clean_title("Overgeared 1080p Eng Sub HEVC | Episode 3")
+    t3, _y3, _ = _clean_title("Overgeared 1080p Eng Sub HEVC | Episode 3")
     assert t3 == "Overgeared"
 
-    t4, y4, _ = _clean_title("Boruto 1080p Dual Audio | Kayoanime")
+    t4, _y4, _ = _clean_title("Boruto 1080p Dual Audio | Kayoanime")
     assert t4 == "Boruto"
 
 
@@ -219,9 +214,7 @@ def test_episodes_walk_folders_dedupe_and_use_file_ids():
     sources = asyncio.run(provider.sources("kayoanime:961", "f274"))
     assert len(sources) == 1  # ONE Source: play url + download route
     assert sources[0].resolution == 1080
-    assert sources[0].url.startswith(
-        "https://www.googleapis.com/drive/v3/files/f274?alt=media"
-    )
+    assert sources[0].url.startswith("https://www.googleapis.com/drive/v3/files/f274?alt=media")
     assert "confirm=t" in sources[0].download_url
     # The gated folder is named (not just logged) and the real filename survives.
     assert provider.gated_folders("kayoanime:961") == ["1080p [Private Drive]"]

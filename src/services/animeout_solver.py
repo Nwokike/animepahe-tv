@@ -61,9 +61,7 @@ class AnimeOutSolver:
         try:
             from services.webview_solver import WebViewSolver
 
-            stored = (
-                await self._store.get_clearance(_HOST) if self._store else None
-            )
+            stored = await self._store.get_clearance(_HOST) if self._store else None
             prior_ua = (stored or {}).get("user_agent") or None
             cookies, user_agent = await WebViewSolver.solve_challenge(
                 page, BASE_URL, user_agent=prior_ua
@@ -104,9 +102,7 @@ class AnimeOutSolver:
 
         return not _looks_like_cf_challenge(resp.text or "", resp.status_code)
 
-    def file_headers(
-        self, clearance: dict | None, referer: str | None = None
-    ) -> dict:
+    def file_headers(self, clearance: dict | None, referer: str | None = None) -> dict:
         """Headers for the walled host: the DDL public page referer plus the
         clearance when there is one. An empty dict means no clearance, and
         the caller must treat the file as unavailable."""

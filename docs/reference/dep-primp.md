@@ -25,14 +25,32 @@
 
 ```python
 class PrimpError(Exception): ...
-class BuilderError(PrimpError): ...      # client builder config
+
+
+class BuilderError(PrimpError): ...  # client builder config
+
+
 class RequestError(PrimpError): ...
+
+
 class ConnectError(RequestError): ...
-class TimeoutError(RequestError): ...    # verified live on a dead server
-class StatusError(PrimpError): ...       # 4xx/5xx via raise_for_status()
+
+
+class TimeoutError(RequestError): ...  # verified live on a dead server
+
+
+class StatusError(PrimpError): ...  # 4xx/5xx via raise_for_status()
+
+
 class RedirectError(PrimpError): ...
+
+
 class BodyError(PrimpError): ...
+
+
 class DecodeError(PrimpError): ...
+
+
 class UpgradeError(PrimpError): ...
 ```
 MRO: `ConnectError->RequestError->PrimpError`; `TimeoutError->RequestError->PrimpError`.

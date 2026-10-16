@@ -12,6 +12,7 @@ both AdMob policy and TV focus design call out as wrong.
 """
 
 import asyncio
+import contextlib
 
 import flet as ft
 from flet import context as flet_context
@@ -19,10 +20,10 @@ from flet import context as flet_context
 from core.tasks import spawn
 from core.theme import AppColors
 from screens.anime_detail_screen import AnimeDetailScreen
+from screens.discover_screen import DiscoverScreen
 from screens.downloads_screen import DownloadsScreen
 from screens.home_screen import HomeScreen
 from screens.search_screen import SearchScreen
-from screens.discover_screen import DiscoverScreen
 from screens.settings_screen import SettingsScreen
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -62,9 +63,7 @@ def _startup_splash(state) -> ft.Control:
             [
                 ft.Image(src="icon.png", width=140, height=140, fit=ft.BoxFit.CONTAIN),
                 ft.Container(height=24),
-                ft.ProgressRing(
-                    width=40, height=40, stroke_width=3, color=ft.Colors.PRIMARY
-                ),
+                ft.ProgressRing(width=40, height=40, stroke_width=3, color=ft.Colors.PRIMARY),
                 ft.Container(height=10),
                 ft.Text(
                     state.startup_stage or "",
@@ -175,10 +174,8 @@ def AppShell() -> ft.Control:
             set_portal_owner(None)
             set_active_dialog(None)
             set_dialog_resolving(False)
-    try:
+    with contextlib.suppress(RuntimeError):
         ft.use_dialog(active_dialog)
-    except RuntimeError:
-        pass
 
     def _close_dialog():
         """Close whichever dialog is open.
@@ -435,10 +432,11 @@ def _use_player_overlay(state, controller) -> None:
 
     error = getattr(state, "player_error", None)
     spec = getattr(state, "player_spec", None) or {}
-    if error:
-        key = ("error", error)
-    else:
-        key = ("play", spec.get("episode_session"), spec.get("resource"))
+    key = (
+        ("error", error)
+        if error
+        else ("play", spec.get("episode_session"), spec.get("resource"))
+    )
 
     if key == _active_key and _in_overlay(page, _active_mount):
         return  # already showing exactly this stage
@@ -552,10 +550,8 @@ async def _player_back():
     # (bounded, 3s) before the shell tears it down.
     player = _active_player
     if player is not None:
-        try:
+        with contextlib.suppress(Exception):
             await player.handle_close()
-        except Exception:
-            pass
     await _async_close_player()
 
 
@@ -571,10 +567,8 @@ async def _async_close_player():
     # it loses the resume position and lets audio bleed into the next episode.
     player = _active_player
     if player is not None:
-        try:
+        with contextlib.suppress(Exception):
             await asyncio.wait_for(player.handle_close(), timeout=3.0)
-        except Exception:
-            pass
 
     mount = _active_mount
     _active_mount = None
@@ -629,7 +623,7 @@ def _build_download_quality_dialog(state, controller) -> ft.Control:
     for i, choice in enumerate(choices):
         is_first = i == 0
         buttons.append(
-            (
+            
                 ft.FilledButton(
                     content=choice["label"],
                     icon=ft.Icons.RECOMMEND_ROUNDED,
@@ -645,7 +639,7 @@ def _build_download_quality_dialog(state, controller) -> ft.Control:
                     content=choice["label"],
                     on_click=lambda e, i=i: controller.choose_download_quality(i),
                 )
-            )
+            
         )
     label = f"{pending.get('title', '')} — Episode {pending.get('episode_num', '?')}"
     return ft.AlertDialog(
@@ -730,7 +724,9 @@ def _build_backend_picker(state, controller) -> ft.Control:
             border_radius=8,
             border=ft.Border.all(
                 1.5 if selected else 1,
-                ft.Colors.PRIMARY if selected else ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE),
+                ft.Colors.PRIMARY
+                if selected
+                else ft.Colors.with_opacity(0.2, ft.Colors.ON_SURFACE),
             ),
             ink=True,
             on_click=lambda e, n=name: controller.pin_backend(n),
@@ -752,11 +748,7 @@ def _build_backend_picker(state, controller) -> ft.Control:
             tight=True,
             spacing=8,
         ),
-        actions=[
-            ft.TextButton(
-                content="Close", on_click=lambda e: controller.close_dialog()
-            )
-        ],
+        actions=[ft.TextButton(content="Close", on_click=lambda e: controller.close_dialog())],
         actions_alignment=ft.MainAxisAlignment.END,
     )
 
@@ -776,7 +768,7 @@ def _build_quality_dialog(state, controller) -> ft.Control:
     for i, choice in enumerate(choices):
         is_first = i == 0
         buttons.append(
-            (
+            
                 ft.FilledButton(
                     content=choice["label"],
                     icon=ft.Icons.RECOMMEND_ROUNDED,
@@ -794,7 +786,7 @@ def _build_quality_dialog(state, controller) -> ft.Control:
                     disabled=resolving,
                     on_click=lambda e, i=i: controller.choose_quality(i),
                 )
-            )
+            
         )
     return ft.AlertDialog(
         modal=True,

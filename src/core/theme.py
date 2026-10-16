@@ -1,5 +1,6 @@
-import flet as ft
+from typing import ClassVar
 
+import flet as ft
 
 # The 3-way theme (house pattern): token <-> ThemeMode in ONE place each,
 # so the settings picker, the persisted name, and the header cycle cannot
@@ -97,7 +98,7 @@ class AppTheme:
     # unspecified roles fall back to Material's baseline (purple-tinted),
     # which would make light-mode cards disagree with the DARK_SURFACE
     # family they replaced.
-    _DARK_SURFACE_ROLES = {
+    _DARK_SURFACE_ROLES: ClassVar[dict] = {
         "surface": AppColors.DARK_BG,
         "surface_bright": AppColors.DARK_SURFACE,
         "surface_dim": AppColors.DARK_BG,
@@ -111,7 +112,7 @@ class AppTheme:
         "outline": AppColors.DARK_TEXT_MUTED,
         "outline_variant": AppColors.DARK_TEXT_MUTED,
     }
-    _LIGHT_SURFACE_ROLES = {
+    _LIGHT_SURFACE_ROLES: ClassVar[dict] = {
         "surface": AppColors.LIGHT_BG,
         "surface_bright": AppColors.LIGHT_SURFACE,
         "surface_dim": AppColors.LIGHT_BG,

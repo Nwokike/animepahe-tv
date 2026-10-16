@@ -1,5 +1,7 @@
-import flet as ft
 from dataclasses import dataclass, field
+from typing import ClassVar
+
+import flet as ft
 
 
 @dataclass
@@ -91,12 +93,12 @@ class AppState:
     startup_ready: bool = False
     startup_stage: str = ""
     search_query: str = ""
-    search_results: list[Anime] = []
-    latest_releases: list[LatestRelease] = []
+    search_results: ClassVar[list[Anime]] = []
+    latest_releases: ClassVar[list[LatestRelease]] = []
     latest_page: int = 1
     latest_has_more: bool = True
     search_has_more: bool = True
-    episodes: list[Episode] = []
+    episodes: ClassVar[list[Episode]] = []
     episodes_has_more: bool = True
     episodes_page: int = 1
     current_anime_session: str = ""
@@ -121,10 +123,10 @@ class AppState:
 
     # Search + continue watching (durable store-backed). Recent rows are
     # {title, session, ts} — the ANIME that was opened, not the typed text.
-    search_history: list[dict] = []
+    search_history: ClassVar[list[dict]] = []
     search_error: str | None = None
     search_page: int = 1
-    continue_watching: dict = {}
+    continue_watching: ClassVar[dict] = {}
     selected_anime: dict | None = None
     selected_source: object | None = None
     current_source_name: str = ""
@@ -133,20 +135,20 @@ class AppState:
     latest_source: str = ""
     search_source: str = ""
     # Dev-test panel (Settings): rows from "Test all sources".
-    source_test_results: list = []
+    source_test_results: ClassVar[list] = []
     sources_test_version: int = 0
     # Airing schedule (anikato): 7 day tabs + the selected day's entries.
-    schedule_tabs: list = []
-    schedule_entries: list = []
+    schedule_tabs: ClassVar[list] = []
+    schedule_entries: ClassVar[list] = []
     schedule_time: str = ""
     schedule_version: int = 0
 
     # Discover: provider-generated filters + the filtered grid. The filter
     # vocabulary comes from the provider (never hardcoded in the UI), so
     # discover_source names which provider served it.
-    discover_filters: list = []
-    discover_selections: dict = {}
-    discover_results: list = []
+    discover_filters: ClassVar[list] = []
+    discover_selections: ClassVar[dict] = {}
+    discover_results: ClassVar[list] = []
     discover_has_more: bool = False
     discover_source: str = ""
     discover_page: int = 1
@@ -166,7 +168,7 @@ class AppState:
     pending_playback: dict | None = None
 
     # Offline downloads (durable rows + throttled live progress)
-    downloads: dict = {}
+    downloads: ClassVar[dict] = {}
     download_progress: dict | None = None
     downloads_version: int = 0
     # Download quality choice (the same list the play dialog shows — a

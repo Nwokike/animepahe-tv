@@ -23,9 +23,11 @@ The design decisions that matter, all learned from KTV:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import re
+from typing import ClassVar
 
 import flet as ft
 import flet_video as fv
@@ -77,9 +79,7 @@ _BOX_FITS = {
 }
 
 
-def _stream_variants(
-    m3u8_text: str, playlist_url: str | None = None
-) -> list[dict]:
+def _stream_variants(m3u8_text: str, playlist_url: str | None = None) -> list[dict]:
     """Parse an HLS master playlist into variants.
 
     Returns [] for a media playlist (single quality) or anything
@@ -403,9 +403,7 @@ class ImmersivePlayer(ft.Stack):
                     icon=ft.Icons.CLOSED_CAPTION_OUTLINED,
                     icon_size=16,
                     tooltip="Subtitle file",
-                    on_click=lambda e: spawn(
-                        self._pick_subtitle_file(), name="pick-subtitle"
-                    ),
+                    on_click=lambda e: spawn(self._pick_subtitle_file(), name="pick-subtitle"),
                 )
             )
             # VideoSkipNext/PreviousButton are value objects without event
@@ -438,9 +436,7 @@ class ImmersivePlayer(ft.Stack):
                 on_click=lambda e: self._on_back(),
                 tooltip="Back",
             ),
-            ft.Text(
-                self.title, size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS
-            ),
+            ft.Text(self.title, size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
         ]
 
         return fv.AdaptiveVideoControls(
@@ -538,9 +534,7 @@ class ImmersivePlayer(ft.Stack):
         self._show_progress("Loading stream...")
         self._reconnect_count = 0
         try:
-            self.video.playlist = [
-                fv.VideoMedia(self.resource, http_headers=self.http_headers)
-            ]
+            self.video.playlist = [fv.VideoMedia(self.resource, http_headers=self.http_headers)]
             try:
                 self.video.update()
             except RuntimeError:
@@ -567,9 +561,7 @@ class ImmersivePlayer(ft.Stack):
 
         async def _retry():
             try:
-                self.video.playlist = [
-                    fv.VideoMedia(self.resource, http_headers=self.http_headers)
-                ]
+                self.video.playlist = [fv.VideoMedia(self.resource, http_headers=self.http_headers)]
                 self.video.update()
                 await self.video.play()
                 self._start_watchdog()
@@ -584,9 +576,7 @@ class ImmersivePlayer(ft.Stack):
 
     def _resource_url_for(self, variant: int | None, audio: str | None) -> str:
         """Rebuild the playback URL for a (variant, audio) pinning choice."""
-        if self.hls_proxy is not None and self.source_url.startswith(
-            ("http://", "https://")
-        ):
+        if self.hls_proxy is not None and self.source_url.startswith(("http://", "https://")):
             try:
                 return self.hls_proxy.get_proxy_url(
                     self.source_url,
@@ -601,9 +591,7 @@ class ImmersivePlayer(ft.Stack):
 
     @property
     def can_switch_quality(self) -> bool:
-        return self.hls_proxy is not None and self.source_url.startswith(
-            ("http://", "https://")
-        )
+        return self.hls_proxy is not None and self.source_url.startswith(("http://", "https://"))
 
     async def list_variants(self) -> list[dict]:
         """HLS master variants (cached). Empty for media playlists."""
@@ -613,9 +601,7 @@ class ImmersivePlayer(ft.Stack):
             return []
         try:
             variants = await asyncio.wait_for(
-                self.hls_proxy.fetch_variants(
-                    self.source_url, headers=self.source_headers
-                ),
+                self.hls_proxy.fetch_variants(self.source_url, headers=self.source_headers),
                 timeout=8.0,
             )
         except Exception:
@@ -631,9 +617,7 @@ class ImmersivePlayer(ft.Stack):
             return []
         try:
             tracks = await asyncio.wait_for(
-                self.hls_proxy.fetch_audio_tracks(
-                    self.source_url, headers=self.source_headers
-                ),
+                self.hls_proxy.fetch_audio_tracks(self.source_url, headers=self.source_headers),
                 timeout=8.0,
             )
         except Exception:
@@ -656,24 +640,18 @@ class ImmersivePlayer(ft.Stack):
             self.variants = variants
             self.audio_tracks = tracks
             self._refresh_option_labels()
-            try:
+            with contextlib.suppress(Exception):
                 self.video.update()
-            except Exception:
-                pass
 
     async def apply_variant(self, index: int | None) -> None:
         """Pin a quality variant (None = Auto)."""
         self._current_variant = index
-        await self._swap_media(
-            "Auto quality" if index is None else "Switching quality..."
-        )
+        await self._swap_media("Auto quality" if index is None else "Switching quality...")
 
     async def apply_audio(self, name: str | None) -> None:
         """Pin an audio rendition (None = manifest default)."""
         self._current_audio = name
-        await self._swap_media(
-            "Default audio" if name is None else "Switching audio..."
-        )
+        await self._swap_media("Default audio" if name is None else "Switching audio...")
 
     async def _swap_media(self, message: str):
         """Restart the playlist on the currently pinned resource, restoring
@@ -689,9 +667,7 @@ class ImmersivePlayer(ft.Stack):
         duration = None
         for getter in (self.video.get_current_position, self.video.get_duration):
             try:
-                value = await asyncio.wait_for(
-                    asyncio.create_task(getter()), timeout=0.8
-                )
+                value = await asyncio.wait_for(asyncio.create_task(getter()), timeout=0.8)
                 if getter is self.video.get_current_position:
                     position = value
                 else:
@@ -717,9 +693,7 @@ class ImmersivePlayer(ft.Stack):
         self.resource = new_url
         self._show_progress(message)
         try:
-            self.video.playlist = [
-                fv.VideoMedia(new_url, http_headers=self.http_headers)
-            ]
+            self.video.playlist = [fv.VideoMedia(new_url, http_headers=self.http_headers)]
             self.video.update()
             await self.video.play()
             self._start_watchdog()
@@ -753,6 +727,152 @@ class ImmersivePlayer(ft.Stack):
         except Exception:
             pass
         self._toast_show(f"Speed {rate}x")
+
+    def _cycle_speed_reverse(self):
+        """Cycle speed backwards (via '<' or ',' keyboard shortcut)."""
+        self._speed_index = (self._speed_index - 1) % len(SPEEDS)
+        rate = SPEEDS[self._speed_index]
+        self._speed_rate = rate
+        for text in self.speed_texts:
+            text.value = f"{rate}x"
+        try:
+            self.video.playback_rate = rate
+            self.video.update()
+        except Exception:
+            pass
+        self._toast_show(f"Speed {rate}x")
+
+    # ------------------------------------------------------------------
+    # Keyboard & Direct Playback Controls (KTV Player parity)
+    # ------------------------------------------------------------------
+
+    async def toggle_play_pause(self):
+        """Toggle play/pause with visual toast feedback."""
+        try:
+            await self.video.play_or_pause()
+            is_playing = await self.video.is_playing()
+            self._toast_show("Play" if is_playing else "Pause")
+        except Exception as ex:
+            logger.debug("toggle_play_pause failed: %s", ex)
+
+    async def seek_relative(self, delta_seconds: float):
+        """Seek forward (+) or backward (-) with toast feedback."""
+        try:
+            pos = max(0.0, self._last_position + delta_seconds)
+            if self._last_duration > 0:
+                pos = min(pos, self._last_duration)
+            await self.video.seek(ft.Duration(seconds=pos))
+            self._last_position = pos
+            sign = "+" if delta_seconds > 0 else ""
+            self._toast_show(f"{sign}{int(delta_seconds)}s ({_fmt(pos)})")
+        except Exception as ex:
+            logger.debug("seek_relative failed: %s", ex)
+
+    def adjust_volume(self, delta: float):
+        """Adjust volume by delta percentage (clamped 0..100)."""
+        try:
+            current_vol = getattr(self.video, "volume", 100.0) or 100.0
+            new_vol = max(0.0, min(100.0, current_vol + delta))
+            self.video.volume = new_vol
+            self.video.update()
+            self._toast_show(f"Volume {int(new_vol)}%")
+        except Exception as ex:
+            logger.debug("adjust_volume failed: %s", ex)
+
+    def toggle_mute(self):
+        """Toggle audio mute state."""
+        try:
+            new_muted = not getattr(self.video, "muted", False)
+            self.video.muted = new_muted
+            self.video.update()
+            self._toast_show("Mute" if new_muted else "Unmute")
+        except Exception as ex:
+            logger.debug("toggle_mute failed: %s", ex)
+
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode."""
+        try:
+            new_fs = not getattr(self.video, "fullscreen", False)
+            self.video.fullscreen = new_fs
+            self.video.update()
+        except Exception as ex:
+            logger.debug("toggle_fullscreen failed: %s", ex)
+
+    async def jump_percentage(self, pct: float):
+        """Jump to a specific percentage (0.0 .. 0.9) of the video."""
+        try:
+            if self._last_duration <= 0:
+                return
+            target = self._last_duration * pct
+            await self.video.seek(ft.Duration(seconds=target))
+            self._last_position = target
+            self._toast_show(f"{int(pct * 100)}% ({_fmt(target)})")
+        except Exception as ex:
+            logger.debug("jump_percentage failed: %s", ex)
+
+    async def handle_key(self, e) -> bool:
+        """Handle desktop and TV remote keyboard events.
+
+        Full parity with KTV Player / MPV / YouTube / VLC:
+        - Space / k / MediaPlayPause -> toggle play/pause
+        - Left / j -> seek backward 10s
+        - Right / l -> seek forward 10s
+        - Up / Down -> volume +/- 10%
+        - m -> toggle mute
+        - f -> toggle fullscreen
+        - [ / p / MediaTrackPrevious -> previous episode
+        - ] / n / MediaTrackNext -> next episode
+        - > / . -> speed up
+        - < / , -> speed down
+        - 0..9 -> jump to 0%..90%
+        - s -> skip intro/outro
+        """
+        key = getattr(e, "key", "") or ""
+        lower = key.lower()
+
+        if key in (" ", "Space", "k") or lower == "k" or key in ("MediaPlayPause", "MediaPlay", "MediaPause"):
+            await self.toggle_play_pause()
+            return True
+        elif key in ("ArrowLeft", "Left") or lower == "j":
+            await self.seek_relative(-10)
+            return True
+        elif key in ("ArrowRight", "Right") or lower == "l":
+            await self.seek_relative(10)
+            return True
+        elif key in ("ArrowUp", "Up"):
+            self.adjust_volume(10)
+            return True
+        elif key in ("ArrowDown", "Down"):
+            self.adjust_volume(-10)
+            return True
+        elif lower == "m":
+            self.toggle_mute()
+            return True
+        elif lower == "f":
+            self.toggle_fullscreen()
+            return True
+        elif key in ("]", "MediaTrackNext") or lower == "n":
+            if self.on_next is not None:
+                self.on_next()
+                return True
+        elif key in ("[", "MediaTrackPrevious") or lower == "p":
+            if self.on_previous is not None:
+                self.on_previous()
+                return True
+        elif key in (">", "."):
+            self._cycle_speed()
+            return True
+        elif key in ("<", ","):
+            self._cycle_speed_reverse()
+            return True
+        elif key in ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9"):
+            await self.jump_percentage(int(key) / 10.0)
+            return True
+        elif lower == "s":
+            if getattr(self, "skip_chip", None) and self.skip_chip.visible:
+                await self._on_skip_chip()
+                return True
+        return False
 
     def _refresh_option_labels(self) -> None:
         """Sync the quality/audio chip text with the current pins, and
@@ -806,14 +926,12 @@ class ImmersivePlayer(ft.Stack):
         self.overlay.visible = True
         self._overlay_hidden = False
         self._enable_tap_to_close()
-        try:
+        # The session was torn down while the stream was dying (hot
+        # reload / app close): there is nothing left to update, and the
+        # raise used to cascade through the caller's error path
+        # (observed live: "Control must be added to the page first").
+        with contextlib.suppress(RuntimeError):
             self.update()
-        except RuntimeError:
-            # The session was torn down while the stream was dying (hot
-            # reload / app close): there is nothing left to update, and the
-            # raise used to cascade through the caller's error path
-            # (observed live: "Control must be added to the page first").
-            pass
 
     def _enable_tap_to_close(self):
         """A tap on the dead overlay goes Back — the error card is not a
@@ -827,10 +945,8 @@ class ImmersivePlayer(ft.Stack):
             if self._is_final_error:
                 self._on_back()
 
-        try:
+        with contextlib.suppress(Exception):
             self.overlay.on_click = _tap
-        except Exception:
-            pass
 
     def _hide_overlay(self):
         self._overlay_hidden = True
@@ -936,10 +1052,8 @@ class ImmersivePlayer(ft.Stack):
             return
 
         async def _save():
-            try:
+            with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._save_current_position(), timeout=2.0)
-            except Exception:
-                pass
             self._position_saved = True
 
         from core.tasks import spawn
@@ -969,9 +1083,7 @@ class ImmersivePlayer(ft.Stack):
         self._last_position = pos_sec
         if dur_sec > 0:
             self._last_duration = dur_sec
-        await self.store.save_position(
-            self.resume_key, pos_sec, dur_sec or None, self._speed_rate
-        )
+        await self.store.save_position(self.resume_key, pos_sec, dur_sec or None, self._speed_rate)
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -1011,17 +1123,14 @@ class ImmersivePlayer(ft.Stack):
             self._settings_open = False
             return
 
-        from core.tasks import spawn
-
         from core.dialogs import show_app_dialog
+        from core.tasks import spawn
 
         def _close():
             self._settings_open = False
-            setattr(page, "_app_dialog", None)
-            try:
+            page._app_dialog = None
+            with contextlib.suppress(Exception):
                 page.pop_dialog()
-            except Exception:
-                pass
 
         def _pick_variant(index):
             from core.tasks import spawn
@@ -1056,8 +1165,7 @@ class ImmersivePlayer(ft.Stack):
         if len(tracks) >= 2:
             rows = [
                 ft.OutlinedButton(
-                    content=t["name"]
-                    + (f" ({t['language']})" if t["language"] else ""),
+                    content=t["name"] + (f" ({t['language']})" if t["language"] else ""),
                     on_click=lambda e, n=t["name"]: _pick_audio(n),
                 )
                 for t in tracks
@@ -1117,9 +1225,7 @@ class ImmersivePlayer(ft.Stack):
         # every track (the source's own list stays untouched above).
         size_section: list[ft.Control] = []
         if self.subtitles or self._local_subtitle:
-            size_section.append(
-                ft.Text("Subtitle size", size=13, weight=ft.FontWeight.W_700)
-            )
+            size_section.append(ft.Text("Subtitle size", size=13, weight=ft.FontWeight.W_700))
             size_section.append(
                 ft.Row(
                     [
@@ -1154,9 +1260,7 @@ class ImmersivePlayer(ft.Stack):
                     modal=True,
                     title=ft.Text("Stream Settings", weight=ft.FontWeight.BOLD),
                     content=ft.Column(sections, tight=True, spacing=8),
-                    actions=[
-                        ft.TextButton(content="Close", on_click=lambda e: _close())
-                    ],
+                    actions=[ft.TextButton(content="Close", on_click=lambda e: _close())],
                     actions_alignment=ft.MainAxisAlignment.END,
                 ),
             )
@@ -1304,9 +1408,7 @@ class ImmersivePlayer(ft.Stack):
             return None
         try:
             paths = ft.StoragePaths()
-            return await asyncio.wait_for(
-                paths.get_downloads_directory(), timeout=5.0
-            ) or None
+            return await asyncio.wait_for(paths.get_downloads_directory(), timeout=5.0) or None
         except Exception:
             return None
 
@@ -1319,9 +1421,7 @@ class ImmersivePlayer(ft.Stack):
             # discarded failure left the user with a photo that isn't).
             shot = await asyncio.wait_for(self.video.take_screenshot(), timeout=5.0)
             if shot is None:
-                show_snack(
-                    self._page(), "Screenshot unavailable", bgcolor=AppColors.PRIMARY
-                )
+                show_snack(self._page(), "Screenshot unavailable", bgcolor=AppColors.PRIMARY)
                 return
             directory = await self._snapshot_directory()
             path = await asyncio.to_thread(save_snapshot, shot, directory)
@@ -1350,7 +1450,7 @@ class ImmersivePlayer(ft.Stack):
     # picked from the settings sheet)
     # ------------------------------------------------------------------
 
-    SUBTITLE_SIZES = [12, 16, 22, 30]
+    SUBTITLE_SIZES: ClassVar[list[int]] = [12, 16, 22, 30]
 
     def _subtitle_size(self) -> int:
         if self.store is None:
@@ -1409,10 +1509,8 @@ class ImmersivePlayer(ft.Stack):
     def _toast_show(self, message: str) -> None:
         self.toast_chip.content.value = message
         self.toast_chip.visible = True
-        try:
+        with contextlib.suppress(Exception):
             self.toast_chip.update()
-        except Exception:
-            pass
         # Generation counter: an older _hide task used to fire early and
         # hide a toast that had just been replaced.
         self._toast_gen = getattr(self, "_toast_gen", 0) + 1
@@ -1423,10 +1521,8 @@ class ImmersivePlayer(ft.Stack):
             if self._is_closing or gen != self._toast_gen:
                 return
             self.toast_chip.visible = False
-            try:
+            with contextlib.suppress(Exception):
                 self.toast_chip.update()
-            except Exception:
-                pass
 
         from core.tasks import spawn
 
@@ -1491,16 +1587,14 @@ class ImmersivePlayer(ft.Stack):
             return
         self.skip_chip.visible = visible
         self.skip_chip.content.value = label
-        try:
+        with contextlib.suppress(Exception):
             self.skip_chip.update()
-        except Exception:
-            pass
 
     async def _on_skip_chip(self, e=None):
         window = self._active_window(self._last_position)
         if not window:
             return
-        start, end = window
+        _start, end = window
         # Land 1s past the window so the chip does not re-flash.
         # ft.DurationValue: a bare int is MILLISECONDS in flet-video, so
         # the raw-seconds seek jumped to ~1ms instead of ~1s.
@@ -1575,15 +1669,11 @@ class ImmersivePlayer(ft.Stack):
         if self._checkpoint_task and not self._checkpoint_task.done():
             self._checkpoint_task.cancel()
         # Bounded: a hung native bridge must not make Back dead.
-        try:
+        with contextlib.suppress(Exception):
             await asyncio.wait_for(self._save_current_position(), timeout=3.0)
-        except Exception:
-            pass
         self._position_saved = True
-        try:
+        with contextlib.suppress(Exception):
             await asyncio.wait_for(self.video.stop(), timeout=2.0)
-        except Exception:
-            pass
         try:
             self.video.playlist = []
             self.video.update()

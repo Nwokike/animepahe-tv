@@ -145,12 +145,8 @@ def test_is_ad_stub_playlist_detects_only_all_tiktok_playlists():
 
     assert is_ad_stub_playlist(_STUB_PLAYLIST) is True
     assert is_ad_stub_playlist(_REAL_PLAYLIST) is False
-    first_url = (
-        "https://p19-ad-site-sign-sg.tiktokcdn.com/ad-site-i18n-sg/x0.image?lk3s=6d71dd51"
-    )
-    mixed = _STUB_PLAYLIST.replace(
-        first_url, "https://9lc74.phantomharbor.space/x/seg-0.jpg", 1
-    )
+    first_url = "https://p19-ad-site-sign-sg.tiktokcdn.com/ad-site-i18n-sg/x0.image?lk3s=6d71dd51"
+    mixed = _STUB_PLAYLIST.replace(first_url, "https://9lc74.phantomharbor.space/x/seg-0.jpg", 1)
     assert is_ad_stub_playlist(mixed) is False
     too_short = "\n".join(
         ["#EXTM3U"]
@@ -249,7 +245,7 @@ def test_get_embed_id_parses_data_id_with_referer():
     )
     assert res == "104527"
     assert len(client.calls) == 1
-    url, headers = client.calls[0]
+    _url, headers = client.calls[0]
     assert headers.get("Referer") == "https://anikototv.to/"
 
 
@@ -261,4 +257,3 @@ def test_get_embed_id_falls_back_when_missing_or_failed():
     provider = AniKatoProvider(client=_FailingClient())
     res = asyncio.run(provider._get_embed_id("https://megaplay.buzz/x", fallback="fallback_id"))
     assert res == "fallback_id"
-

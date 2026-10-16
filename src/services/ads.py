@@ -12,6 +12,7 @@ module owns the SDK service and the fullscreen formats.
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -109,7 +110,9 @@ async def show_interstitial(page) -> None:
     try:
         ad = fya.InterstitialAd(
             unit_id=AD_INTERSTITIAL_UNIT_ID,
-            on_impression=lambda e: logger.debug("Interstitial impression: %s", getattr(e, "impression_data", "")),
+            on_impression=lambda e: logger.debug(
+                "Interstitial impression: %s", getattr(e, "impression_data", "")
+            ),
         )
         page.services.append(ad)
         await asyncio.wait_for(ad.show(), timeout=20.0)
@@ -120,10 +123,8 @@ async def show_interstitial(page) -> None:
         logger.warning("interstitial failed: %s", ex)
     finally:
         if ad is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await ad.destroy()
-            except Exception:
-                pass
             if ad in page.services:
                 page.services.remove(ad)
 
@@ -136,7 +137,9 @@ async def show_app_open(page) -> None:
     try:
         ad = fya.AppOpenAd(
             unit_id=AD_APP_OPEN_UNIT_ID,
-            on_impression=lambda e: logger.debug("AppOpen impression: %s", getattr(e, "impression_data", "")),
+            on_impression=lambda e: logger.debug(
+                "AppOpen impression: %s", getattr(e, "impression_data", "")
+            ),
         )
         page.services.append(ad)
         await asyncio.wait_for(ad.show(), timeout=20.0)
@@ -145,9 +148,7 @@ async def show_app_open(page) -> None:
         logger.warning("app-open failed: %s", ex)
     finally:
         if ad is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await ad.destroy()
-            except Exception:
-                pass
             if ad in page.services:
                 page.services.remove(ad)

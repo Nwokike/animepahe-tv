@@ -1,5 +1,6 @@
 import logging
 import re
+
 import primp
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,12 @@ def _dean_unpack(html_text: str) -> list[str]:
         radix = 62 if radix_str.startswith("[") else int(radix_str)
         payload = payload.replace("\\\\", "\\").replace("\\'", "'")
 
-        def _replace(m: re.Match) -> str:
+        def _replace(m: re.Match, radix=radix, symtab=symtab) -> str:
+            # radix/symtab ride as defaults on purpose: the closure is built
+            # inside the match loop, so a plain capture would read whatever
+            # the loop held when the function is CALLED, not when it was
+            # defined (B023 — benign today because re.sub runs inline, a
+            # corruption the day that changes).
             word = m.group(0)
             try:
                 idx = _unbase(word, radix)
@@ -138,9 +144,7 @@ class KwikResolver:
             # (where the link was issued), not a header derived from the
             # CDN's own URL — deriving from the CDN URL always fell back
             # to the wrong host.
-            resp = await client.head(
-                url, headers=self._headers(referer or url), timeout=5
-            )
+            resp = await client.head(url, headers=self._headers(referer or url), timeout=5)
             ct = resp.headers.get("content-type", "")
             result = resp.status_code == 200 and "mpegurl" in ct.lower()
             logger.info(

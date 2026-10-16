@@ -19,11 +19,10 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-import flet as ft  # noqa: E402
-import pytest  # noqa: E402
+import flet as ft
+import pytest
 
-from services.kwik_resolver import KwikResolver  # noqa: E402
-
+from services.kwik_resolver import KwikResolver
 
 # ---------------------------------------------------------------------------
 # desktop_cf_solver
@@ -58,7 +57,7 @@ class _SolverExited(Exception):
 
 
 def test_desktop_solver_exits_when_the_user_closes_the_window(monkeypatch):
-    """The hang: the 120×1s poll kept calling get_cookies() on a dead
+    """The hang: the 120x1s poll kept calling get_cookies() on a dead
     window and the parent's communicate() never returned."""
     import services.desktop_cf_solver as dcs
 
@@ -120,9 +119,7 @@ def test_is_challenge_complete_matches_target_cookies_case_insensitively():
             return "https://animepahe.com/"
 
     # Real Set-Cookie headers arrive with original casing.
-    assert is_challenge_complete(
-        _Window(), {"cf_clearance", "XSRF-TOKEN", "animepahe_session"}
-    )
+    assert is_challenge_complete(_Window(), {"cf_clearance", "XSRF-TOKEN", "animepahe_session"})
 
 
 def test_is_challenge_complete_succeeds_on_generic_hosts_once_cleared():
@@ -139,6 +136,7 @@ def test_is_challenge_complete_succeeds_on_generic_hosts_once_cleared():
             return "https://public.animeout.xyz/"
 
     assert is_challenge_complete(_Window(), {"cf_clearance"}) is True
+
     # Still on challenge -> False
     class _ChallengeWin:
         def evaluate_js(self, script):
@@ -149,6 +147,49 @@ def test_is_challenge_complete_succeeds_on_generic_hosts_once_cleared():
 
     assert is_challenge_complete(_ChallengeWin(), {"cf_clearance"}) is False
 
+
+def test_an_empty_title_is_never_a_completed_challenge():
+    """The regression that shipped an unusable pahe clearance: a title read
+    racing a navigation returns "" rather than a challenge word, and the old
+    negative-only check declared success while the interstitial looped."""
+    from services.desktop_cf_solver import is_challenge_complete
+
+    class _Racing:
+        def evaluate_js(self, script):
+            return ""
+
+        def get_current_url(self):
+            return "https://animepahe.pw/"
+
+    assert is_challenge_complete(_Racing(), {"cf_clearance"}) is False
+
+
+def test_site_cookies_or_a_site_title_are_positive_completion_signals():
+    """The old 1.0.9 signals, restored: the site's own cookies, or a real
+    (non-empty, non-challenge) title naming the site."""
+    from services.desktop_cf_solver import is_challenge_complete
+
+    class _NoTitleWin:
+        def evaluate_js(self, script):
+            return ""
+
+        def get_current_url(self):
+            return "https://animepahe.pw/"
+
+    # The site's own cookie is enough, even with no title.
+    assert (
+        is_challenge_complete(_NoTitleWin(), {"cf_clearance", "animepahe_session"})
+        is True
+    )
+
+    class _SiteWin:
+        def evaluate_js(self, script):
+            return "AnimePahe - Watch Anime Online"
+
+        def get_current_url(self):
+            return "https://animepahe.pw/"
+
+    assert is_challenge_complete(_SiteWin(), {"cf_clearance"}) is True
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +207,7 @@ class _FakeWebViewModule:
                 setattr(self, k, v)
 
         async def get_current_url(self):
-            raise ft.FletUnsupportedPlatformException(
-                "supported on Android, iOS and macOS only"
-            )
+            raise ft.FletUnsupportedPlatformException("supported on Android, iOS and macOS only")
 
         async def set_javascript_mode(self, mode):
             raise AssertionError("must not run on an unsupported platform")
@@ -266,7 +305,7 @@ def test_verify_uses_the_kwik_page_as_referer():
         resolver._verify("https://cdn-six.example/stream.m3u8", "https://kwik.si/e/ABC")
     )
     assert ok is True
-    url, headers = client.heads[0]
+    _url, headers = client.heads[0]
     assert headers["Referer"] == "https://kwik.si/"
 
 
@@ -511,11 +550,17 @@ def test_desktop_run_pins_the_stored_ua_into_the_window(monkeypatch):
     fake = _RunWebview()
     monkeypatch.setattr(dcs, "webview", fake)
     monkeypatch.setattr(dcs, "captured_ua", dcs.FALLBACK_UA)
+    # test_store.py sets FLET_APP_STORAGE_DATA at import; unset it so this
+    # test pins the ephemeral-profile fallback deterministically.
+    monkeypatch.delenv("FLET_APP_STORAGE_DATA", raising=False)
     dcs.run("https://animepahe.com/", "UA/stored")
     func, window, kwargs = fake.started
     assert func is dcs.check_cookies
     assert window is dcs.window
-    assert kwargs == {"user_agent": "UA/stored"}
+    assert kwargs["user_agent"] == "UA/stored"
+    # No FLET_APP_STORAGE_DATA in the test env -> ephemeral profile fallback.
+    assert kwargs["private_mode"] is True
+    assert kwargs["storage_path"] is None
     assert dcs.captured_ua == "UA/stored"
     assert fake.created[1] == "https://animepahe.com/"
 
@@ -551,9 +596,7 @@ def test_desktop_solver_refuses_a_non_chromium_renderer(monkeypatch):
     assert calls == ["unsupported-renderer (mshtml) — install the WebView2 Runtime"]
 
 
-def test_desktop_solver_emits_success_the_moment_a_solved_page_loads(
-    monkeypatch, capsys
-):
+def test_desktop_solver_emits_success_the_moment_a_solved_page_loads(monkeypatch, capsys):
     """A page that already carries the clearance (a returning user whose
     cookie survived) is judged on load, not after the first 1 s tick."""
     import services.desktop_cf_solver as dcs
