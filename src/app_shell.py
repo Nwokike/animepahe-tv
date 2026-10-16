@@ -402,6 +402,17 @@ def _unmount_player_overlay(page) -> None:
     if mount is not None and page is not None and _in_overlay(page, mount):
         page.overlay.remove(mount)
         page.update()
+    # The player is gone: the window-level stream must stop feeding it.
+    from flet import context as _fctx
+
+    try:
+        _page = _fctx.page
+    except Exception:
+        _page = None
+    ctrl = getattr(_page, "_app_controller", None) if _page else None
+    fm = getattr(ctrl, "focus_manager", None)
+    if fm is not None:
+        fm.set_key_consumer(None)
 
 
 def _use_player_overlay(state, controller) -> None:
@@ -478,6 +489,14 @@ def _use_player_overlay(state, controller) -> None:
         mount = focus_scope(player, lambda: _player_back())
 
     _active_player, _active_mount, _active_key = player, mount, key
+    # The window-level key stream is the one that receives ARROW keys
+    # (Flutter's focus traversal eats them before any KeyboardListener):
+    # register the player's handler there for the life of the mount.
+    if player is not None and hasattr(player, "handle_key"):
+        app_controller = getattr(controller, "_app_controller", None)
+        focus_manager = getattr(app_controller, "focus_manager", None)
+        if focus_manager is not None:
+            focus_manager.set_key_consumer(player.handle_key)
     page.overlay.append(mount)
     page.update()
 

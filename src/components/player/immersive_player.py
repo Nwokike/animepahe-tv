@@ -810,68 +810,78 @@ class ImmersivePlayer(ft.Stack):
         except Exception as ex:
             logger.debug("jump_percentage failed: %s", ex)
 
+    # Flutter's keyLabel varies by platform ("Arrow Left" vs "ArrowLeft",
+    # "Return" vs "Enter", "Esc" vs "Escape") — CollabShell normalizes by
+    # lowercase + de-space + alias and so do we. The old exact-string
+    # compares are why only Space ever matched.
+    _KEY_ALIASES = {"return": "enter", "esc": "escape", "spacebar": "space"}
+    _SEEK_BACK = ("arrowleft", "left", "j")
+    _SEEK_FORWARD = ("arrowright", "right", "l")
+    _VOLUME_UP = ("arrowup", "up")
+    _VOLUME_DOWN = ("arrowdown", "down")
+    _PLAY_PAUSE = ("space", "k", "mediaplaypause", "mediaplay", "mediapause")
+    _PREV = ("[", "p", "mediatrackprevious")
+    _NEXT = ("]", "n", "mediatracknext")
+
+    @classmethod
+    def _norm_key(cls, key: str) -> str:
+        return cls._KEY_ALIASES.get(
+            key.replace(" ", "").lower(), key.replace(" ", "").lower()
+        )
+
     async def handle_key(self, e) -> bool:
-        """Handle desktop and TV remote keyboard events.
+        """Handle desktop and TV keyboard events. Full parity with the
+        house player: play/pause, seek, volume, mute, fullscreen, episode
+        skips, speed, percentage jumps and the skip-intro shortcut.
 
-        Full parity with KTV Player / MPV / YouTube / VLC:
-        - Space / k / MediaPlayPause -> toggle play/pause
-        - Left / j -> seek backward 10s
-        - Right / l -> seek forward 10s
-        - Up / Down -> volume +/- 10%
-        - m -> toggle mute
-        - f -> toggle fullscreen
-        - [ / p / MediaTrackPrevious -> previous episode
-        - ] / n / MediaTrackNext -> next episode
-        - > / . -> speed up
-        - < / , -> speed down
-        - 0..9 -> jump to 0%..90%
-        - s -> skip intro/outro
+        Matching is NORMALIZED (space-less, lowercase, aliases) because
+        Flutter's key label varies by platform — the exact-string compares
+        this replaces only ever matched the space bar (owner: "you did
+        pause with space bar but you did not do seek forward").
         """
-        key = getattr(e, "key", "") or ""
-        lower = key.lower()
+        key = self._norm_key(getattr(e, "key", "") or "")
 
-        if key in (" ", "Space", "k") or lower == "k" or key in ("MediaPlayPause", "MediaPlay", "MediaPause"):
+        if key in self._PLAY_PAUSE:
             await self.toggle_play_pause()
             return True
-        elif key in ("ArrowLeft", "Left") or lower == "j":
+        if key in self._SEEK_BACK:
             await self.seek_relative(-10)
             return True
-        elif key in ("ArrowRight", "Right") or lower == "l":
+        if key in self._SEEK_FORWARD:
             await self.seek_relative(10)
             return True
-        elif key in ("ArrowUp", "Up"):
+        if key in self._VOLUME_UP:
             self.adjust_volume(10)
             return True
-        elif key in ("ArrowDown", "Down"):
+        if key in self._VOLUME_DOWN:
             self.adjust_volume(-10)
             return True
-        elif lower == "m":
+        if key == "m":
             self.toggle_mute()
             return True
-        elif lower == "f":
+        if key == "f":
             self.toggle_fullscreen()
             return True
-        elif key in ("]", "MediaTrackNext") or lower == "n":
+        if key in self._NEXT:
             if self.on_next is not None:
                 self.on_next()
                 return True
-        elif key in ("[", "MediaTrackPrevious") or lower == "p":
+        if key in self._PREV:
             if self.on_previous is not None:
                 self.on_previous()
                 return True
-        elif key in (">", "."):
+        if key in (">", "."):
             self._cycle_speed()
             return True
-        elif key in ("<", ","):
+        if key in ("<", ","):
             self._cycle_speed_reverse()
             return True
-        elif key in ("0", "1", "2", "3", "4", "5", "6", "7", "8", "9"):
+        if key.isdigit():
             await self.jump_percentage(int(key) / 10.0)
             return True
-        elif lower == "s":
-            if getattr(self, "skip_chip", None) and self.skip_chip.visible:
-                await self._on_skip_chip()
-                return True
+        if key == "s" and getattr(self, "skip_chip", None) and self.skip_chip.visible:
+            await self._on_skip_chip()
+            return True
         return False
 
     def _refresh_option_labels(self) -> None:

@@ -76,7 +76,7 @@ def test_focus_scope_schedules_the_sync_handlers_coroutine():
 
     token = _context_page.set(page)
     try:
-        scope.on_key_down(_Event())
+        scope.content.on_key_down(_Event())
     finally:
         _context_page.reset(token)
     assert page.run_tasks, "the coroutine must be scheduled"
@@ -99,7 +99,7 @@ def test_focus_scope_tolerates_no_page_context():
         key = "Go Back"
 
     # Deliberately outside any page context.
-    scope.on_key_down(_Event())  # must not raise
+    scope.content.on_key_down(_Event())  # must not raise
 
 
 # ---------------------------------------------------------------------------

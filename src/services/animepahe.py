@@ -33,27 +33,49 @@ def _safe_float(val, default: float = 0.0) -> float:
         return default
 
 
+# Artwork fan-out cap. A 30-item page used to fire every snapshot request
+# at once; i.animepahe.pw's Cloudflare front answered with
+# "too_many_data_frames"/"excessive load", 403ed a batch of them, and each
+# failure surfaced as an unhandled page error in the renderer (owner's run,
+# 2026-10-16). Four at a time keeps the CDN calm and the screen busy.
+_IMAGE_CONCURRENCY = 4
+
+
 class AnimePaheScraper:
     def __init__(self):
         self.ddos = DDoSSolver()
         self._mem_cache: dict = {}
         self._mem_ttl: dict = {}
+        self._image_gate: asyncio.Semaphore | None = None
+
+    def _image_semaphore(self) -> asyncio.Semaphore:
+        if self._image_gate is None:
+            self._image_gate = asyncio.Semaphore(_IMAGE_CONCURRENCY)
+        return self._image_gate
 
     async def _get_image_base64(self, url: str) -> str:
+        """Snapshot -> inline data URI (the site's images need the session
+        cookies the WebView solve produced, so they ride the ddos client).
+
+        A failure returns "" rather than the raw URL on purpose: the raw
+        URL would 403 in the renderer too and raise an unhandled page
+        error per image; an empty src paints the card's own fallback.
+        """
         if not url:
             return ""
-        if "animepahe" in url:
+        if "animepahe" not in url:
+            return url
+        async with self._image_semaphore():
             try:
                 resp = await self.ddos.get(url, headers={"Accept": "image/*"})
                 if resp.status_code == 200:
                     encoded = base64.b64encode(resp.content).decode()
                     ct = resp.headers.get("content-type", "image/jpeg")
                     return f"data:{ct};base64,{encoded}"
-                else:
-                    logger.warning("Failed to proxy image %s: status=%d", url, resp.status_code)
+                logger.debug("image proxy %s: status=%d", url, resp.status_code)
             except Exception as ex:
-                logger.error("Error proxying image %s: %s", url, ex)
-        return url
+                logger.debug("image proxy %s failed: %s", url, ex)
+        return ""
 
     def _get_mem(self, key: str, ttl: int = 300):
         if key in self._mem_cache and key in self._mem_ttl:

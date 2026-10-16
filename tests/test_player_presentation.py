@@ -155,12 +155,20 @@ async def test_box_fit_maps_every_option_and_rejects_junk(tmp_path):
 async def test_set_fit_persists_and_unknown_names_are_ignored(tmp_path):
     store = JsonStore(filename=str(tmp_path / "fits-save.json"))
     player = _player(store=store)
+    async def _wait_for(value):
+        # The save rides a spawned task: poll for it instead of guessing a
+        # sleep (a fixed 10 ms made the suite flaky under load).
+        for _ in range(100):
+            if store.get_setting("video_fit") == value:
+                return True
+            await asyncio.sleep(0.02)
+        return store.get_setting("video_fit") == value
+
     player._set_fit("cover")
-    await asyncio.sleep(0.01)  # let the spawned save land
-    assert store.get_setting("video_fit") == "cover"
+    assert await _wait_for("cover")
 
     player._set_fit("melt-the-screen")
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
     assert store.get_setting("video_fit") == "cover"  # unchanged
 
 

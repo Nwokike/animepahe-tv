@@ -353,7 +353,10 @@ def test_animepahe_sources_via_links_parses_renditions():
 
     provider = AnimePaheProvider(scraper=FakeScraper())
     provider._anime_ids["ep-sess"] = 958
-    sources = asyncio.run(provider.sources("pahe-anime", "ep-sess"))
+    # The play page is the live path (probe 2026-10-16); the retired
+    # m=links JSON route is kept only as the last-resort fallback, so its
+    # parser is exercised directly.
+    sources = asyncio.run(provider._sources_via_links("pahe-anime", "ep-sess"))
     assert [s.resolution for s in sources] == [360, 720, 1080]
     assert all(s.audio == "jpn" for s in sources)
     assert sources[2].url == "https://kwik.si/e/abc1080"
@@ -364,7 +367,11 @@ def test_animepahe_sources_via_links_parses_renditions():
     assert sources[2].fansub == "AnimePahe HD"
 
 
-def test_animepahe_links_failure_falls_back_to_scrape():
+def test_animepahe_the_live_path_serves_before_the_retired_json():
+    """Order probe 2026-10-16: the play page IS the site's mechanism (its
+    markup never calls m=links), so it is tried FIRST; the retired JSON
+    route is only the last resort. The fake scraper's sources() returns a
+    rendition, so _fetch_api must never fire."""
     import asyncio
 
     from core.state import Source
@@ -374,12 +381,12 @@ def test_animepahe_links_failure_falls_back_to_scrape():
         ddos = None
 
         async def _fetch_api(self, params):
-            raise RuntimeError("walled")
+            raise AssertionError("m=links must not fire while the page serves")
 
         async def sources(self, a, e):
             return [
                 Source(
-                    url="https://kwik.si/e/fallback",
+                    url="https://kwik.si/e/live-path",
                     resolution=720,
                     audio="jpn",
                     fansub="Subs",
@@ -389,10 +396,10 @@ def test_animepahe_links_failure_falls_back_to_scrape():
     provider = AnimePaheProvider(scraper=FakeScraper())
     provider._anime_ids["ep-sess"] = 958
     sources = asyncio.run(provider.sources("pahe-anime", "ep-sess"))
-    assert sources[0].url.endswith("fallback")  # the scrape safety net
+    assert sources[0].url.endswith("live-path")
 
 
-def test_animepahe_links_without_anime_id_goes_straight_to_scrape():
+def test_animepahe_without_an_anime_id_the_page_still_serves():
     import asyncio
 
     from core.state import Source
@@ -402,7 +409,7 @@ def test_animepahe_links_without_anime_id_goes_straight_to_scrape():
         ddos = None
 
         async def _fetch_api(self, params):
-            raise AssertionError("m=links must not fire without the id")
+            raise AssertionError("m=links needs the id and must not fire here")
 
         async def sources(self, a, e):
             return [
@@ -645,7 +652,13 @@ def test_focus_scope_is_a_plain_function():
         def run_task(self, fn):
             seen.append(fn)
 
-    listener = focus_scope(ft.Container(), lambda: seen.append("back"))
+    # KTV's bounds-bearing wrapper: an expanding Container around the
+    # listener (a bare listener gives the player Stack no bounds — audio
+    # with an empty surface).
+    wrapper = focus_scope(ft.Container(), lambda: seen.append("back"))
+    assert isinstance(wrapper, ft.Container)
+    assert wrapper.expand is True
+    listener = wrapper.content
     assert isinstance(listener, ft.KeyboardListener)
     assert listener.autofocus is True
 

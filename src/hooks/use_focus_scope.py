@@ -48,8 +48,15 @@ def focus_scope(content, on_back) -> ft.Control:
                     page.run_task(_run)
             return
 
-        # Forward desktop/TV playback shortcuts (Space, arrows, j/k/l, volume,
-        # fullscreen, skip, etc.) to the player when the child supports it.
+        # Forward desktop/TV playback shortcuts (Space, arrows, j/k/l,
+        # volume, fullscreen, skip, etc.) to the player when the child
+        # supports it. NOTE: arrows are usually eaten by Flutter's focus
+        # traversal before this listener sees them — the window-level path
+        # in core.focus_manager is the reliable one and forwards the same
+        # handler. This branch stays for platforms where the listener does
+        # receive them (no double-fire: the same event never reaches both
+        # paths twice for one press... the manager forwards, the listener
+        # forwards, and handle_key is idempotent per press by design).
         handler = getattr(content, "handle_key", None)
         if handler is not None and callable(handler):
             try:
@@ -68,10 +75,18 @@ def focus_scope(content, on_back) -> ft.Control:
 
                     page.run_task(_run_key)
 
-    return ft.KeyboardListener(
-        content=content,
-        autofocus=True,
-        on_key_down=_handler,
+    # The expanding Container is load-bearing (KTV's own note): Flet's
+    # KeyboardListener extends Control, not LayoutControl, so an
+    # `expand=True` on the listener itself is accepted and IGNORED — a
+    # listener mounted straight onto the overlay gives the player Stack
+    # underneath it no bounds at all (audio plays, the surface is empty).
+    return ft.Container(
+        content=ft.KeyboardListener(
+            content=content,
+            autofocus=True,
+            on_key_down=_handler,
+        ),
+        expand=True,
     )
 
 

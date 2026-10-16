@@ -173,16 +173,22 @@ class AnimePaheProvider:
         return results
 
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
-        # m=links first (one cheap JSON call, richer payload); the
-        # play-page scrape stays as the fallback — never removed.
-        try:
-            results = await self._sources_via_links(anime_session, episode_session)
-        except Exception as ex:
-            logger.warning("m=links failed (%s) — play-page fallback", ex)
-            results = []
+        # The play page IS the site's own current mechanism (probe
+        # 2026-10-16: the page never references m=links and serves its
+        # kwik URLs straight from the resolutionMenu's data-src buttons;
+        # the old m=links JSON endpoint answers "not enough arguments" for
+        # every parameter shape, so the first attempt only cost a request
+        # and a misleading warning on every play).
+        results = await self.scraper.sources(anime_session, episode_session)
         if results:
             return results
-        return await self.scraper.sources(anime_session, episode_session)
+        # Last resort, kept deliberately: if the markup ever changes, the
+        # retired JSON route is one flag away rather than a rewrite.
+        try:
+            return await self._sources_via_links(anime_session, episode_session)
+        except Exception as ex:
+            logger.debug("m=links fallback failed: %s", ex)
+            return []
 
     async def anime(self, session: str) -> Anime | None:
         """The /anime/{session} details page — synopsis, genres, studios,

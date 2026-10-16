@@ -28,6 +28,13 @@ class FocusManager:
     def __init__(self, page: ft.Page):
         self.page = page
         self._back_handler = None
+        # An optional extra consumer for the window-level stream — the
+        # player installs its key handler here. A KeyboardListener alone
+        # is not enough for arrows: Flutter's focus system consumes them
+        # for traversal before the listener ever sees the event (owner's
+        # report: Space acted, seek/volume did not). page.on_keyboard_event
+        # is the window-level handler and sees every physical key.
+        self._key_consumer = None
         self._previous = getattr(page, "on_keyboard_event", None)
         # Keep the installed handler's identity: bound methods are fresh
         # objects on every attribute access, so an `is` check against a
@@ -37,6 +44,10 @@ class FocusManager:
 
     def set_back_handler(self, handler: callable):
         self._back_handler = handler
+
+    def set_key_consumer(self, handler: callable | None):
+        """Install (or clear) the player's window-level key handler."""
+        self._key_consumer = handler
 
     def _handle_keyboard(self, e: ft.KeyboardEvent):
         # The previously installed handler still gets its event — and if
@@ -56,6 +67,12 @@ class FocusManager:
             # Never break key dispatch on a handler failure.
             with contextlib.suppress(Exception):
                 self._back_handler()
+            return
+        # Everything else goes to the player when it is open (it ignores
+        # keys it has no use for). Back never double-fires: handled above.
+        if self._key_consumer is not None and not self._is_text_editing(e):
+            with contextlib.suppress(Exception):
+                self._key_consumer(e)
 
     @staticmethod
     def _is_text_editing(e: ft.KeyboardEvent) -> bool:
