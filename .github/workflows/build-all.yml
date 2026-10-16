@@ -128,7 +128,13 @@ jobs:
 
   # ─── 2. Android APK (split per ABI) ───────────────────────
   build-apk-split:
-    needs: [prepare-release, build-apk]
+    # PARALLEL with build-apk (the house pattern in Sherlock/DDGS: every
+    # build job needs only prepare-release). It used to `needs: build-apk`
+    # — the universal APK had to FINISH before the split build started,
+    # doubling the wall-clock wait for no dependency at all (the owner's
+    # report, 2026-10-16). The two write different file sets into the same
+    # release, so they cannot collide.
+    needs: [prepare-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
