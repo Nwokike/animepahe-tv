@@ -203,6 +203,11 @@ def DownloadsScreen() -> ft.Control:
         page = None
 
     downloads = state.downloads or {}
+    # Which series cards are open. The first is expanded by default (the
+    # newest group — the one the user most likely came to watch); every
+    # other series collapses to its header until tapped.
+    expanded, set_expanded = ft.use_state(None)
+
     if not downloads:
         return EmptyState(
             "Downloads appear here",
@@ -225,64 +230,110 @@ def DownloadsScreen() -> ft.Control:
         group["rows"].append((session, row))
 
     sections = []
+    # Most-recently-updated series first: the row's updated_at when the
+    # store has one, the dict order otherwise (the store is newest-first).
+    def _recency(item):
+        first_row = item[1]["rows"][0][1]
+        return float(first_row.get("updated_at") or first_row.get("ts") or 0.0)
+
+    default_open = max(groups.items(), key=_recency)[0] if groups else None
+
     for session_key, group in groups.items():
+        is_open = (expanded if expanded is not None else default_open) == session_key
         rows = sorted(group["rows"], key=lambda r: r[1].get("episode_num", 0), reverse=True)
-        total_size = sum(
-            (r[1].get("size_bytes") or 0) for r in rows if r[1].get("state") == "complete"
+        complete = [r for r in rows if r[1].get("state") == "complete"]
+        total_size = sum((r[1].get("size_bytes") or 0) for r in complete)
+
+        # Live aggregate for the whole series: "3/11 · 42%" while jobs are
+        # running (the per-item bars below say which one is where).
+        progress_map = state.download_progress or {}
+        live = [progress_map.get(s) for s, _ in rows]
+        running = [p_ for p_ in live if p_ and p_.get("state") in ("downloading", "queued")]
+        if running:
+            done_items = sum(1 for p_ in live if p_ and p_.get("state") == "complete")
+            done_items += sum(1 for _, r in rows if r.get("state") == "complete")
+            percent_sum = sum(
+                float(p_.get("percent") or 0.0)
+                for p_ in running
+                if isinstance(p_.get("percent"), (int, float))
+            )
+            overall = percent_sum / len(rows) if rows else 0.0
+            summary = f"{done_items}/{len(rows)} done · {overall:.0f}%"
+        else:
+            summary = f"{len(rows)} episode{'s' if len(rows) != 1 else ''} · {_fmt_size(total_size)}"
+
+        chevron = ft.Icon(
+            ft.Icons.EXPAND_LESS_ROUNDED if is_open else ft.Icons.EXPAND_MORE_ROUNDED,
+            size=20,
+            color=ft.Colors.ON_SURFACE_VARIANT,
         )
-        header = ft.Row(
-            [
-                ft.Container(
-                    content=ft.Image(
-                        src=image_url(group["poster"] or "", owner_of(session_key)),
-                        fit=ft.BoxFit.COVER,
-                        expand=True,
-                    )
-                    if group["poster"]
-                    else ft.Icon(
-                        ft.Icons.MOVIE_ROUNDED,
-                        size=20,
-                        color=ft.Colors.ON_SURFACE_VARIANT,
-                    ),
-                    width=40,
-                    height=40,
-                    border_radius=6,
-                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                ),
-                ft.Column(
-                    [
-                        ft.Text(
-                            group["title"],
-                            size=15,
-                            weight=ft.FontWeight.W_700,
-                            color=ft.Colors.ON_SURFACE,
-                            max_lines=1,
-                            overflow=ft.TextOverflow.ELLIPSIS,
-                        ),
-                        ft.Text(
-                            f"{len(rows)} episode{'s' if len(rows) != 1 else ''} · {_fmt_size(total_size)}",
-                            size=11,
-                            color=ft.Colors.ON_SURFACE_VARIANT,
-                        ),
-                    ],
-                    spacing=2,
+        header_rows: list[ft.Control] = [
+            ft.Container(
+                content=ft.Image(
+                    src=image_url(group["poster"] or "", owner_of(session_key)),
+                    fit=ft.BoxFit.COVER,
                     expand=True,
+                )
+                if group["poster"]
+                else ft.Icon(
+                    ft.Icons.MOVIE_ROUNDED,
+                    size=20,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
                 ),
-            ],
-            spacing=12,
+                width=40,
+                height=40,
+                border_radius=6,
+                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            ),
+            ft.Column(
+                [
+                    ft.Text(
+                        group["title"],
+                        size=15,
+                        weight=ft.FontWeight.W_700,
+                        color=ft.Colors.ON_SURFACE,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    ft.Text(
+                        summary,
+                        size=11,
+                        color=AppColors.PRIMARY if running else ft.Colors.ON_SURFACE_VARIANT,
+                    ),
+                ],
+                spacing=2,
+                expand=True,
+            ),
+            chevron,
+        ]
+
+        def _toggle(e=None, key=session_key, open_now=is_open):
+            set_expanded(None if open_now else key)
+
+        header = ft.Container(
+            content=ft.Row(header_rows, spacing=12),
+            padding=ft.Padding.symmetric(horizontal=4, vertical=6),
+            border_radius=8,
+            ink=True,
+            tooltip="Collapse" if is_open else "Expand",
+            on_click=_toggle,
         )
+
         episode_rows = [
             _episode_row(
                 row,
                 session,
                 controller,
-                (state.download_progress or {}).get(session),
+                progress_map.get(session),
             )
             for session, row in rows
         ]
+        # Only the expanded series renders its rows: a 3-series library
+        # stays scannable, and a long series costs nothing until opened.
+        body = [header, *(episode_rows if is_open else [])]
         sections.append(
             ft.Container(
-                content=ft.Column([header, *episode_rows], spacing=4),
+                content=ft.Column(body, spacing=4),
                 padding=ft.Padding.all(12),
                 border_radius=12,
                 bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),

@@ -40,6 +40,17 @@ PROBE_HEADERS = {
 # so a transient failure never sticks across launches — but a dead host is
 # not re-dialed repeatedly within one session either.
 _mem: dict[str, str | None] = {}
+# Real w/h per URL, in-session. The shape labels are coarse (anything >= 1
+# is "landscape"); the ratio lets a card decide whether a crop is a hairline
+# (fill the cell) or a butchery (show the whole image over a frosted fill).
+_aspect: dict[str, float] = {}
+
+
+def cached_aspect(src: str) -> float | None:
+    """width/height for a URL probed this session, else None."""
+    if not src:
+        return None
+    return _aspect.get(CACHE_PREFIX + src)
 
 
 def cached_shape(src: str) -> str | None:
@@ -154,6 +165,9 @@ async def _probe_one(client, url: str, referer: str | None) -> str | None:
                 buf += chunk
                 dims = sniff_dimensions(bytes(buf))
                 if dims:
+                    width, height = dims
+                    if height:
+                        _aspect[CACHE_PREFIX + url] = width / height
                     # Parsed: a square abstains (None) and reading more cannot help.
                     return shape_of(*dims)
                 if len(buf) >= HEAD_LIMIT:

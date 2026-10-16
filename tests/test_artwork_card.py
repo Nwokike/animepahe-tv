@@ -111,3 +111,26 @@ def test_card_frame_carries_aspect_focus_and_click():
     )
     assert frame.content.aspect_ratio == 1.67
     assert frame.on_focus is not None and frame.on_blur is not None
+
+
+def test_a_close_ratio_fills_the_cell_instead_of_frosting():
+    """Adaptive fill (owner's "the image left some space inside the box"):
+    with the probe's REAL ratio known, a near-matching crop is a hairline —
+    COVER fills the cell. Only a genuinely different shape (a portrait
+    poster in a landscape cell) falls to the frosted fill."""
+    from components.artwork_card import FILL_TOLERANCE, card_media
+
+    url = "https://cdn.example/known-ratio.jpg"
+    # Seed the session memo exactly as a probe would: 1.78 landscape art.
+    artwork_probe._aspect[artwork_probe.CACHE_PREFIX + url] = 1.78
+    try:
+        # In a landscape cell (1.67): 6% off — fills.
+        fill = card_media(url, "landscape", title="X")
+        assert isinstance(fill, ft.Image) and fill.fit == ft.BoxFit.COVER
+        # In a portrait cell (0.67): far off — frosted (a Stack).
+        frosted = card_media(url, "portrait", title="X")
+        assert isinstance(frosted, ft.Stack)
+    finally:
+        artwork_probe._aspect.pop(artwork_probe.CACHE_PREFIX + url, None)
+
+    assert 0 < FILL_TOLERANCE < 0.5

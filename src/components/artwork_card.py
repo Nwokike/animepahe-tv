@@ -25,7 +25,7 @@ from components.focus_styles import (
 from core.artwork import LANDSCAPE, PORTRAIT
 from core.theme import AppColors
 from core.tokens import CARD_ASPECT_LANDSCAPE, CARD_ASPECT_PORTRAIT
-from services.artwork_probe import cached_shape
+from services.artwork_probe import cached_aspect, cached_shape
 from services.hls_proxy import image_url
 
 __all__ = [
@@ -38,6 +38,10 @@ __all__ = [
 
 FROSTED_BLUR = 18
 FROSTED_SCRIM_OPACITY = 0.45
+# How much ratio mismatch still counts as "the same shape" (25%: a 16:9
+# image in a 3:2 cell crops a hairline; a 2:3 poster in a 16:9 cell does
+# not, and gets the frosted fill instead of being cut in half).
+FILL_TOLERANCE = 0.25
 
 # The no-art panel's proportions, in one place so every surface matches.
 ART_TILE = 46
@@ -212,7 +216,21 @@ def card_media(
     shape = cached_shape(src)
     display = image_url(src, provider)
     error = error_content or fallback
-    if shape not in (LANDSCAPE, PORTRAIT) or shape == mode:
+    # Adaptive fill: when the probe knows the real ratio, a crop within
+    # FILL_TOLERANCE of the cell is just a hairline — COVER fills the cell
+    # (no empty space, the owner's ask). Only a genuinely different shape
+    # (a portrait poster in a landscape cell, or vice versa) gets the
+    # frosted fill that shows the whole image. A square (shape None but a
+    # ratio known) rides the same test.
+    aspect = cached_aspect(src)
+    cell = aspect_for(mode)
+    if aspect is not None:
+        # The ratio is the authority when it is known.
+        fills = abs(aspect - cell) / cell <= FILL_TOLERANCE
+    else:
+        # Coarse fallback: an unknown shape keeps the house cover-crop.
+        fills = shape not in (LANDSCAPE, PORTRAIT) or shape == mode
+    if fills:
         return ft.Image(
             src=display,
             fit=ft.BoxFit.COVER,
