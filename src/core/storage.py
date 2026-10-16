@@ -15,6 +15,7 @@ app namespace, so both ways of running share one dev store — resolved from
 the repo root, never from the current directory.
 """
 
+import math
 import os
 
 APP_NAMESPACE = "animepahe"
@@ -95,8 +96,17 @@ def dir_size(path: str) -> int:
 
 
 def format_size(num_bytes: int) -> str:
-    """A compact human size: "0 B", "512 KB", "1.4 MB"."""
-    size = float(num_bytes)
+    """A compact human size: "0 B", "512 KB", "1.4 MB".
+
+    Garbage and negatives clamp to "0 B" (the ffmpeg app's format_bytes
+    discipline) — a size row must never render "nan" or "-3 MB".
+    """
+    try:
+        size = float(num_bytes)
+    except (TypeError, ValueError):
+        return "0 B"
+    if math.isnan(size) or math.isinf(size) or size < 0:
+        return "0 B"
     for unit in ("B", "KB", "MB", "GB"):
         if size < 1024 or unit == "GB":
             if unit == "B":

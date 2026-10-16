@@ -1215,14 +1215,23 @@ class AppController:
         verdicts, the home-feed snapshot) and the poster mirror. Durable
         data — history, resume positions, favorites, downloads, the CF
         clearance — is untouched by design."""
-        from core.storage import app_cache_dir
+        from core.storage import app_cache_dir, dir_size, format_size
 
         try:
+            before = await asyncio.to_thread(dir_size, app_cache_dir())
             await self.cache.clear()
             posters = app_cache_dir("posters")
             if os.path.isdir(posters):
                 await asyncio.to_thread(_remove_tree, posters)
-            show_snack(self.page, "Cache cleared", bgcolor=AppColors.SUCCESS)
+            after = await asyncio.to_thread(dir_size, app_cache_dir())
+            freed = max(0, before - after)
+            # Report what was actually freed (ffmpeg's shape): "Cleared"
+            # alone tells the user nothing about whether it mattered.
+            show_snack(
+                self.page,
+                f"Removed {format_size(freed)} of regenerable cache",
+                bgcolor=AppColors.SUCCESS,
+            )
         except Exception as ex:
             logger.warning("clear_cache failed: %s", ex)
             self._show_error_snackbar("Couldn't clear the cache.")

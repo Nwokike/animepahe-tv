@@ -21,15 +21,29 @@ from state.controller_ctx import ControllerMethodsCtx
 TERMINAL_DISPLAY_LINES = 500
 
 
-def _section_header(text: str) -> ft.Control:
-    return ft.Container(
-        padding=ft.Padding.only(left=16, right=16, top=12, bottom=4),
-        content=ft.Text(
+def _section_header(text: str, subtitle: str = "") -> ft.Control:
+    """The ffmpeg-app header shape: the label, then a quiet one-line
+    subtitle that says what the section is FOR. A bare label makes the
+    user read the rows to guess the section's job."""
+    rows: list[ft.Control] = [
+        ft.Text(
             text,
             size=12,
             weight=ft.FontWeight.W_700,
             color=AppColors.PRIMARY,
-        ),
+        )
+    ]
+    if subtitle:
+        rows.append(
+            ft.Text(
+                subtitle,
+                size=10,
+                color=ft.Colors.with_opacity(0.55, ft.Colors.ON_SURFACE),
+            )
+        )
+    return ft.Container(
+        padding=ft.Padding.only(left=16, right=16, top=12, bottom=4),
+        content=ft.Column(rows, spacing=1, tight=True),
     )
 
 
@@ -406,24 +420,24 @@ def SettingsScreen() -> ft.Control:
         on_click=lambda e: controller.test_all_sources(),
     )
     source_section = [
-        _section_header("CONTENT SOURCE"),
+        _section_header("CONTENT SOURCE", "Which backend is the app"),
         _settings_card([backend_row]),
         _settings_card([*status_rows, test_button]) if status_rows else ft.Container(height=0),
     ]
 
     return ft.Column(
         controls=[
-            _section_header("APPEARANCE"),
+            _section_header("APPEARANCE", "Theme preference"),
             _settings_card([theme_picker]),
             *source_section,
-            _section_header("PLAYBACK"),
+            _section_header("PLAYBACK", "How episodes play"),
             _settings_card([external_player_row]),
-            _section_header("DIAGNOSTICS"),
+            _section_header("DIAGNOSTICS", "Logs and engine status"),
             _settings_card([terminal_row]),
             build_banner_ad(page, inline=True),
-            _section_header("STORAGE"),
+            _section_header("STORAGE", "Regenerable data only"),
             _settings_card([cache_row]),
-            _section_header("ABOUT"),
+            _section_header("ABOUT", "Application and credits"),
             _settings_card(
                 [
                     _setting_row(
