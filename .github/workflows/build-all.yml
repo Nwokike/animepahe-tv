@@ -21,7 +21,7 @@ permissions:
 env:
   PYTHONUTF8: "1"
   FLET_CLI_NO_RICH_OUTPUT: "1"
-  UV_PYTHON: "3.13"
+  UV_PYTHON: "3.14"
   # Tag pushes carry the version (v1.2.3 -> 1.2.3, build number = UTC date
   # stamp, monotonic without a counter to bump by hand); manual dispatches
   # keep their explicit inputs.
