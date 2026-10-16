@@ -24,6 +24,9 @@ captured_ua = FALLBACK_UA
 page_loaded_once = False
 window = None
 _done = False
+# The proof navigation itself fires `loaded` again; this guard keeps the
+# re-entrant judge from recursing into another proof.
+_verifying = False
 
 # A page whose title matches these is plainly a web server's own page
 # (the owner saw pywebview sit on an nginx page for the full wait) — not
@@ -155,6 +158,46 @@ def _split_cookies(cookies) -> tuple[set[str], list[str]]:
     return cookie_keys, cookie_strs
 
 
+# The API path the parent's own fetches use (the pahe provider's helper).
+# The clearance is proven by a JSON answer from THIS path, never by the
+# cookie's mere presence: a stale cf_clearance in the persistent profile
+# passes every local check and still 403s, and shipping it looped the app
+# (live probe, 2026-10-16 — 'solve succeeded' in seconds, then the same
+# 403).
+_PROOF_PATH = "/api?m=airing&page=1"
+
+# Cloudflare's hard block (as opposed to a solvable challenge): retrying
+# only deepens the flag. The owner hit exactly this — repeated automated
+# attempts from one address earn 'Sorry, you have been blocked'.
+_BLOCKED_TITLE_MARKERS = ("attention required", "sorry, you have been blocked")
+
+
+def clearance_works(base_url: str, cookie_header: str, ua: str) -> bool:
+    """Ask the API with the captured clearance: a JSON body is the proof.
+
+    Uses the WebView's own network stack (a top-level navigation inside
+    the window), so the judgement runs under the same fingerprint that
+    solved the challenge. Returns False on any non-JSON answer — the
+    challenge loop keeps running and the stale profile gets discarded by
+    the caller's next attempt instead of being persisted.
+    """
+    url = f"{base_url.rstrip('/')}{_PROOF_PATH}"
+    try:
+        window.load_url(url)
+        time.sleep(4.0)
+        body = str(window.evaluate_js("document.body ? document.body.innerText : ''") or "")
+    except Exception as ex:
+        print(f"[DEBUG] Proof request failed: {ex}", file=sys.stderr)
+        return False
+    body = body.strip()
+    ok = body.lstrip()[:1] == "{"
+    print(
+        f"[DEBUG] Proof request -> {'JSON' if ok else 'NOT JSON'}: {body[:80]!r}",
+        file=sys.stderr,
+    )
+    return ok
+
+
 def _emit_success(cookie_strs: list[str], window) -> None:
     """Print the clearance JSON once and close the window."""
     global _done, captured_ua
@@ -188,6 +231,15 @@ def _check_now(window) -> None:
     keys, pairs = _split_cookies(cookies)
     if is_challenge_complete(window, keys):
         _emit_success(pairs, window)
+
+
+def _hard_blocked(window) -> bool:
+    """Is this Cloudflare's hard block (not a solvable challenge)?"""
+    try:
+        title = str(window.evaluate_js("document.title") or "").lower()
+    except Exception:
+        return False
+    return any(marker in title for marker in _BLOCKED_TITLE_MARKERS)
 
 
 def check_cookies(window):
