@@ -28,9 +28,10 @@ PAYLOAD = b"\x47" + bytes(range(1, 256)) * 4000  # ~1 MB of fake TS
 class _FakeResponse:
     status_code = 200
 
-    def __init__(self, body: bytes, chunk: int = 4096):
+    def __init__(self, body: bytes, chunk: int = 4096, headers=None):
         self._body = body
         self._chunk = chunk
+        self.headers = dict(headers or {})
 
     async def aiter_bytes(self):
         for i in range(0, len(self._body), self._chunk):

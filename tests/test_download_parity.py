@@ -153,7 +153,7 @@ def test_direct_download_resumes_with_range(tmp_path):
     async def run():
         seen = {"bytes": 0}
 
-        def on_progress(n):  # chunk-level, one arg
+        def on_progress(n, _total=0):  # chunk-level: (bytes, total)
             seen["bytes"] += n
 
         ok = await mgr._download_file(

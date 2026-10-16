@@ -15,7 +15,7 @@ later refactor cannot silently undo one:
 - cache: an expired get() persists the eviction (survives a reload)
 - hls_proxy: the master cache key includes headers
 - downloads: _calculate_dir_size sums files, tolerates a missing dir
-- ads: demo-id seam defaults, runtime consent setters land in the
+- ads: the shipped production unit ids, runtime consent setters land in the
   service kwargs, interstitial interval guard skips a second show
 - banner_ad: seam id + inline max_height + observability handlers
 - home_screen: the Continue Watching shelf filters malformed rows
@@ -349,14 +349,18 @@ def test_calculate_dir_size():
 # ---------------------------------------------------------------------------
 
 
-def test_ad_unit_seam_defaults_to_demo_ids():
+def test_ad_unit_seam_ships_the_production_ids():
+    """The owner's app 20208795 units (2026-10-16). No demo id may ship,
+    and every format the app shows must resolve to its own unit."""
     from services import ads
 
-    assert ads.AD_UNITS["banner"] == "demo-banner-yandex"
-    assert ads.AD_UNITS["interstitial"] == "demo-interstitial-yandex"
-    assert ads.AD_UNITS["rewarded"] == "demo-rewarded-yandex"
-    assert ads.AD_UNITS["app_open"] == "demo-appopenad-yandex"
-    assert ads.AD_INTERSTITIAL_UNIT_ID == "demo-interstitial-yandex"
+    assert ads.AD_UNITS["banner"] == "R-M-20208795-1"
+    assert ads.AD_UNITS["interstitial"] == "R-M-20208795-3"
+    assert ads.AD_UNITS["rewarded"] == "R-M-20208795-4"
+    assert ads.AD_UNITS["app_open"] == "R-M-20208795-5"
+    assert ads.AD_INTERSTITIAL_UNIT_ID == "R-M-20208795-3"
+    # No shipped default may be a demo id.
+    assert not any(str(v).startswith("demo-") for v in ads.AD_UNITS.values())
 
 
 def test_consent_setters_land_in_the_service(monkeypatch):

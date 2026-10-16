@@ -118,12 +118,13 @@ def test_an_unknown_length_is_indeterminate_not_zero():
     bar = _bar(row)
     assert bar is not None
     assert bar.value is None  # indeterminate
-    assert any("Downloading" in text for text in _texts(row))
+    # The honest pre-first-byte word, not a spinner pretending progress.
+    assert any("Starting" in text for text in _texts(row))
 
 
 def test_a_queued_job_waits_and_can_still_be_cancelled():
     _controller, row = _row({"state": "queued", "done": 0, "total": 0})
-    assert any("Waiting" in text for text in _texts(row))
+    assert any("Queued" in text for text in _texts(row))
     assert sorted(b.tooltip for b in _buttons(row)) == ["Cancel", "Pause"]
 
 

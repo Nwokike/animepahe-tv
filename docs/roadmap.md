@@ -16,8 +16,8 @@ ability only one source has appears only when that source is selected.
 ("start afresh"), then a plan-mode presentation. Every step carries its own
 regression tests; commits per step; the full suite stays green at every
 commit (462 passing, warnings-as-errors, F-clean ruff gate). No new
-dependencies without a study. Ads keep `demo-*-yandex` unit ids until the
-owner swaps production ids.
+dependencies without a study. Ads ship the owner's production unit ids
+(app 20208795, 2026-10-16) — no demo id anywhere.
 
 **History.** Phases before this list — the 0.85.3-era multi-source plan, the
 audit passes (7.5/7.6), the YouTube-style downloads release — live in git
@@ -146,7 +146,6 @@ lives at the end of docs/testing-findings.md.
   paths are login-only).
 - **Rewarded early access** — out; needs a free-line/paywall rule the app
   does not have.
-- **Production ad unit ids** — the owner's swap (four `R-M-XXXXXX-Y` ids).
 - **The owner's later major changes** — one provider leaves; one becomes the
   backbone for Discover; the rest hardened perfectly. Planned after the
   phases above, by the owner's direction.

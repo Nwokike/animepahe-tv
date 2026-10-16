@@ -810,8 +810,33 @@ def _build_series_download_dialog(episodes, controller, anime_session, downloads
     # Already-complete episodes are excluded from the default range.
     done = {s for s, r in (downloads or {}).items() if r.get("state") == "complete"}
 
+    # The range fields SWALLOW the first Escape (it ends the edit and
+    # restores the value) instead of the dialog closing mid-keystroke —
+    # the owner's report: typing "5" to replace "15" looked like the
+    # modal simply vanishing.
+    from core.focus_manager import FieldFocusTracker
+
+    field_focus = FieldFocusTracker()
+
     from_ctl = ft.TextField(value=str(lo), width=70, keyboard_type=ft.KeyboardType.NUMBER)
     to_ctl = ft.TextField(value=str(hi), width=70, keyboard_type=ft.KeyboardType.NUMBER)
+
+    def _restore_defaults():
+        from_ctl.value = str(lo)
+        to_ctl.value = str(hi)
+        from_ctl.error = None
+        to_ctl.error = None
+        for ctl in (from_ctl, to_ctl):
+            with contextlib.suppress(Exception):
+                ctl.update()
+
+    field_focus.attach(from_ctl, on_cancel=_restore_defaults)
+    field_focus.attach(to_ctl, on_cancel=_restore_defaults)
+    app_controller = getattr(controller, "_app_controller", None)
+    if app_controller is not None:
+        focus_manager = getattr(app_controller, "focus_manager", None)
+        if focus_manager is not None:
+            focus_manager.field_focus = field_focus
 
     def _range():
         def _num(field, fallback):

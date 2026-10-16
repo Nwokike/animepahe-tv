@@ -4,9 +4,8 @@ import flet as ft
 
 _BACK_KEYS = ("Escape", "Go Back", "Browser Back", "Backspace", "Back", "BrowserBack")
 
-# Key names that mean "erase a character" when a text field has focus —
-# they must not also mean "navigate away" (the search fields type them
-# hundreds of times a session).
+# Keys the FIELD consumes while it holds focus: Backspace erases a
+# character, Escape cancels the edit. Neither may navigate away.
 _TEXT_INPUT_TYPES = tuple(
     t
     for t in (
@@ -16,6 +15,45 @@ _TEXT_INPUT_TYPES = tuple(
     )
     if t is not None
 )
+
+
+class FieldFocusTracker:
+    """Is a text field being edited right now?
+
+    The window-level keyboard event cannot always say (`e.control` is the
+    reactive stream's idea of the focused control, and it is missing on
+    some platforms) — so the fields THEMSELVES report focus. Dialog range
+    inputs install this with `attach(field)`: while the field is focused,
+    Escape/Restore cancels the edit (via `on_cancel`) instead of closing
+    the dialog; a second Escape — focus already released — closes it.
+    """
+
+    def __init__(self):
+        self.active = False
+        self._cancel = None
+
+    def attach(self, field: ft.TextField, on_cancel=None) -> ft.TextField:
+        def _focus(_e):
+            self.active = True
+
+        def _blur(_e):
+            self.active = False
+
+        field.on_focus = _focus
+        field.on_blur = _blur
+        self._cancel = on_cancel
+        return field
+
+    def handle_back(self) -> bool:
+        """True when the key was consumed by the focused field."""
+        if not self.active:
+            return False
+        self.active = False
+        if self._cancel is not None:
+            with contextlib.suppress(Exception):
+                self._cancel()
+        # Drop the control's own focus so the NEXT Back reaches the dialog.
+        return True
 
 
 class FocusManager:
@@ -35,6 +73,8 @@ class FocusManager:
         # report: Space acted, seek/volume did not). page.on_keyboard_event
         # is the window-level handler and sees every physical key.
         self._key_consumer = None
+        # The focused text field's tracker (see FieldFocusTracker).
+        self.field_focus: FieldFocusTracker | None = None
         self._previous = getattr(page, "on_keyboard_event", None)
         # Keep the installed handler's identity: bound methods are fresh
         # objects on every attribute access, so an `is` check against a
@@ -64,6 +104,12 @@ class FocusManager:
             except Exception:
                 pass
         if e.key in _BACK_KEYS and not self._is_text_editing(e) and self._back_handler:
+            # A FOCUSED FIELD swallows the first Back: Escape ends the
+            # edit and restores the field (an in-progress range input
+            # must not be discarded by the same key that cancels typing),
+            # and a dialog only closes on the second press.
+            if self.field_focus is not None and self.field_focus.handle_back():
+                return
             # Never break key dispatch on a handler failure.
             with contextlib.suppress(Exception):
                 self._back_handler()

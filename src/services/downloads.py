@@ -538,6 +538,12 @@ class DownloadManager:
         finished row from a late progress callback."""
         return episode_session in self._progress
 
+    def clear_progress(self, sessions: list[str]) -> None:
+        """Drop progress entries the UI has already consumed (a failed
+        job whose row now carries the error + Retry)."""
+        for session in sessions:
+            self._progress.pop(session, None)
+
     def progress(self, episode_session: str) -> dict | None:
         """One progress row for the UI: bytes + the percent when the total
         is known, explicitly percent=None when it isn't (Media3's
@@ -586,15 +592,22 @@ class DownloadManager:
         progress = self._progress[episode_session]
         have = os.path.getsize(part_path) if os.path.exists(part_path) else 0
         progress["bytes"] = have
+        progress["total"] = progress.get("total") or 0
         on_progress = getattr(self, "on_progress", None)
 
-        def _chunk(n: int):
+        def _chunk(n: int, total: int):
             # ONE progress contract: (episode_session, dict) — the same
             # shape the segment path emits. This used to call
             # (session, bytes, 0), which raised TypeError against the
             # controller's handler and was swallowed, so a direct-file
             # download's byte progress never reached the UI at all.
-            progress["bytes"] = have + n if not progress["done"] else progress["bytes"] + n
+            progress["bytes"] = progress.get("bytes", 0) + n
+            if total:
+                # The server's own size is the denominator, so the bar
+                # shows a real percent from the first chunk (Sherlock's
+                # shape: "42% · 78.2/186.4 MB") instead of spinning at 0
+                # until the file ends.
+                progress["total"] = total
             progress["done"] = 1
             if on_progress is not None:
                 with contextlib.suppress(Exception):
@@ -614,6 +627,14 @@ class DownloadManager:
             raise
         except Exception as ex:
             logger.warning("direct download failed for %s: %s", episode_session, ex)
+            # Publish the failure NOW: without it the row's spinner kept
+            # turning forever on a job that had already died (owner's run:
+            # episode 1 sat "downloading" while the log showed its failure).
+            progress["state"] = STATE_FAILED
+            progress["error"] = str(ex)[:200]
+            if on_progress is not None:
+                with contextlib.suppress(Exception):
+                    on_progress(episode_session, dict(progress))
             if self._store is not None:
                 await self._store.save_download_error(episode_session, str(ex))
             return
@@ -639,9 +660,12 @@ class DownloadManager:
             # Cancelled mid-file: the partial stays on disk (resumable).
             return
         size_bytes = os.path.getsize(final_path)
+        progress["bytes"] = size_bytes
+        progress["total"] = size_bytes
+        progress["done"] = 1
         if on_progress is not None:
             with contextlib.suppress(Exception):
-                on_progress(episode_session, {"bytes": size_bytes, "done": 1, "total": 1})
+                on_progress(size_bytes, size_bytes)
         self._write_manifest(
             os.path.join(job_dir, "manifest.json"),
             {
@@ -991,11 +1015,60 @@ class DownloadManager:
             with contextlib.suppress(Exception):
                 await resp.aclose()
             raise RuntimeError(f"HTTP {resp.status_code} for {url}")
+        # Resume ALIGNMENT. A Range request is only valid when the answer
+        # starts exactly at `have`:
+        #   - 206 must carry `Content-Range: bytes {have}-...`;
+        #   - a 200 to a Range request means the server IGNORED it and is
+        #     sending the whole file from byte 0 — appending that onto the
+        #     partial wrote a doubled, unplayable file (live evidence:
+        #     82 MB "complete" MKV with no EBML magic; the player answered
+        #     "Failed to recognize file format", owner's run 2026-10-16).
+        # Anything misaligned restarts the file from zero.
+        content_range = str(resp.headers.get("content-range") or "")
+        if have and resp.status_code == 206:
+            if not content_range.startswith(f"bytes {have}-"):
+                with contextlib.suppress(Exception):
+                    await resp.aclose()
+                logger.warning(
+                    "resume misaligned for %s (%s) — restarting the file",
+                    url,
+                    content_range or "no Content-Range",
+                )
+                with contextlib.suppress(OSError):
+                    os.remove(part_path)
+                have = 0
+        elif have and resp.status_code == 200:
+            declared = resp.headers.get("content-length")
+            try:
+                declared = int(declared) if declared is not None else None
+            except (TypeError, ValueError):
+                declared = None
+            if declared is not None and declared != have:
+                # The body is not our partial: the server ignored Range
+                # (misaligned append) or the file changed under us.
+                logger.warning(
+                    "resume ignored by the server for %s (have=%d, body=%s) — restarting",
+                    url,
+                    have,
+                    declared,
+                )
+                have = 0
         mode = "ab" if have and resp.status_code == 206 else "wb"
         # When the server ignores Range and answers 200 we TRUNCATE — so
         # the byte counter starts at 0 too, or it counts the discarded
         # prefix on top of the body.
         done = have if mode == "ab" else 0
+        # The denominator for a real percent. 206 answers carry the FULL
+        # size in Content-Range ("bytes 100-999/1000"); a 200's
+        # Content-Length is the whole file.
+        body_total = 0
+        if mode == "ab" and "/" in content_range:
+            with contextlib.suppress(ValueError):
+                body_total = int(content_range.rsplit("/", 1)[1])
+        if not body_total:
+            with contextlib.suppress(TypeError, ValueError):
+                body_total = int(resp.headers.get("content-length") or 0)
+        progress_total = body_total if body_total > done else 0
 
         # ONE handle for the whole body. The old per-chunk writer opened
         # the part file with mode "wb" (truncate) on EVERY chunk and
@@ -1003,9 +1076,8 @@ class DownloadManager:
         # THREAD POOL, so concurrent writers truncated one another. Live
         # proof (2026-10-16): 273 chunks / 950,904 bytes streamed and read
         # back as a 632-byte garbage file. One handle also makes the
-        # close-before-rename ordering deterministic.
-        # One handle for the whole body; the handle lives across awaits
-        # by design and the finally below closes it on every path.
+        # close-before-rename ordering deterministic. The handle lives
+        # across awaits by design; the finally below closes it everywhere.
         handle = await anyio.to_thread.run_sync(lambda: open(part_path, mode))  # noqa: SIM115
         try:
             first = True
@@ -1033,7 +1105,7 @@ class DownloadManager:
                 await anyio.to_thread.run_sync(handle.write, chunk)
                 done += len(chunk)
                 if on_progress is not None:
-                    on_progress(len(chunk))
+                    on_progress(len(chunk), progress_total)
         finally:
             # Close SYNCHRONOUSLY: a thread-pool close can be skipped when
             # the task is cancelled (and on Windows an open handle blocks

@@ -29,15 +29,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Configurable seam for Yandex ad unit IDs. Default to official test IDs
-# ("demo-*-yandex") so development and testing works out of the box;
-# production IDs (R-M-XXXXXX-Y) can be supplied via environment variables or
-# swapped directly here when ready for store submission.
+# The owner's production Yandex unit IDs (app 20208795, added 2026-10-16):
+# one unit per format, exactly as the partner interface lists them.
+# Environment variables still override for a local test setup, but the
+# shipped default is the real monetization, not a demo id.
 AD_UNITS = {
-    "banner": os.getenv("YANDEX_BANNER_UNIT_ID", "demo-banner-yandex"),
-    "interstitial": os.getenv("YANDEX_INTERSTITIAL_UNIT_ID", "demo-interstitial-yandex"),
-    "rewarded": os.getenv("YANDEX_REWARDED_UNIT_ID", "demo-rewarded-yandex"),
-    "app_open": os.getenv("YANDEX_APP_OPEN_UNIT_ID", "demo-appopenad-yandex"),
+    "banner": os.getenv("YANDEX_BANNER_UNIT_ID", "R-M-20208795-1"),
+    "interstitial": os.getenv("YANDEX_INTERSTITIAL_UNIT_ID", "R-M-20208795-3"),
+    "rewarded": os.getenv("YANDEX_REWARDED_UNIT_ID", "R-M-20208795-4"),
+    "app_open": os.getenv("YANDEX_APP_OPEN_UNIT_ID", "R-M-20208795-5"),
 }
 
 AD_INTERSTITIAL_UNIT_ID = AD_UNITS["interstitial"]

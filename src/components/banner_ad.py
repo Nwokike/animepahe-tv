@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 from services.ads import AD_UNITS
 
-AD_BANNER_UNIT_ID = AD_UNITS.get("banner", "demo-banner-yandex")
+AD_BANNER_UNIT_ID = AD_UNITS.get("banner", "R-M-20208795-1")
 
 _STICKY_WIDTH = 320
 _STICKY_HEIGHT = 50

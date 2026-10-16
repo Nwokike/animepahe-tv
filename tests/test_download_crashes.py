@@ -327,7 +327,7 @@ def test_server_ignoring_range_resets_the_byte_counter():
             {},
             part,
             final,
-            on_progress=lambda n: seen.append(n),
+            on_progress=lambda n, _total=0: seen.append(n),
         )
         assert ok is True
         assert os.path.getsize(final) == 50  # truncated, not 1050

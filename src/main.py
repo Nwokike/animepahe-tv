@@ -2177,6 +2177,20 @@ class AppController:
             state.download_progress = merged
             state.downloads_version += 1
             await self._sync_download_notifications(merged)
+            # A FAILED job's row must stop spinning and show Retry: the
+            # store carries the error, but the in-memory rows are what the
+            # screen paints, so failures republish them too. The failed
+            # progress entry is then dropped (the row state + Retry button
+            # carry it from here — a lingering failed entry would keep the
+            # flush loop alive for nothing).
+            failed = [
+                s for s, row in live.items() if str(row.get("state") or "") == "failed"
+            ]
+            if failed:
+                rows = await self.store.get_downloads()
+                state.downloads = rows
+                state.downloads_version += 1
+                self.downloads.clear_progress(failed)
 
     async def _sync_download_notifications(self, progress: dict) -> None:
         """One tray row per running download, advanced by re-showing its

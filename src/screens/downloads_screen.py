@@ -36,6 +36,40 @@ def _fmt_size(num_bytes) -> str:
     return f"{value:.1f}GB"
 
 
+def _progress_label(progress: dict, *, complete: bool, row: dict) -> str:
+    """The one line the owner expects to SEE MOVING: "42% · 78.2/186.4 MB".
+
+    House format (Sherlock's scan / DDGS's downloader): the percent first,
+    then the counter it came from once a denominator exists — segment jobs
+    count segments, file jobs count bytes. "Starting…" is reserved for the
+    honest pre-first-byte window, and every non-running state is a WORD,
+    never a spinner pretending to be progress.
+    """
+    job_state = (progress or {}).get("state") or ""
+    percent = (progress or {}).get("percent")
+    done = (progress or {}).get("done")
+    total = (progress or {}).get("total")
+    if job_state == STATE_DOWNLOADING:
+        if isinstance(percent, (int, float)):
+            if isinstance(total, (int, float)) and total > 1 and isinstance(done, (int, float)):
+                # A segment job counts SEGMENTS (144 max); a file job
+                # counts BYTES. The unit follows the counter's own scale.
+                if total > 20_000:
+                    return f"{percent:.0f}% · {_fmt_size(done)} / {_fmt_size(total)}"
+                return f"{percent:.0f}% · {int(done)}/{int(total)} segments"
+            return f"{percent:.0f}%"
+        return "Starting…"
+    if job_state == STATE_QUEUED:
+        return "Queued"
+    if job_state == STATE_STOPPED:
+        return f"Paused · {_fmt_size((progress or {}).get('bytes'))} saved"
+    if job_state == STATE_FAILED:
+        return "Failed — tap Retry"
+    if complete:
+        return _fmt_size(row.get("size_bytes"))
+    return "Failed — tap Retry" if row.get("error") else "Not started"
+
+
 def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
     """One episode row: the state word, an inline bar while it runs, and
     the actions that state allows."""
@@ -44,25 +78,14 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
     row_state = row.get("state", "partial")
     complete = row_state == "complete"
 
-    # The bar is inside the name row when it runs — YouTube's inline
-    # progress — and absent otherwise. An unknown length is indeterminate
-    # rather than a lie at 0%.
+    # The bar is inside the name row when it runs — the house shape — and
+    # absent otherwise. It goes DETERMINATE the moment a percent exists;
+    # only the genuine pre-first-byte window stays indeterminate.
     running = job_state in (STATE_DOWNLOADING, STATE_QUEUED)
     bar_value = (
         min(max(float(percent), 0.0), 100.0) / 100.0 if isinstance(percent, (int, float)) else None
     )
-    if job_state == STATE_DOWNLOADING:
-        status_text = f"{percent:.0f}%" if isinstance(percent, (int, float)) else "Downloading…"
-    elif job_state == STATE_QUEUED:
-        status_text = "Waiting…"
-    elif job_state == STATE_STOPPED:
-        status_text = f"Paused · {_fmt_size((progress or {}).get('bytes'))} saved"
-    elif job_state == STATE_FAILED:
-        status_text = "Failed"
-    elif complete:
-        status_text = _fmt_size(row.get("size_bytes"))
-    else:
-        status_text = "Paused" if row.get("error") else "Not started"
+    status_text = _progress_label(progress or {}, complete=complete, row=row)
 
     status = ft.Text(
         status_text,
