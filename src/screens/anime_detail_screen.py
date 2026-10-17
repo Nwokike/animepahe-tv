@@ -13,12 +13,12 @@ import contextlib
 
 import flet as ft
 
+from components.ad_breaks import grid_with_ads
 from components.artwork_card import art_fallback, card_frame, card_media
-from components.banner_ad import build_banner_ad
 from components.focus_styles import attach_focus_zoom
 from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
-from core.artwork import LANDSCAPE, PORTRAIT
+from core.artwork import PORTRAIT
 from core.theme import AppColors
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
@@ -34,19 +34,17 @@ def _episode_card(
     now_playing: bool,
     state_glyph=None,
     menu_items=None,
-    mode: str = LANDSCAPE,
+    mode: str = PORTRAIT,
     fallback_src: str = "",
     provider: str = "",
 ) -> ft.Control:
-    # Compact three-dot overflow (the KTV full-dialog treatment was
-    # rejected): items are built per episode state, so the menu never
-    # shows an action the current state can't honour.
-    #
-    # A SIBLING of the play button, not nested in its content: an
-    # activatable control inside a Button's content swallows the card's
-    # on_play on tap AND is unreachable for D-pad focus (focus sits on
-    # the parent button). Overlaid in a Stack so the visual position is
-    # unchanged.
+    """One episode, rendered as the DISCOVER card (owner's order: the
+    episode grid matches the Discover grid's size and anatomy on every
+    source — same portrait poster, same centered play glyph, same
+    bottom-left title block, same padding). Only the top-right overflow
+    is an episode-specific addition, and it is a Stack SIBLING of the
+    play button (an activatable control inside a Button's content
+    swallows the tap AND is unreachable for D-pad focus)."""
     overflow = ft.PopupMenuButton(
         icon=ft.Icons.MORE_VERT_ROUNDED,
         icon_size=20,
@@ -63,21 +61,51 @@ def _episode_card(
             )
         ],
     )
+    # The subtitle line carries what the source actually published —
+    # duration, SUB/DUB, air date — joined, never invented.
+    facts = " • ".join(
+        [ep.duration or "24m"]
+        + (["SUB"] if getattr(ep, "subs", False) else [])
+        + (["DUB"] if getattr(ep, "dub", False) else [])
+        + (
+            [_fmt_air_date(getattr(ep, "aired_ts", 0))]
+            if getattr(ep, "aired_ts", 0)
+            else []
+        )
+    )
     overlay = [
         ft.Container(
             gradient=ft.LinearGradient(
-                begin=ft.Alignment.CENTER_LEFT,
-                end=ft.Alignment.CENTER_RIGHT,
+                begin=ft.Alignment.TOP_CENTER,
+                end=ft.Alignment.BOTTOM_CENTER,
                 colors=[
-                    ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
                     ft.Colors.TRANSPARENT,
+                    ft.Colors.with_opacity(0.85, ft.Colors.BLACK),
                 ],
             ),
             expand=True,
         ),
         ft.Container(
-            padding=16,
-            alignment=ft.Alignment.CENTER_LEFT,
+            alignment=ft.Alignment.CENTER,
+            content=ft.Row(
+                [
+                    state_glyph or ft.Container(width=0),
+                    ft.Icon(
+                        ft.Icons.EQUALIZER_ROUNDED
+                        if now_playing
+                        else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
+                        size=48,
+                        color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
+                    ),
+                ],
+                spacing=8,
+                alignment=ft.MainAxisAlignment.CENTER,
+                tight=True,
+            ),
+        ),
+        ft.Container(
+            alignment=ft.Alignment.BOTTOM_LEFT,
+            padding=12,
             content=ft.Column(
                 [
                     ft.Row(
@@ -86,9 +114,11 @@ def _episode_card(
                                 f"Episode {ep.episode}",
                                 color=ft.Colors.WHITE,
                                 weight=ft.FontWeight.BOLD,
-                                size=16,
+                                size=14,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                                expand=True,
                             ),
-                            ft.Container(width=6),
                             ft.Container(
                                 content=ft.Text(
                                     "Filler",
@@ -109,48 +139,21 @@ def _episode_card(
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     ft.Text(
-                        " • ".join(
-                            [ep.duration or "24m"]
-                            + (["SUB"] if getattr(ep, "subs", False) else [])
-                            + (["DUB"] if getattr(ep, "dub", False) else [])
-                            + (
-                                [_fmt_air_date(getattr(ep, "aired_ts", 0))]
-                                if getattr(ep, "aired_ts", 0)
-                                else []
-                            )
-                        ),
+                        facts,
                         size=12,
                         color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
                     ),
                 ],
-                alignment=ft.MainAxisAlignment.CENTER,
                 spacing=4,
-            ),
-        ),
-        ft.Container(
-            alignment=ft.Alignment.CENTER_RIGHT,
-            padding=16,
-            content=ft.Row(
-                [
-                    state_glyph or ft.Container(width=0),
-                    ft.Icon(
-                        ft.Icons.EQUALIZER_ROUNDED
-                        if now_playing
-                        else ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
-                        size=40,
-                        color=AppColors.PRIMARY if now_playing else ft.Colors.WHITE,
-                    ),
-                ],
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
         ),
     ]
     # The shared frame is a flat FilledButton, so the D-pad can focus the
-    # episode (Container cards are unreachable on TV in flet 1.0.4). The
-    # menu is a Stack SIBLING, not button content, so D-pad reaches it and
-    # a tap on it no longer plays the card. Art falls back to the series
-    # poster (the backend's own) when the episode has none.
+    # episode (Container cards are unreachable on TV in flet 1.0.4). Art
+    # falls back to the series poster (the backend's own) when the episode
+    # has none.
     return ft.Stack(
         [
             card_frame(
@@ -166,7 +169,7 @@ def _episode_card(
             ),
             ft.Container(
                 alignment=ft.Alignment.TOP_RIGHT,
-                padding=ft.Padding.only(top=14, right=10),
+                padding=ft.Padding.only(top=8, right=4),
                 content=overflow,
             ),
         ],
@@ -535,15 +538,20 @@ def AnimeDetailScreen() -> ft.Control:
                         fallback_src=poster or "",
                         provider=provider,
                     ),
-                    col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
+                    # The DISCOVER spans, verbatim (owner's order: episodes
+                    # match the Discover grid on every breakpoint — 2 up on
+                    # a phone, denser on TV — instead of the old
+                    # one-giant-card-per-row phone layout).
+                    col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
                 )
             )
         return cards
 
-    grid = ft.ResponsiveRow(
-        controls=_render_ep_cards(),
+    grid = ft.Column(
+        # A banner every 12 episodes, then one before the pager (the shared
+        # grid rule — owner's order, 2026-10-16).
+        controls=grid_with_ads(_render_ep_cards(), page, spacing=12, run_spacing=12),
         spacing=12,
-        run_spacing=12,
     )
 
     pager = ft_pager(
@@ -685,42 +693,144 @@ def AnimeDetailScreen() -> ft.Control:
             )
         return ft.Column(children, tight=True, spacing=0)
 
+    # Phone (portrait width) gets the BANNER-FIRST hero the owner asked
+    # for: the series' own cover across the top (16:9, with the poster
+    # floating over its lower edge), then the title on its own line and
+    # the facts wrapped beneath it. The old shape squeezed poster + title
+    # + metadata + chips into one side-by-side row on a phone — cramped,
+    # with dead space above and below the banner (owner's report,
+    # 2026-10-16). TV / wide keeps the classic side-by-side hero.
+    width = getattr(page, "width", None) or 0
+    platform = getattr(page, "platform", None)
+    is_tv = platform is not None and platform == ft.PagePlatform.ANDROID_TV
+    compact = bool(page is not None and not is_tv and 0 < width < 720)
+
+    hero_cover = ft.Container(
+        aspect_ratio=16 / 7,
+        border_radius=16,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        content=ft.Stack(
+            [
+                ft.Image(
+                    src=image_url(backdrop_src, provider),
+                    fit=ft.BoxFit.COVER,
+                    expand=True,
+                )
+                if backdrop_src
+                else ft.Container(bgcolor=ft.Colors.SURFACE_CONTAINER_HIGH),
+                # Legibility scrim under the title block below.
+                ft.Container(
+                    expand=True,
+                    gradient=ft.LinearGradient(
+                        begin=ft.Alignment.TOP_CENTER,
+                        end=ft.Alignment.BOTTOM_CENTER,
+                        colors=[
+                            ft.Colors.with_opacity(0.1, ft.Colors.BLACK),
+                            ft.Colors.with_opacity(0.6, ft.Colors.BLACK),
+                        ],
+                    ),
+                ),
+            ],
+            expand=True,
+        ),
+    )
+    compact_poster = ft.Container(
+        width=96,
+        height=140,
+        right=8,
+        bottom=-32,
+        border_radius=10,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        border=ft.Border.all(2, ft.Colors.with_opacity(0.7, ft.Colors.BLACK)),
+        shadow=ft.BoxShadow(
+            blur_radius=14,
+            color=ft.Colors.with_opacity(0.45, ft.Colors.BLACK),
+            offset=ft.Offset(0, 6),
+        ),
+        content=ft.Image(src=image_url(poster, provider), fit=ft.BoxFit.COVER, expand=True)
+        if poster
+        else art_fallback(
+            title,
+            mode=PORTRAIT,
+            badge=anime.get("type", "TV"),
+            show_title=False,
+        ),
+    )
+    # The cover is the anchor Stack (absolute children position against
+    # it); the poster hangs over its lower-right edge, the standard
+    # streaming-detail eye-line.
+    compact_cover = ft.Stack(
+        [hero_cover, compact_poster],
+        expand=True,
+    )
+    compact_body = ft.Column(
+        [
+            # Space for the poster's overhang, then the title on its own
+            # line — the owner's "banner first, text under it" shape.
+            ft.Container(height=44),
+            ft.Text(
+                title,
+                size=22,
+                weight=ft.FontWeight.BOLD,
+                color=ft.Colors.ON_SURFACE,
+                max_lines=3,
+                overflow=ft.TextOverflow.ELLIPSIS,
+            ),
+            ft.Container(height=6),
+            _metadata_row(anime),
+            ft.Container(height=10),
+            _genre_chips(anime),
+            ft.Container(height=12),
+            follow_button,
+            ft.Container(height=14),
+            _synopsis_block(anime),
+        ],
+        spacing=0,
+        tight=True,
+    )
+    wide_hero = ft.Row(
+        [
+            poster_box,
+            ft.Container(width=24),
+            ft.Column(
+                [
+                    ft.Text(
+                        title,
+                        size=28,
+                        weight=ft.FontWeight.BOLD,
+                        color=ft.Colors.ON_SURFACE,
+                        max_lines=2,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    ft.Container(height=8),
+                    _metadata_row(anime),
+                    ft.Container(height=12),
+                    _genre_chips(anime),
+                    ft.Container(height=12),
+                    follow_button,
+                ],
+                expand=True,
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+        ],
+        alignment=ft.MainAxisAlignment.START,
+    )
+    hero: ft.Control = ft.Column(
+        [compact_cover, compact_body] if compact else [wide_hero],
+        spacing=0,
+        tight=True,
+    )
+
     return _titled(ft.Stack(
         [
             backdrop,
             ft.Container(
                 content=ft.Column(
                     [
-                        ft.Row(
-                            [
-                                poster_box,
-                                ft.Container(width=24),
-                                ft.Column(
-                                    [
-                                        ft.Text(
-                                            title,
-                                            size=28,
-                                            weight=ft.FontWeight.BOLD,
-                                            color=ft.Colors.ON_SURFACE,
-                                            max_lines=2,
-                                            overflow=ft.TextOverflow.ELLIPSIS,
-                                        ),
-                                        ft.Container(height=8),
-                                        _metadata_row(anime),
-                                        ft.Container(height=12),
-                                        _genre_chips(anime),
-                                        ft.Container(height=12),
-                                        follow_button,
-                                    ],
-                                    expand=True,
-                                    alignment=ft.MainAxisAlignment.CENTER,
-                                ),
-                            ],
-                            alignment=ft.MainAxisAlignment.START,
-                        ),
+                        hero,
                         ft.Container(height=16),
-                        _synopsis_block(anime),
-                        ft.Container(height=24),
+                        _synopsis_block(anime) if compact else ft.Container(width=0, height=0),
+                        ft.Container(height=24) if compact else ft.Container(height=0),
                         ft.Row(
                             [
                                 ft.Text(
@@ -738,24 +848,12 @@ def AnimeDetailScreen() -> ft.Control:
                                     icon=ft.Icons.DOWNLOAD_FOR_OFFLINE_ROUNDED,
                                     on_click=lambda e: _open_series_download(),
                                 ),
-                                # Which provider served these episodes —
-                                # display only. Switching backends happens
-                                # in the header (title pill / badge picker);
-                                # the detail screen carries no switcher
-                                # (owner's order, 2026-10-15).
-                                ft.Text(
-                                    f"Source: {state.current_source_name.capitalize()}"
-                                    if state.current_source_name
-                                    else "",
-                                    size=12,
-                                    color=ft.Colors.ON_SURFACE_VARIANT,
-                                ),
                             ],
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         ft.Container(height=8),
                         grid,
-                        build_banner_ad(page, inline=True),
+                        ft.Container(height=8),
                         pager,
                         ft.Container(height=32),
                     ],
@@ -763,7 +861,9 @@ def AnimeDetailScreen() -> ft.Control:
                     scroll=ft.ScrollMode.AUTO,
                     expand=True,
                 ),
-                padding=ft.Padding.all(24),
+                padding=ft.Padding.symmetric(horizontal=16, vertical=12)
+                if compact
+                else ft.Padding.all(24),
                 expand=True,
             ),
         ],

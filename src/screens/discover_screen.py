@@ -5,10 +5,17 @@ Nothing about genres, categories, types or sorts is hardcoded here: the
 provider returns its filter spec at runtime (the site's own lists), this
 screen renders it. A provider whose source has no browse surface reports
 an empty spec and the screen says so — it never invents filters.
+
+Layout (owner's order, 2026-10-16): the filters are DROPDOWNS in a
+compact row — a wall of chips read as noise — an ad slot sits under the
+filter row, the grid is Discover-sized, and an ad break lands before the
+pager. The "via <source>" line is gone: the header already names the
+source, twice.
 """
 
 import flet as ft
 
+from components.ad_breaks import grid_with_ads
 from components.banner_ad import build_banner_ad
 from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
@@ -18,43 +25,41 @@ from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
 
-def _filter_choices(spec: dict, selected, on_pick) -> ft.Control:
-    """One filter group as chips. Radio semantics per key: picking a value
-    replaces the previous one, and an empty value clears it."""
+def _filter_dropdown(spec: dict, selected, on_pick) -> ft.Control:
+    """One filter group as a Dropdown — the owner's order: genre, type,
+    status, season and sort collapse into compact pickers instead of a
+    wall of chips. Radio semantics per key: picking a value replaces the
+    previous one; "All" (an empty value) clears it."""
     key = spec["key"]
+    label = spec.get("label", key)
     options = spec.get("options") or []
     if spec.get("kind") == "number":
         field = ft.TextField(
             value=str(selected or ""),
-            hint_text=spec.get("label", ""),
-            width=120,
-            height=40,
+            hint_text=label,
+            width=110,
+            height=44,
             text_size=12,
             keyboard_type=ft.KeyboardType.NUMBER,
             on_submit=lambda e, k=key: on_pick(k, (e.control.value or "").strip()),
             on_blur=lambda e, k=key: on_pick(k, (e.control.value or "").strip()),
         )
-        return ft.Row([ft.Text(spec.get("label", ""), size=12), field], spacing=8)
-    chips = [
-        ft.Container(
-            content=ft.Text(label, size=12, weight=ft.FontWeight.W_500),
-            padding=ft.Padding.symmetric(horizontal=12, vertical=6),
-            border_radius=16,
-            ink=True,
-            bgcolor=ft.Colors.with_opacity(0.18, ft.Colors.PRIMARY)
-            if selected == value
-            else ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE),
-            on_click=lambda e, k=key, v=value: on_pick(k, v),
-        )
-        for value, label in ((o["value"], o.get("label", o["value"])) for o in options)
+        return field
+    items = [ft.DropdownOption(key="", text="All")]
+    items += [
+        ft.DropdownOption(key=str(o["value"]), text=str(o.get("label", o["value"])))
+        for o in options
     ]
-    return ft.Column(
-        [
-            ft.Text(spec.get("label", ""), size=12, weight=ft.FontWeight.W_700),
-            ft.Row(chips, spacing=6, wrap=True),
-        ],
-        spacing=4,
-        tight=True,
+    return ft.Dropdown(
+        label=label,
+        value="" if selected in (None, "") else str(selected),
+        options=items,
+        width=170,
+        text_size=12,
+        label_style=ft.TextStyle(size=11),
+        border_radius=12,
+        dense=True,
+        on_change=lambda e, k=key: on_pick(k, e.control.value or ""),
     )
 
 
@@ -85,11 +90,9 @@ def DiscoverScreen() -> ft.Control:
         [
             ft.Text("Discover", size=22, weight=ft.FontWeight.W_700),
             ft.Container(expand=True),
-            ft.Text(
-                f"via {state.discover_source.capitalize()}" if state.discover_source else "",
-                size=12,
-                color=ft.Colors.ON_SURFACE_VARIANT,
-            ),
+            # No "via <source>" here — the shared header names the active
+            # source twice already (the title pill and the badge). An owner
+            # called it out (2026-10-16).
             ft.IconButton(
                 icon=ft.Icons.SEARCH_ROUNDED,
                 tooltip="Search",
@@ -139,46 +142,51 @@ def DiscoverScreen() -> ft.Control:
             expand=True,
         )
 
-    chips = ft.Column(
+    # Dropdowns, not a chip wall (owner's order) — and Reset rides the
+    # same row, so the controls read as one compact filter bar.
+    filter_row = ft.Row(
         [
-            _filter_choices(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
-            for spec in filters
+            *[
+                _filter_dropdown(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
+                for spec in filters
+            ],
+            ft.Container(expand=True),
         ],
-        spacing=10,
-        tight=True,
+        spacing=8,
+        wrap=True,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
     results = state.discover_results or []
-    grid = ft.ResponsiveRow(
-        controls=[
-            ft.Container(
-                content=_result_card(
-                    anime,
-                    controller.open_anime,
-                    col=None,
-                    mode=grid_mode,
-                    provider=state.discover_source or state.current_source_name,
-                ),
-                col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
-            )
-            for anime in results
-        ],
-        spacing=16,
-        run_spacing=16,
-    )
+    cards = [
+        ft.Container(
+            content=_result_card(
+                anime,
+                controller.open_anime,
+                col=None,
+                mode=grid_mode,
+                provider=state.discover_source or state.current_source_name,
+            ),
+            col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
+        )
+        for anime in results
+    ]
 
     body: list[ft.Control] = [
         # The shared header: the source pill/badge are on EVERY screen, so
         # swapping a walled backend never depends on being on Home.
         app_header(state, page, controller, subtitle="Discover"),
         header,
-        ft.Container(height=12),
-        chips,
-        ft.Container(height=12),
+        ft.Container(height=10),
+        filter_row,
+        # An ad under the filter row, before the results (KTV's search
+        # screen slot: under the header, above the grid).
+        build_banner_ad(page, inline=True),
     ]
     if results:
-        body.append(grid)
-        body.append(build_banner_ad(None, inline=True))
+        # Every 12 cards, a break; then one more before the pager (KTV's
+        # grid-then-banner-then-pager shape).
+        body.extend(grid_with_ads(cards, page, spacing=16, run_spacing=16))
         body.append(
             ft_pager(
                 page=state.discover_page,

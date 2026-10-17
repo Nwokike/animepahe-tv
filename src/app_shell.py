@@ -238,7 +238,10 @@ def AppShell() -> ft.Control:
         # the topmost element — a separate AppBar above it put
         # "back · Anime" ahead of the header, 2026-10-16).
         chrome = None
-        show_nav = False
+        # The nav bar STAYS on the detail view: hiding it stranded the
+        # owner (tabs unreachable from an anime page — his report,
+        # 2026-10-16). Back in the header remains for returning to the tab.
+        show_nav = True
     else:
         if active_tab == "Home":
             body = HomeScreen()
@@ -264,6 +267,10 @@ def AppShell() -> ft.Control:
     ]
     selected = _TABS.index(active_tab)
 
+    # SafeArea wraps the WHOLE shell (house standard: KTV app_shell.py:238,
+    # Sherlock:1220, DDGS:185) — without it the top row runs under the
+    # status bar and the nav bar under the gesture pill (the owner's
+    # "you are dragging space with my notifications", 2026-10-16).
     if _use_rail(page):
         rail_or_bar = ft.NavigationRail(
             destinations=rail_destinations,
@@ -283,23 +290,32 @@ def AppShell() -> ft.Control:
             expand=True,
         )
         if show_nav:
-            return ft.Row(
-                [rail_or_bar, ft.VerticalDivider(width=1), content],
-                spacing=0,
+            return ft.SafeArea(
+                content=ft.Row(
+                    [rail_or_bar, ft.VerticalDivider(width=1), content],
+                    spacing=0,
+                    expand=True,
+                ),
                 expand=True,
             )
-        return ft.Column([content], spacing=0, expand=True)
+        return ft.SafeArea(
+            content=ft.Column([content], spacing=0, expand=True),
+            expand=True,
+        )
 
-    return ft.Column(
-        [
-            ft.Container(content=body, expand=True),
-            ft.NavigationBar(
-                destinations=bar_destinations,
-                selected_index=selected,
-                on_change=lambda e: _on_tab(_TABS[e.control.selected_index]),
-            ),
-        ],
-        spacing=0,
+    return ft.SafeArea(
+        content=ft.Column(
+            [
+                ft.Container(content=body, expand=True),
+                ft.NavigationBar(
+                    destinations=bar_destinations,
+                    selected_index=selected,
+                    on_change=lambda e: _on_tab(_TABS[e.control.selected_index]),
+                ),
+            ],
+            spacing=0,
+            expand=True,
+        ),
         expand=True,
     )
 

@@ -436,13 +436,20 @@ def SettingsScreen() -> ft.Control:
             _section_header("APPEARANCE", "Theme preference"),
             _settings_card([theme_picker]),
             *source_section,
+            # Banner slot 1 — the house pattern (DDGS/Sherlock): banners
+            # SEPARATE major sections, never crowd a card list.
+            build_banner_ad(page, inline=True),
             _section_header("PLAYBACK", "How episodes play"),
             _settings_card([external_player_row]),
+            # Banner slot 2.
+            build_banner_ad(page, inline=True),
             _section_header("DIAGNOSTICS", "Logs and engine status"),
             _settings_card([terminal_row]),
-            build_banner_ad(page, inline=True),
             _section_header("STORAGE", "Regenerable data only"),
             _settings_card([cache_row]),
+            # Banner slot 3 — before About, the last slot in the house
+            # apps' pinned order.
+            build_banner_ad(page, inline=True),
             _section_header("ABOUT", "Application and credits"),
             _settings_card(
                 [
@@ -458,6 +465,7 @@ def SettingsScreen() -> ft.Control:
                     ),
                 ]
             ),
+            ft.Container(height=24),
         ],
         spacing=0,
         expand=True,

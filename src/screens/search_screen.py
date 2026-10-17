@@ -9,7 +9,7 @@ title/year/type/score, 4px border reserve for the focus ring.
 
 import flet as ft
 
-from components.banner_ad import build_banner_ad
+from components.ad_breaks import grid_with_ads
 from components.empty_state import EmptyState
 from components.focus_styles import (
     attach_focus_zoom,
@@ -388,25 +388,23 @@ def SearchScreen() -> ft.Control:
             on_next=lambda e: controller.load_search(state.search_query, state.search_page + 1),
             is_loading=state.is_loading,
         )
+        search_cards = [
+            _result_card(
+                a,
+                controller.open_anime,
+                col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
+                now_playing=state.current_anime_session == a.session,
+                mode=grid_mode,
+                provider=state.search_source or state.current_source_name,
+            )
+            for a in shown
+        ]
         results = ft.Column(
             [
                 *([chips_row] if chips_row is not None else []),
-                ft.ResponsiveRow(
-                    controls=[
-                        _result_card(
-                            a,
-                            controller.open_anime,
-                            col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
-                            now_playing=state.current_anime_session == a.session,
-                            mode=grid_mode,
-                            provider=state.search_source or state.current_source_name,
-                        )
-                        for a in shown
-                    ],
-                    spacing=16,
-                    run_spacing=16,
-                ),
-                build_banner_ad(page, inline=True),
+                # A banner every 12 results, then one before the pager — the
+                # shared grid rule (owner's order, 2026-10-16).
+                *grid_with_ads(search_cards, page),
                 pager,
             ],
             spacing=16,

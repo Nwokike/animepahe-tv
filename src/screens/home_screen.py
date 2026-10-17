@@ -11,6 +11,7 @@ the same line: icon + wordmark left, actions right.
 
 import flet as ft
 
+from components.ad_breaks import grid_with_ads
 from components.artwork_card import card_frame, card_media
 from components.banner_ad import build_banner_ad
 from components.cross_promo import PromoHero
@@ -351,21 +352,17 @@ def HomeScreen() -> ft.Control:
         "episode": state.current_episode_session,
     }
 
-    grid = ft.ResponsiveRow(
-        controls=[
-            _release_card(
-                r,
-                controller.open_anime,
-                now_playing["anime"] == r.anime_session and now_playing["episode"] == r.session,
-                col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
-                mode=grid_mode,
-                provider=state.latest_source or state.current_source_name,
-            )
-            for r in releases
-        ],
-        spacing=12,
-        run_spacing=12,
-    )
+    release_cards = [
+        _release_card(
+            r,
+            controller.open_anime,
+            now_playing["anime"] == r.anime_session and now_playing["episode"] == r.session,
+            col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
+            mode=grid_mode,
+            provider=state.latest_source or state.current_source_name,
+        )
+        for r in releases
+    ]
 
     pager = ft_pager(
         page=state.latest_page,
@@ -391,15 +388,25 @@ def HomeScreen() -> ft.Control:
             )
         ]
     else:
-        grid_section = [grid, pager]
+        # The grid + its pager through the shared ad-break helper: a banner
+        # every 12 cards, then one before the pager (KTV's shape).
+        grid_section = [
+            *grid_with_ads(release_cards, page, spacing=12, run_spacing=12),
+            pager,
+        ]
 
+    continue_shelf = _continue_watching_row(
+        state.continue_watching, controller.open_anime, grid_mode
+    )
     content = ft.Container(
         content=ft.Column(
             [
                 PromoHero(),
+                # KTV's home order, ported: shelf → banner → grid. The
+                # owner expects the ad AFTER Continue Watching (his KTV
+                # home puts it after the Recently Watched carousel).
+                continue_shelf or ft.Container(width=0, height=0),
                 build_banner_ad(page, inline=True),
-                _continue_watching_row(state.continue_watching, controller.open_anime, grid_mode)
-                or ft.Container(width=0, height=0),
                 ft.Text(
                     "Recent Episodes",
                     size=18,
@@ -407,7 +414,6 @@ def HomeScreen() -> ft.Control:
                     color=ft.Colors.ON_SURFACE,
                 ),
                 *grid_section,
-                build_banner_ad(page, inline=True),
                 ft.Container(height=32),
             ],
             spacing=16,

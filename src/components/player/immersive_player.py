@@ -284,6 +284,13 @@ class ImmersivePlayer(ft.Stack):
 
         # Skip-intro/outro chip: KTV-styled toast, hidden until the
         # position enters a declared window.
+        #
+        # It lives DIRECTLY in this Stack (with right/bottom) — NOT in the
+        # Video control's own `controls` list, where absolute positioning
+        # is an error ("controls can be positioned absolutely with left,
+        # top, right, and bottom properties inside Stack control only and
+        # page.overlay" — the owner's live run, 2026-10-16). A Video's
+        # controls are laid out as its overlay, not a Stack.
         self.skip_chip = ft.Container(
             content=ft.Text(
                 "Skip Intro",

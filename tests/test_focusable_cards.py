@@ -105,8 +105,10 @@ def test_release_card_is_focusable():
 
 
 def test_episode_card_is_focusable():
+    # Portrait now — the episode grid matches Discover's card on every
+    # source (owner's order, 2026-10-16): same shape, same anatomy.
     card = _episode_card(_Episode(), lambda a, e: None, "sess", now_playing=False)
-    _assert_focusable_card(card)
+    _assert_focusable_card(card, aspect=0.67)
 
 
 def test_result_card_is_focusable():

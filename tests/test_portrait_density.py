@@ -28,17 +28,25 @@ def test_card_frame_density_by_mode():
 
 
 def test_search_and_discover_grid_spacing_and_insets():
+    """The grids ride the shared ad-break helper (12 per chunk, banner
+    between) at the house 16px density, and the screens keep their 24px
+    insets."""
     import inspect
 
     import screens.discover_screen as discover
     import screens.search_screen as search
+    from components import ad_breaks
+
+    helper = inspect.getsource(ad_breaks)
+    assert "spacing: int = 16" in helper
+    assert "run_spacing: int = 16" in helper
+    # One ad every 12 cards, by the shared constant.
+    assert "AD_EVERY = 12" in helper
 
     search_src = inspect.getsource(search)
-    assert "spacing=16" in search_src
-    assert "run_spacing=16" in search_src
+    assert "grid_with_ads(" in search_src, "search uses the shared grid helper"
     assert "left=24, right=24" in search_src
 
     discover_src = inspect.getsource(discover)
-    assert "spacing=16" in discover_src
-    assert "run_spacing=16" in discover_src
+    assert "grid_with_ads(" in discover_src, "discover uses the shared grid helper"
     assert "left=24, right=24" in discover_src
