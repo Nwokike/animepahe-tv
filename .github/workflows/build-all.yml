@@ -137,9 +137,11 @@ jobs:
         run: |
           # A Gradle build can be SIGTERM'd by the runner (exit 143) when
           # two Android builds share the machine — one bounded retry heals
-          # that without serializing the jobs.
+          # that without serializing the jobs. The 45-min timeout turns a
+          # HUNG Gradle into a fast failure the retry can act on (the
+          # universal job once spun for an hour doing nothing, 2026-10-16).
           for attempt in 1 2; do
-            uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v && break
+            timeout 2700 uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v && break
             echo "::warning::universal build attempt $attempt failed — retrying"
           done
       - name: Upload to Private Release
@@ -215,7 +217,7 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           for attempt in 1 2; do
-            uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v && break
+            timeout 2700 uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v && break
             echo "::warning::split build attempt $attempt failed — retrying"
           done
       - name: Upload to Private Release
