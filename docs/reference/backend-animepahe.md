@@ -224,6 +224,27 @@ play page are not parsed by any implementation — titles come from `m=release`.
   Kwik hosts rotate: `kwik.cx` (our code + CloudStream era), `kwik.si` (current per
   inkand-paper + CloudstreamPlugins `Extractors.kt`), `kwik.pw` (legacy). Our
   hard-coded `Referer: https://kwik.cx/` should follow the host of the issued URL.
+
+  **Host state re-verified live 2026-10-19 (this list ages fast):**
+  `kwik.cx` is the ONLY live kwik host — "Kwik: Just Another Video Hosting
+  Service", landing page 200 with no Cloudflare wall. `kwik.si` is now a
+  **parked domain** (a microloan spam page): it answers 200 for EVERY
+  path, so a stale `kwik.si` reference does not fail loudly — it
+  "succeeds" with a parking page and no m3u8. `kwik.pw`, `kwik.to`,
+  `kwik.la` and `kwik.icu` are DNS-dead; `kwik.link` and `kwik.one` are
+  unrelated sites (404 on `/f/`). Our resolver follows the ISSUED url's
+  host for the Referer, so it is correct for whichever host the site
+  issues — but a resolver pointed at a parked host fails silently, which
+  is why the host family is worth re-probing before a release.
+
+  The three kwik routes are NOT equally walled (live probes, primp
+  chrome impersonation): the landing page is 200, the `/e/` STREAM page
+  is NOT challenged (a bogus id answers 404, not 403 — the challenge
+  middleware does not cover that path), the `/f/` FILE page IS
+  challenged (`403`, `cf-mitigated: challenge`; it clears in a real
+  browser and the clearance then persists), and the `/d/` download
+  endpoint is not challenged at all (it answers `419 Page Expired` —
+  Laravel's CSRF check — with no Cloudflare involved).
 - **Subtitles: none, by three converging lines of evidence.** (a) No scraper emits a
   subtitle track for pahe — CloudStream `loadLinks` takes a `subtitleCallback` and
   never calls it for this provider; Juro `GetVideosAsync` returns video-only;
@@ -360,7 +381,7 @@ Third-party code (GitHub, fetched file contents):
 5. `inkand-paper/Anime` `src/lib/animepahe.ts` (sha `19bcb60`) —
    `PaheEpisode{episode2, edition, created_at…}`, `PaheStream{audio,kwik,
    kwik_pahewin,hd}`, `m=links&id&session&p=kwik`, kwik extraction cascade,
-   "30 per page", kwik.si current host.
+   "30 per page", kwik host rotates (kwik.cx live, 2026-10-19).
 6. `iamitkrp/CLI_DOWNLOADER` `Clients/AnimePaheClient.py` (sha `1daf908`) —
    `resolutionMenu`×`pickDownload` zip with `data-av1` preference + `eng` skip,
    `m=links&p=kwik&id=` download URL config.
