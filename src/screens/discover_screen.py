@@ -20,26 +20,74 @@ from components.banner_ad import build_banner_ad
 from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
+from core.theme import AppColors
 from core.tokens import GRID_COL
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
-# Filter keys the providers accept as MULTIPLE values: `browse` joins them
-# with commas, so the value must be a LIST. The dropdown emits one string;
-# shaping it here makes the character-iteration bug impossible (picking
-# DVD=14893 used to request categories=1,4,8,9,3 — the owner's
-# "I see DVD 2 but open DVD and there are more", 2026-10-19).
-_LIST_VALUED_KEYS = frozenset(
-    {"categories", "tags", "genre", "term_type", "status", "season"}
-)
+# Keys whose "no selection" state is meaningless — there is no "sort by
+# all", the list always has an active order (the owner, 2026-10-19: "There
+# is no such thing as sort all, sort by all"). These groups therefore never
+# get the synthetic "All" first option.
+_NO_ALL_KEYS = frozenset({"orderby", "sort"})
+
+# The direction control shown beside the sort group: WordPress's `order`
+# query parameter, and the up/down arrows every catalog sort carries
+# (owner, 2026-10-19: "there is no way to make it up to down and down to
+# up... Normally when you see category sort, you see something that points
+# up to down and down to up"). Only sources whose spec declares
+# "direction" get the control — AniKato's own form has no order
+# parameter, so a toggle there would flip an arrow and change nothing.
+_ORDER_KEY = "order"
+
+
+def _multi_valued_keys(filters: list[dict]) -> set[str]:
+    """The filter keys that take SEVERAL values, read from the provider's
+    own spec ("multi": True) instead of a hardcoded list here.
+
+    The hardcoded list was wrong the moment it was written: it wrapped
+    AniKato's genre/status/season in a list the site's form never wanted
+    (the request became ``genre[]=['1']`` and the grid came back empty —
+    2026-10-19), and it missed WordPress's "type" key. The provider
+    declares the shape; the screen renders it."""
+    return {str(spec.get("key")) for spec in filters or [] if spec.get("multi")}
+
+
+def _sort_defaults(filters: list[dict]) -> dict[str, str]:
+    """The sort group's own default: the FIRST option the provider listed
+    ("Recently updated" for the WordPress sources, "Default" for
+    AniKato). The dropdown shows it, so the request must ask for it too —
+    a displayed value that is never sent is a lie (the owner's "the
+    numbering... does not update", 2026-10-19)."""
+    out: dict[str, str] = {}
+    for spec in filters or []:
+        key = str(spec.get("key") or "")
+        if key not in _NO_ALL_KEYS:
+            continue
+        options = spec.get("options") or []
+        if options:
+            out[key] = str(options[0]["value"])
+    return out
+
+
+def _effective_selections(selections: dict | None, filters: list[dict]) -> dict:
+    """The selections as the SOURCE will receive them: every sort group
+    carries its default order even when the user never touched it, so
+    what the dropdown shows is what the site is asked for."""
+    out = dict(selections or {})
+    for key, value in _sort_defaults(filters).items():
+        if not out.get(key):
+            out[key] = value
+    return out
 
 
 def _filter_dropdown(spec: dict, selected, on_pick) -> ft.Control:
     """One filter group as a Dropdown — the owner's order: genre, type,
     status, season and sort collapse into compact pickers instead of a
     wall of chips. Radio semantics per key: picking a value replaces the
-    previous one; "All" (an empty value) clears it."""
+    previous one; "All" (an empty value) clears it — except for order-only
+    groups (Sort), where "All" would be meaningless."""
     key = spec["key"]
     label = spec.get("label", key)
     options = spec.get("options") or []
@@ -55,11 +103,15 @@ def _filter_dropdown(spec: dict, selected, on_pick) -> ft.Control:
             on_blur=lambda e, k=key: on_pick(k, (e.control.value or "").strip()),
         )
         return field
-    items = [ft.DropdownOption(key="", text="All")]
+    items = [] if key in _NO_ALL_KEYS else [ft.DropdownOption(key="", text="All")]
     items += [
         ft.DropdownOption(key=str(o["value"]), text=str(o.get("label", o["value"])))
         for o in options
     ]
+    # The sort dropdown lands on its first REAL option rather than an
+    # empty (nonexistent) "All": the site's own default order.
+    if key in _NO_ALL_KEYS and not selected and items:
+        selected = str(options[0]["value"])
     return ft.Dropdown(
         label=label,
         value="" if selected in (None, "") else str(selected),
@@ -71,12 +123,16 @@ def _filter_dropdown(spec: dict, selected, on_pick) -> ft.Control:
         on_select=lambda e, k=key: on_pick(k, e.control.value or ""),
     )
 
-
 @ft.component
 def DiscoverScreen() -> ft.Control:
     state = ft.use_context(AppStateCtx)
     controller = ft.use_context(ControllerMethodsCtx)
     _ = state.discover_version
+
+    # The provider's own filter vocabulary — the shape of every key
+    # (multi-valued, sortable, its default) is read from THIS, never
+    # hardcoded here.
+    filters = state.discover_filters or []
 
     # The detected grid shape for this screen (its own backend's own art).
     discover_sources = grid_sources(state.discover_results or [], lambda a: a.poster)
@@ -84,18 +140,25 @@ def DiscoverScreen() -> ft.Control:
 
     def _pick(key: str, value):
         selections = dict(state.discover_selections or {})
-        # The dropdown emits one string; the WP providers' `browse`
-        # expects multi-value keys (categories/tags) as LISTS. Passing the
-        # raw string made animeout iterate its characters: picking DVD
-        # (14893) requested categories=1,4,8,9,3 — the owner's
-        # "I see DVD 2 but open DVD and there are more" (2026-10-19).
-        shaped: object = value
-        if value in (None, "") or selections.get(key) == value:
-            selections.pop(key, None)  # a second pick clears the filter
+        multi = _multi_valued_keys(filters)
+        if value in (None, ""):
+            selections.pop(key, None)  # "All" clears the filter
+        elif selections.get(key) == value:
+            # A second pick of the same value clears the filter — but for
+            # a SORT group that would leave the dropdown claiming an order
+            # the site is no longer being asked for (the owner's "does
+            # not update"). It returns to the group's own default.
+            if key in _NO_ALL_KEYS:
+                selections[key] = _sort_defaults(filters).get(key, value)
+            else:
+                selections.pop(key, None)
         else:
-            shaped = [value] if key in _LIST_VALUED_KEYS else value
-            selections[key] = shaped
-        controller.load_discover(selections, 1)
+            # A multi-valued key travels as a LIST: the provider joins
+            # them, and a bare string would be iterated character by
+            # character (category 14893 became categories=1,4,8,9,3 —
+            # the owner's "DVD 2 but open DVD and there are more").
+            selections[key] = [value] if key in multi else value
+        controller.load_discover(_effective_selections(selections, filters), 1)
 
     ft.use_effect(
         lambda: controller.load_discover_filters() if not state.discover_filters else None,
@@ -104,7 +167,9 @@ def DiscoverScreen() -> ft.Control:
 
     header = ft.Row(
         [
-            ft.Text("Discover", size=22, weight=ft.FontWeight.W_700),
+            # No big screen title here: every other screen names itself in
+            # the shared header's subtitle, and a second "Discover" one
+            # screen below read as a stutter.
             ft.Container(expand=True),
             # No "via <source>" here — the shared header names the active
             # source twice already (the title pill and the badge). An owner
@@ -131,7 +196,6 @@ def DiscoverScreen() -> ft.Control:
 
     from components.app_header import app_header
 
-    filters = state.discover_filters or []
     if not filters:
         return ft.Container(
             content=ft.Column(
@@ -161,11 +225,46 @@ def DiscoverScreen() -> ft.Control:
     # Dropdowns, not a chip wall (owner's order) — wrapped naturally
     # without expand=True spacers (Expanded inside a wrap=True Row throws
     # Flutter's "WrapParentData is not a subtype of FlexParentData" error).
+    filter_controls: list[ft.Control] = [
+        _filter_dropdown(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
+        for spec in filters
+    ]
+    # The sort-direction toggle: only where the SOURCE has a direction to
+    # toggle — the provider's spec says so ("direction": True). AniKato's
+    # own form has no order parameter, so the arrow there flipped and
+    # changed nothing (2026-10-19). An IconButton, so a D-pad can reach
+    # it: a Container takes no focus at all in flet 1.0.4.
+    if any(spec.get("direction") for spec in filters):
+        order = str((state.discover_selections or {}).get(_ORDER_KEY) or "desc")
+
+        def _toggle_order(e=None):
+            selections = dict(state.discover_selections or {})
+            current = str(selections.get(_ORDER_KEY) or "desc")
+            selections[_ORDER_KEY] = "asc" if current == "desc" else "desc"
+            controller.load_discover(_effective_selections(selections, filters), 1)
+
+        filter_controls.append(
+            ft.IconButton(
+                icon=ft.Icons.ARROW_UPWARD_ROUNDED
+                if order == "asc"
+                else ft.Icons.ARROW_DOWNWARD_ROUNDED,
+                icon_size=16,
+                icon_color=AppColors.PRIMARY,
+                style=ft.ButtonStyle(
+                    bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
+                    shape=ft.RoundedRectangleBorder(radius=12),
+                    padding=ft.Padding.all(12),
+                    side={
+                        ft.ControlState.FOCUSED: ft.BorderSide(2.5, AppColors.PRIMARY),
+                        ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT),
+                    },
+                ),
+                tooltip="Oldest first" if order == "asc" else "Newest first",
+                on_click=_toggle_order,
+            )
+        )
     filter_row = ft.Row(
-        [
-            _filter_dropdown(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
-            for spec in filters
-        ],
+        filter_controls,
         spacing=8,
         wrap=True,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -206,10 +305,12 @@ def DiscoverScreen() -> ft.Control:
                 page=state.discover_page,
                 has_more=state.discover_has_more,
                 on_prev=lambda e: controller.load_discover(
-                    dict(state.discover_selections or {}), state.discover_page - 1
+                    _effective_selections(state.discover_selections, filters),
+                    state.discover_page - 1,
                 ),
                 on_next=lambda e: controller.load_discover(
-                    dict(state.discover_selections or {}), state.discover_page + 1
+                    _effective_selections(state.discover_selections, filters),
+                    state.discover_page + 1,
                 ),
                 is_loading=False,
             )
@@ -222,7 +323,8 @@ def DiscoverScreen() -> ft.Control:
                 title="Nothing matched",
                 message="Loosen a filter and try again.",
                 on_retry=lambda e: controller.load_discover(
-                    state.discover_selections, state.discover_page
+                    _effective_selections(state.discover_selections, filters),
+                    state.discover_page,
                 ),
                 on_downloads=lambda e: controller.open_downloads(),
             )

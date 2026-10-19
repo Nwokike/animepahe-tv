@@ -29,8 +29,16 @@ def result_card(
         provider=provider,
         opacity=0.5 if now_playing else 1.0,
     )
-    # score can be missing from the site payload — never format a None.
-    score = anime.score if getattr(anime, "score", None) is not None else None
+    # A rating only renders when the serving source actually publishes one.
+    # Kayoanime (verified live, 2026-10-19) exposes no numeric score — its
+    # "rating" field is the AGE certification (PG-13) — so its rows used
+    # to show a fabricated "★ 0.0". The count-honesty rule (never print a
+    # number the source did not give you) says: absent renders as nothing.
+    try:
+        raw_score = float(getattr(anime, "score", 0) or 0)
+    except (TypeError, ValueError):
+        raw_score = 0.0
+    score = raw_score if raw_score > 0 else None
     score_color = AppColors.SUCCESS if (score or 0) >= 7.5 else AppColors.WARNING
     overlay = [
         ft.Container(
@@ -78,12 +86,18 @@ def result_card(
                                 size=12,
                                 color=ft.Colors.with_opacity(0.7, ft.Colors.WHITE),
                             ),
-                            ft.Container(width=4),
-                            ft.Text(
-                                f"★ {score:.1f}" if score is not None else "★ —",
-                                size=12,
-                                weight=ft.FontWeight.BOLD,
-                                color=score_color,
+                            *(
+                                [
+                                    ft.Container(width=4),
+                                    ft.Text(
+                                        f"★ {score:.1f}",
+                                        size=12,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=score_color,
+                                    ),
+                                ]
+                                if score is not None
+                                else []
                             ),
                         ],
                         spacing=4,

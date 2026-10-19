@@ -2556,6 +2556,17 @@ async def main(page: ft.Page):
 
     page.on_error = _on_page_error
 
+    def _on_resize(e):
+        # The layout reads the WIDTH (the header's badge, the detail
+        # screen's compact mode, the title size). A resize has to
+        # re-render them, or a rotated phone keeps the old layout until
+        # some other state change happens to redraw it.
+        from core.state import state as app_state
+
+        app_state.viewport_version += 1
+
+    page.on_resize = _on_resize
+
     methods = ControllerMethods()
     methods.load_latest = lambda page_num=1: spawn(
         controller.load_latest(page_num), name="load-latest"

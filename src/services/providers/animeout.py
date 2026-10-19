@@ -25,6 +25,7 @@ from core.state import Anime, Episode, LatestRelease, Source
 from services.providers.base import (
     all_episodes,
     close_client,
+    label_with_count,
     make_session,
     page_slice,
     releases_from_anime,
@@ -231,7 +232,7 @@ class AnimeOutProvider:
                     options.append(
                         {
                             "value": str(row.get("id")),
-                            "label": f"{row['name']} ({row.get('count', 0)})",
+                            "label": label_with_count(row["name"], row.get("count")),
                         }
                     )
         except Exception as ex:
@@ -243,6 +244,7 @@ class AnimeOutProvider:
                     "key": "categories",
                     "label": "Category",
                     "kind": "choice",
+                    "multi": True,
                     "options": options,
                 }
             )
@@ -251,9 +253,10 @@ class AnimeOutProvider:
                 "key": "orderby",
                 "label": "Sort",
                 "kind": "choice",
+                "direction": True,
                 "options": [
-                    {"value": "date", "label": "Newest"},
                     {"value": "modified", "label": "Recently updated"},
+                    {"value": "date", "label": "Newest"},
                     {"value": "title", "label": "Title"},
                 ],
             }
@@ -285,6 +288,18 @@ class AnimeOutProvider:
             params["tags"] = ",".join(str(t) for t in values if str(t).strip())
         if filters.get("orderby"):
             params["orderby"] = str(filters["orderby"])
+        else:
+            # The Sort dropdown SHOWS the site's first option ("Recently
+            # updated" = orderby=modified) when nothing is picked, so the
+            # request must ask for it too. Sending no orderby let
+            # WordPress fall back to its own default (publish date), and
+            # the grid came back in a different order than the dropdown
+            # claimed — the owner's "the numbering... does not update"
+            # (2026-10-19). The default is the SPEC's first option, not
+            # a guess.
+            params["orderby"] = "modified"
+        if filters.get("order"):
+            params["order"] = "asc" if str(filters["order"]) == "asc" else "desc"
         resp = await self._client.get(f"{ANIMEOUT_API}/posts", params=params)
         if resp.status_code != 200:
             raise RuntimeError(f"animeout HTTP {resp.status_code}")

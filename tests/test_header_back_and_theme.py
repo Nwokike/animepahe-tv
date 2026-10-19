@@ -13,6 +13,7 @@ Two reports:
    observable `state.theme_mode` (a normal re-render), never a mutation.
 """
 
+import contextlib
 import inspect
 import os
 import sys
@@ -28,6 +29,8 @@ class _State:
         self.theme_mode = ft.ThemeMode.DARK
         self.update_available = False
         self.update_data = None
+        # The header reads this to re-render on a window resize.
+        self.viewport_version = 0
 
 
 class _AppController:
@@ -84,19 +87,55 @@ def test_no_back_control_by_default():
 def test_on_back_puts_a_round_back_button_in_the_header():
     back_calls = []
     header, _, _, _ = _header(on_back=lambda: back_calls.append("b"))
-    back = next(
+    # The control that carries the arrow is an ICON BUTTON — a
+    # Button-family control, because a Container takes no D-pad focus at
+    # all in flet 1.0.4 (28 control classes expose on_focus/on_blur;
+    # Container is not one of them). On a TV remote a Container control
+    # is unreachable.
+    button = next(
         n
         for n in _walk(header)
-        if isinstance(n, ft.Icon) and n.icon == ft.Icons.ARROW_BACK_ROUNDED
+        if isinstance(n, ft.IconButton) and n.icon == ft.Icons.ARROW_BACK_ROUNDED
     )
-    # It is tappable and routes to the caller's handler.
-    disc = next(
-        n
-        for n in _walk(header)
-        if isinstance(n, ft.Container) and n.content is back
-    )
-    disc.on_click(None)
+    assert button.tooltip == "Back"
+    button.on_click(None)
     assert back_calls == ["b"]
+
+
+def test_every_header_control_is_reachable_by_dpad():
+    """No interactive header control may be a Container.
+
+    Against the installed flet 1.0.4 the focusable controls are the
+    Button family, TextField, Switch, Checkbox, Radio, Slider and
+    Dropdown (28 classes with on_focus/on_blur). A Container has none,
+    so a Container-based back button, theme cycle, version pill or badge
+    can never be highlighted or activated by a TV remote."""
+    import dataclasses
+
+    focusable = set()
+    for name in dir(ft):
+        obj = getattr(ft, name, None)
+        if not isinstance(obj, type):
+            continue
+        fields = None
+        with contextlib.suppress(Exception):
+            fields = {f.name for f in dataclasses.fields(obj)}
+        if fields and "on_focus" in fields and "on_blur" in fields:
+            focusable.add(name)
+    assert "Container" not in focusable, (
+        "if flet 1.0.4 ever gives Container a focus state, this guard "
+        "can be relaxed — the assertion is the point"
+    )
+
+    header, _, _, _ = _header(on_back=lambda: None)
+    for control in _walk(header):
+        if not isinstance(control, ft.Container):
+            continue
+        if control.on_click is None and not control.ink:
+            continue  # a plain layout box
+        raise AssertionError(
+            f"an interactive header control is a Container: {control!r}"
+        )
 
 
 def test_the_detail_screen_has_no_appbar_strip_and_drops_the_anime_title():
@@ -147,7 +186,7 @@ def test_cycling_the_theme_sets_the_observable_state(monkeypatch):
     theme_action = next(
         n
         for n in _walk(header)
-        if isinstance(n, ft.Container) and getattr(n, "tooltip", "") == "Switch theme"
+        if isinstance(n, ft.IconButton) and getattr(n, "tooltip", "") == "Switch theme"
     )
     theme_action.on_click(None)
     # DARK -> LIGHT, on the page (what Flutter paints) AND on the state

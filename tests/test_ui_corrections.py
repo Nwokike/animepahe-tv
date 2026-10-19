@@ -236,3 +236,53 @@ def test_the_detail_title_scales_with_the_viewport():
     assert "title_size = FONT_XXL if width >= 640" in src
     assert "FONT_XL if width >= 480" in src
     assert "FONT_LG" in src
+
+
+def test_quality_dialogs_offer_uniform_rows():
+    """The owner: 'the quality selector, you have one that's like filled
+    red, and then the rest are not filled. It affects it when you're using
+    remote control... remove it so that they are all the same.' Both
+    dialogs build one control type; the best pick is a label marker."""
+    import app_shell
+
+    source = inspect.getsource(app_shell)
+    # No button family is chosen per-index any more in either dialog.
+    for builder in ("_build_quality_dialog", "_build_download_quality_dialog"):
+        block = source[source.index(f"def {builder}(") :]
+        next_def = block.find(chr(10) + 'def ', 5)
+        block = block if next_def == -1 else block[:next_def]
+        assert "if is_first" not in block, f"{builder} still branches on the index"
+        assert "·  Best" in block, f"{builder} must mark the best row in its label"
+
+
+def test_the_episodes_empty_state_names_a_real_way_out():
+    """The old text blamed the series for our failure ('may have no
+    releases yet'). The honest message says the fetch failed and points
+    at the ways out (owner, 2026-10-19)."""
+    import screens.anime_detail_screen as detail
+
+    source = inspect.getsource(detail)
+    assert "Episodes couldn't be fetched" in source
+    assert "Try another source" in source
+    # The old blaming text is gone from the rendered copy (it may live on
+    # only in this file's comments).
+    assert "no releases yet — try again later" not in source
+
+
+def test_discover_sort_has_no_all_option():
+    """There is no 'sort by all' (owner, 2026-10-19): the sort group's
+    options are the site's own orders, with Recently updated first."""
+    import screens.discover_screen as ds
+
+    assert "orderby" in ds._NO_ALL_KEYS
+    assert "sort" in ds._NO_ALL_KEYS
+
+
+def test_discover_sort_has_a_direction_toggle():
+    """Every catalog sort carries an up/down control (owner, 2026-10-19)."""
+    import screens.discover_screen as ds
+
+    source = inspect.getsource(ds)
+    assert "_ORDER_KEY" in source
+    assert "ARROW_UPWARD_ROUNDED" in source and "ARROW_DOWNWARD_ROUNDED" in source
+    assert "_toggle_order" in source

@@ -27,10 +27,17 @@ def test_playback_resolution_has_no_automatic_title_hop():
 
 
 def test_the_detail_screen_has_no_source_switcher():
+    """The header's title pill / badge picker is the only switcher — the
+    detail screen must not carry its own "switch this episode to another
+    backend" control. (The 2026-10-19 empty state's plain-English "try
+    another source" is prose in a message, not a control, and is exempt.)"""
     import screens.anime_detail_screen as detail
 
     source = inspect.getsource(detail)
     assert "try_another_source" not in source, (
         "the header's title pill / badge picker is the only switcher"
     )
-    assert "Try another source" not in source
+    assert source.count("action_label=") == 1, (
+        "exactly one switching control on this screen: the owner-mismatch "
+        "prompt. The empty state carries retry + downloads actions only."
+    )

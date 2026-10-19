@@ -13,7 +13,10 @@ class Anime:
     status: str
     season: str
     year: int
-    score: float
+    # A source that publishes NO numeric rating carries None (Kayoanime's
+    # "rating" is the age certification, verified live 2026-10-19) — the
+    # card then renders no star at all, never a fabricated "★ 0.0".
+    score: float | None
     poster: str
     session: str
     synopsis: str = ""
@@ -107,6 +110,12 @@ class AppState:
     cf_blocked: bool = False
     is_online: bool = True
     connectivity_version: int = 0
+    # Bumped when the window changes size. The header's badge and the
+    # detail screen's compact layout read the WIDTH at render time, and
+    # without this they kept the size of the last render: rotate a
+    # phone and the app stayed in the old layout until something else
+    # re-rendered it (audit, 2026-10-19).
+    viewport_version: int = 0
     # The observable theme mode: the header toggle and the Settings
     # picker both drive it, and every screen reads it instead of asking
     # the page (which is not observable).

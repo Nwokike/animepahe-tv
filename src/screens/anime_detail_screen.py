@@ -20,7 +20,7 @@ from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from core.artwork import PORTRAIT
 from core.theme import AppColors
-from core.tokens import FONT_LG, FONT_XL, FONT_XXL, GRID_COL
+from core.tokens import FONT_LG, FONT_XL, FONT_XXL, GRID_COL, GRID_RUN_SPACING
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
 from services.providers.base import owner_of
@@ -308,8 +308,14 @@ def AnimeDetailScreen() -> ft.Control:
         return _titled(
             empty_or_offline(
                 state,
-                title="No episodes found",
-                message="This series may have no releases yet — try again later.",
+                title="Episodes couldn't be fetched",
+                # The honest message (owner, 2026-10-19): the old
+                # "may have no releases yet" blamed the series for OUR
+                # failure — a walled page, a private folder and a parse
+                # miss all land here, and the release almost always
+                # exists. Say what is true, and name the ways out.
+                message="This source did not return an episode list for it. "
+                "Try another source, or come back later.",
                 icon=ft.Icons.MOVIE_FILTER_ROUNDED,
                 on_retry=lambda e: controller.load_anime(state.current_anime_session),
                 on_downloads=lambda e: controller.open_downloads(),
@@ -552,7 +558,10 @@ def AnimeDetailScreen() -> ft.Control:
         # A banner every 12 episodes, then one before the pager (the shared
         # grid rule — owner's order, 2026-10-16).
         controls=grid_with_ads(_render_ep_cards(), page),
-        spacing=12,
+        # The gap between the rows of episode cards is the grid contract's
+        # run spacing, not a number of its own (one grid, one set of
+        # numbers).
+        spacing=GRID_RUN_SPACING,
     )
 
     pager = ft_pager(
@@ -705,6 +714,11 @@ def AnimeDetailScreen() -> ft.Control:
     platform = getattr(page, "platform", None)
     is_tv = platform is not None and platform == ft.PagePlatform.ANDROID_TV
     compact = bool(page is not None and not is_tv and 0 < width < 720)
+    # The layout above is decided by the WIDTH, so the screen has to
+    # re-render when the window changes size — otherwise a rotated
+    # phone keeps the layout of the last render (the counter is bumped
+    # by the page's resize handler, main.py).
+    _ = state.viewport_version
 
     hero_cover = ft.Container(
         aspect_ratio=16 / 7,
@@ -743,6 +757,12 @@ def AnimeDetailScreen() -> ft.Control:
         width=96,
         height=140,
         right=8,
+        # BOTH insets, so the poster is a FULLY positioned Stack child:
+        # with only `right` set Flutter treats it as partially positioned
+        # and the Stack's own alignment (topStart) put it at the TOP of
+        # the cover, not in the bottom band the comment above describes
+        # (audit, 2026-10-19).
+        bottom=0,
         border_radius=10,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         border=ft.Border.all(2, ft.Colors.with_opacity(0.7, ft.Colors.BLACK)),

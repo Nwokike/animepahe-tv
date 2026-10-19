@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from services.downloads import (
     MAX_PARALLEL_DOWNLOADS,
+    SEGMENT_RETRY_BACKOFF_SECONDS,
     STATE_COMPLETED,
     DownloadManager,
 )
@@ -172,7 +173,14 @@ def test_a_permanently_failing_segment_fails_the_job():
 
 
 def test_a_stalled_segment_does_not_hang_the_job_forever():
-    """Same shape, second segment only: the whole job must still finish."""
+    """Same shape, second segment only: the whole job must still finish.
+
+    The budget now covers the retry backoff introduced for the throttled
+    CDNs (2026-10-19: 'too_many_data_frames' bursts): a segment waits
+    backoff*tries before its next attempt, so a 3-attempt segment needs
+    ~2x the backoff of slack here. The point of the test is unchanged —
+    the job FINISHES, it does not spin forever."""
+    budget = 2.0 + SEGMENT_RETRY_BACKOFF_SECONDS * 3
 
     async def scenario(tmp):
         mgr = _manager(tmp, routes=[("seg1.ts", lambda: _BoomResp())])
@@ -180,7 +188,7 @@ def test_a_stalled_segment_does_not_hang_the_job_forever():
         started = time.monotonic()
         await mgr.start("ep2", "https://x/master.m3u8", {}, {})
         await _drain(mgr, "ep2")
-        assert time.monotonic() - started < 4.0
+        assert time.monotonic() - started < budget
         assert mgr.active_jobs == []
 
     with tempfile.TemporaryDirectory() as tmp:

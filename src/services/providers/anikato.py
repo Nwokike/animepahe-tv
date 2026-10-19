@@ -412,23 +412,38 @@ class AniKatoProvider:
             return cached
         genres, types, statuses, seasons = await self._discover_filter_options()
         spec: list[dict] = []
+        # Every one of these maps to a real ARRAY input on the site's own
+        # /filter form (genre[], term_type[], status[], season[]), so the
+        # key takes several values — the screen sends a list and `browse`
+        # repeats the parameter. The flag lives in the spec so the screen
+        # never has to guess which keys are multi-valued.
         if genres:
             spec.append(
                 {
                     "key": "genre",
                     "label": "Genre",
                     "kind": "choice",
+                    "multi": True,
                     "options": genres,
                 }
             )
         if types:
-            spec.append({"key": "type", "label": "Type", "kind": "choice", "options": types})
+            spec.append(
+                {
+                    "key": "type",
+                    "label": "Type",
+                    "kind": "choice",
+                    "multi": True,
+                    "options": types,
+                }
+            )
         if statuses:
             spec.append(
                 {
                     "key": "status",
                     "label": "Status",
                     "kind": "choice",
+                    "multi": True,
                     "options": statuses,
                 }
             )
@@ -438,6 +453,7 @@ class AniKatoProvider:
                     "key": "season",
                     "label": "Season",
                     "kind": "choice",
+                    "multi": True,
                     "options": seasons,
                 }
             )
@@ -446,6 +462,12 @@ class AniKatoProvider:
                 "key": "sort",
                 "label": "Sort",
                 "kind": "choice",
+                # NO "direction": the site's own /filter form has no
+                # order/asc-desc parameter (verified live 2026-10-19:
+                # the form's inputs are genre[], term_type[], status[],
+                # season[], sort, ep_min, ep_max, year[], rating[],
+                # source[], language[]). Offering a direction toggle here
+                # would flip an arrow and change nothing.
                 "options": [
                     {"value": "default", "label": "Default"},
                     {"value": "latest-updated", "label": "Latest updated"},
@@ -515,8 +537,19 @@ class AniKatoProvider:
         }
         for filter_key, param_name in form_keys.items():
             value = filters.get(filter_key)
-            if value:
-                params.append(f"{quote(param_name)}={quote(str(value))}")
+            if not value:
+                continue
+            # The site's inputs are ARRAY inputs, so a multi-valued key
+            # is sent as the parameter REPEATED (genre[]=1&genre[]=2).
+            # The protocol also says a list; a bare string is accepted
+            # for any other caller. Stringifying a list outright
+            # ("['1']") is what made this filter match nothing on
+            # 2026-10-19 — the request was genre[]=%5B%271%27%5D.
+            values = [value] if isinstance(value, str | int) else list(value)
+            for item in values:
+                text = str(item).strip()
+                if text:
+                    params.append(f"{quote(param_name)}={quote(text)}")
         if filters.get("sort"):
             params.append(f"sort={quote(str(filters['sort']))}")
         for key in ("ep_min", "ep_max"):

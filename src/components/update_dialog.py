@@ -13,14 +13,122 @@ import logging
 
 import flet as ft
 
-from core.dialogs import show_app_dialog
+from core.dialogs import close_app_dialog, show_app_dialog
 from core.shared_services import get_shared_services
+from core.theme import AppColors
 
 logger = logging.getLogger(__name__)
 
 
-def show_update_dialog(page: ft.Page, update_data: dict):
-    """'New Version Available!' — mandatory updates block dismissal."""
+def _show_up_to_date(page: ft.Page) -> None:
+    """'You're up to date' — the version pill's destination.
+
+    The house pattern (KTV components/version_dialog.py, Sherlock
+    components/update_dialog.py, DDGS components/update_dialog.py — all
+    three build this dialog the same way): a "You're up to date" title
+    with the verified icon, the current version, the bundled changelog
+    as MARKDOWN in a SCROLLABLE column, and a live re-check.
+
+    Two things the house gets right that this copy did not (2026-10-19
+    audit): the notes were a plain ``ft.Text`` in a FIXED 340x220 box, so
+    the 1128-character changelog painted ~160px over the buttons; and
+    the dismissal popped the topmost dialog unconditionally, which
+    dismissed a SnackBar standing above this one and orphaned the
+    dialog itself."""
+    from core.changelog import notes_for
+    from core.constants import APP_VERSION
+
+    def _dismiss():
+        # The app's own registry: it pops only if THIS dialog is the
+        # topmost open one, so a snackbar above it is not eaten.
+        close_app_dialog(page)
+
+    async def _recheck(e=None):
+        _dismiss()
+        from core.state import state as app_state
+        from services.update_service import UpdateService
+
+        try:
+            data = await UpdateService().check_for_update()
+        except Exception:
+            data = None
+        # The header's pill morphs on these two fields; a re-check that
+        # does not write them leaves the pill saying "up to date" even
+        # when a newer build is waiting (the house writes both).
+        app_state.update_available = bool(data)
+        app_state.update_data = data or {}
+        if data:
+            show_update_dialog(page, data)
+        else:
+            show_update_dialog(page, None)
+
+    dlg = ft.AlertDialog(
+        modal=False,
+        title=ft.Row(
+            [
+                ft.Icon(ft.Icons.VERIFIED_ROUNDED, color=AppColors.PRIMARY, size=24),
+                ft.Text(
+                    "You're up to date",
+                    weight=ft.FontWeight.BOLD,
+                ),
+            ],
+            spacing=8,
+        ),
+        content=ft.Column(
+            [
+                ft.Text(f"✓ Latest version · v{APP_VERSION}", size=13),
+                ft.Container(height=4),
+                ft.Text("What's New:", size=13, weight=ft.FontWeight.W_600),
+                ft.Container(
+                    content=ft.Column(
+                        [
+                            ft.Markdown(
+                                notes_for(APP_VERSION),
+                                selectable=True,
+                                size=12,
+                            )
+                        ],
+                        scroll=ft.ScrollMode.AUTO,
+                        # A bounded, SCROLLABLE box: the notes are a
+                        # variable-length list, and a fixed height with
+                        # no scroll cut the tail off the dialog.
+                        height=220,
+                    ),
+                    width=340,
+                ),
+            ],
+            tight=True,
+            spacing=0,
+        ),
+        actions=[
+            ft.OutlinedButton(
+                content="Check for Updates",
+                icon=ft.Icons.SYNC_ROUNDED,
+                on_click=lambda e: page.run_task(_recheck, e),
+            ),
+            ft.TextButton(content="Close", on_click=lambda e: _dismiss()),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+        # NO on_dismiss handler here: flet 1.0.4 wraps on_dismiss and
+        # removes the dialog from the stack BEFORE calling it, so a
+        # handler that pops again closes whatever else is on top (the
+        # re-check path appended the new dialog while this one was still
+        # closing, and the round-trip popped the NEW one).
+    )
+    show_app_dialog(page, dlg)
+
+
+def show_update_dialog(page: ft.Page, update_data: dict | None = None):
+    """'New Version Available!' — mandatory updates block dismissal.
+
+    With no data (or ``update_data=None``) it opens the UP-TO-DATE mode:
+    the current version plus the bundled changelog. That is what the
+    header's version pill opens (KTV/Sherlock house pattern — the pill is
+    always live, and a tap works offline because the changelog is
+    bundled)."""
+    if not update_data:
+        _show_up_to_date(page)
+        return
     mandatory = bool(update_data.get("mandatory"))
     shared = get_shared_services(page)
     # One guard for every dismissal path (the Later button, the global

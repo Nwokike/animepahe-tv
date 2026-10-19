@@ -18,6 +18,7 @@ certified backend map (docs/reference/backend-kayoanime.md):
   links-under-maintenance.
 """
 
+import html
 import logging
 import re
 from typing import ClassVar
@@ -38,6 +39,7 @@ from core.state import Anime, Episode, LatestRelease, Source
 from services.providers.base import (
     all_episodes,
     close_client,
+    label_with_count,
     make_session,
     page_slice,
     releases_from_anime,
@@ -102,6 +104,11 @@ def _folder_pairs(content_html: str) -> list[tuple[str, str]]:
         re.DOTALL,
     ):
         clean = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", label)).strip()
+        # WordPress HTML-escapes the label: a folder named "OVAs & Specials"
+        # arrives as "OVAs &amp; Specials". Stripping tags alone left the
+        # entity in the UI text (owner's log: "OVAs &amp; Specials",
+        # 2026-10-16). html.unescape is stdlib and safe on any input.
+        clean = html.unescape(clean)
         pairs.append((href, clean[:120]))
     seen: set[str] = set()
     unique: list[tuple[str, str]] = []
@@ -219,7 +226,11 @@ class KayoanimeProvider:
             status="",
             season="",
             year=year,
-            score=0.0,
+            # Kayoanime exposes NO numeric rating (verified live 2026-10-19:
+            # the payload's only "rating" field is the AGE certification,
+            # "PG-13"). Score stays None so the card renders nothing rather
+            # than a fabricated "★ 0.0" (owner's report — count honesty).
+            score=None,
             poster=poster,
             # The post body is this source's blog entry — its intro
             # paragraph is the description. Present only when the caller
@@ -265,7 +276,7 @@ class KayoanimeProvider:
                     options.append(
                         {
                             "value": str(row.get("id")),
-                            "label": f"{row['name']} ({row.get('count', 0)})",
+                            "label": label_with_count(row["name"], row.get("count")),
                         }
                     )
         except Exception as ex:
@@ -277,6 +288,7 @@ class KayoanimeProvider:
                     "key": "categories",
                     "label": "Category",
                     "kind": "choice",
+                    "multi": True,
                     "options": options,
                 }
             )
@@ -285,6 +297,7 @@ class KayoanimeProvider:
                 "key": "orderby",
                 "label": "Sort",
                 "kind": "choice",
+                "direction": True,
                 "options": [
                     {"value": "modified", "label": "Recently updated"},
                     {"value": "date", "label": "Newest"},
@@ -300,18 +313,28 @@ class KayoanimeProvider:
             "per_page": "30",
             "page": str(page),
             "orderby": str(filters.get("orderby") or "modified"),
-            "order": "desc",
+            "order": "asc" if str(filters.get("order") or "desc") == "asc" else "desc",
             "_fields": "id,title,featured_media,modified,yoast_head_json",
         }
-        if filters.get("categories"):
-            params["categories"] = ",".join(str(c) for c in filters["categories"])
+        categories = filters.get("categories")
+        if categories:
+            # The protocol says LIST; the Discover dropdown emits one
+            # string. Coerce either shape — joining a bare string
+            # iterates its CHARACTERS (the original bug: category 14893
+            # became categories=1,4,8,9,3, 2026-10-19).
+            values = [categories] if isinstance(categories, str | int) else list(categories)
+            params["categories"] = ",".join(str(c) for c in values if str(c).strip())
         resp = await self._client.get(f"{KAYOANIME_API}/posts", params=params)
         if resp.status_code != 200:
             raise RuntimeError(f"kayoanime HTTP {resp.status_code}")
         posts = resp.json()
         result = ([self._to_anime(p) for p in posts], len(posts) >= 30)
         self._cache_put(
-            f"browse_{filters.get('categories')}_{filters.get('orderby')}_{page}",
+            # The direction is part of the identity of the result: without
+            # it in the key, ascending and descending results would share
+            # one cache entry the moment a read is added.
+            f"browse_{filters.get('categories')}_{filters.get('orderby')}_"
+            f"{filters.get('order', 'desc')}_{page}",
             result,
             CACHE_TTL_LATEST,
         )

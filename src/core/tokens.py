@@ -21,6 +21,7 @@ __all__ = [
     "BORDER_RADIUS_MD",
     "BORDER_RADIUS_SM",
     "BORDER_RADIUS_XL",
+    "BREAKPOINT_TABLET",
     "CARD_ASPECT_LANDSCAPE",
     "CARD_ASPECT_PORTRAIT",
     "DIALOG_HEIGHT_MD",
@@ -34,6 +35,9 @@ __all__ = [
     "FONT_XS",
     "FONT_XXL",
     "FONT_XXXL",
+    "GRID_COL",
+    "GRID_RUN_SPACING",
+    "GRID_SPACING",
     "ICON_LG",
     "ICON_MD",
     "ICON_SM",
@@ -103,3 +107,9 @@ DIALOG_HEIGHT_MD: Final = 420
 GRID_COL: Final = {"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2}
 GRID_SPACING: Final = 16
 GRID_RUN_SPACING: Final = 16
+
+# Material 3 window-class boundary (dp): below it the header drops the
+# redundant backend badge, because the title pill already opens the same
+# source picker and a phone's action row needs the room. Above it (tablet,
+# TV) both readouts ride the scrolling action row.
+BREAKPOINT_TABLET: Final = 600

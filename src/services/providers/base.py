@@ -172,7 +172,24 @@ class BrowserProvider(Protocol):
         ``[{"key", "label", "kind": "choice"|"number", "options":
         [{"value", "label"}]}]``. Values come from the provider's own
         site at runtime — nothing is hardcoded in the UI. A provider
-        without a browse route omits this entirely."""
+        without a browse route omits this entirely.
+
+        Two optional flags describe the SHAPE of a key, and the screen
+        reads them instead of guessing (a hardcoded key list in the UI
+        broke AniKato's genre/status/season filters on 2026-10-19 —
+        the screen wrapped them in a list the site's form never wanted,
+        so the request was ``genre[]=['1']`` and the grid came back
+        empty):
+
+        - ``"multi": True`` — the key accepts SEVERAL values. The
+          screen sends a list; ``browse`` must accept a list (and a
+          bare string, for any other caller).
+        - ``"direction": True`` — the source's sort has a direction
+          (asc/desc) the app can toggle. Only WordPress-style
+          catalogues have one; AniKato's own form has no order
+          parameter, so a toggle there would be a control that flips
+          an arrow and changes nothing.
+        """
         ...
 
     async def browse(self, filters: dict, page: int) -> tuple[list[Anime], bool]:
@@ -180,6 +197,24 @@ class BrowserProvider(Protocol):
         chosen values (radio semantics per key). Empty means nothing
         matched — a RESULT, not a failure."""
         ...
+
+
+def label_with_count(name: str, count) -> str:
+    """``<name> (<count>)`` — but only when the source PUBLISHED a count.
+
+    The count-honesty rule (the owner's standing rule, and the
+    2026-10-16 findings): a number the site never sent is never
+    printed. WordPress omits ``count`` on some category rows, and the
+    old ``row.get("count", 0)`` printed "(0)" — a number nobody
+    published, and the owner's "the numbering is either false,
+    hallucinated, or does not update" (2026-10-19)."""
+    if count is None:
+        return str(name)
+    try:
+        value = int(count)
+    except (TypeError, ValueError):
+        return str(name)
+    return f"{name} ({value})"
 
 
 __all__ = [

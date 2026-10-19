@@ -646,31 +646,20 @@ def _close_player():
 def _build_download_quality_dialog(state, controller) -> ft.Control:
     """Which rendition to save offline — the same list the play dialog
     shows, because a silent sources[0] downloads whatever the provider
-    listed first (a 360p when a 1080p exists). The best is filled in as
-    the recommendation."""
+    listed first (a 360p when a 1080p exists). The best is marked in the
+    label (" · Best") so every row is the same control and D-pad focus
+    stays symmetric (owner, 2026-10-19)."""
     choices = state.download_choices or []
     pending = state.pending_download or {}
     buttons = []
     for i, choice in enumerate(choices):
         is_first = i == 0
+        label = choice["label"] if not is_first else f"{choice['label']}  ·  Best"
         buttons.append(
-            
-                ft.FilledButton(
-                    content=choice["label"],
-                    icon=ft.Icons.RECOMMEND_ROUNDED,
-                    style=ft.ButtonStyle(
-                        bgcolor=AppColors.PRIMARY,
-                        color=ft.Colors.WHITE,
-                        shape=ft.RoundedRectangleBorder(radius=10),
-                    ),
-                    on_click=lambda e, i=i: controller.choose_download_quality(i),
-                )
-                if is_first
-                else ft.OutlinedButton(
-                    content=choice["label"],
-                    on_click=lambda e, i=i: controller.choose_download_quality(i),
-                )
-            
+            ft.Button(
+                content=label,
+                on_click=lambda e, i=i: controller.choose_download_quality(i),
+            )
         )
     label = f"{pending.get('title', '')} — Episode {pending.get('episode_num', '?')}"
     return ft.AlertDialog(
@@ -815,9 +804,14 @@ def _build_backend_picker(state, controller) -> ft.Control:
 def _build_quality_dialog(state, controller) -> ft.Control:
     """Select Quality & Audio — every site source the scraper found, best
     first, exactly the list the original build showed. Nothing is filtered:
-    an anime with 3 qualities in 2 languages shows all of them. The best
-    pick is simply filled in as the recommended default, and the m3u8
-    variants of whatever is chosen live in the player's own settings sheet.
+    an anime with 3 qualities in 2 languages shows all of them.
+
+    Every row is the SAME control. The first (highest) pick carries a
+    small "Best" marker in its label instead of being a differently-shaped
+    filled button: a lone filled-red row between outlined rows breaks
+    D-pad focus symmetry on a TV remote (the owner could feel it moving
+    up and down the list, 2026-10-19). The m3u8 variants of whatever is
+    chosen live in the player's own settings sheet.
     """
     choices = state.quality_choices or []
     # A site-source choice re-resolves through kwik (seconds): disable the
@@ -826,26 +820,13 @@ def _build_quality_dialog(state, controller) -> ft.Control:
     buttons = []
     for i, choice in enumerate(choices):
         is_first = i == 0
+        label = choice["label"] if not is_first else f"{choice['label']}  ·  Best"
         buttons.append(
-            
-                ft.FilledButton(
-                    content=choice["label"],
-                    icon=ft.Icons.RECOMMEND_ROUNDED,
-                    disabled=resolving,
-                    style=ft.ButtonStyle(
-                        bgcolor=AppColors.PRIMARY,
-                        color=ft.Colors.WHITE,
-                        shape=ft.RoundedRectangleBorder(radius=10),
-                    ),
-                    on_click=lambda e, i=i: controller.choose_quality(i),
-                )
-                if is_first
-                else ft.OutlinedButton(
-                    content=choice["label"],
-                    disabled=resolving,
-                    on_click=lambda e, i=i: controller.choose_quality(i),
-                )
-            
+            ft.Button(
+                content=label,
+                disabled=resolving,
+                on_click=lambda e, i=i: controller.choose_quality(i),
+            )
         )
     return ft.AlertDialog(
         modal=True,

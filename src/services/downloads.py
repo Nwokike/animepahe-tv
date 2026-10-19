@@ -53,6 +53,11 @@ FILE_TIMEOUT = 600
 # Concurrent jobs across BOTH paths — the rest queue on the limiter, in
 # start order (Media3's maxParallelDownloads, which defaults to 3 there).
 MAX_PARALLEL_DOWNLOADS = 3
+# Wait before a failed segment is retried (seconds), multiplied by the
+# attempt number: a throttled CDN gets room to recover instead of being
+# hammered by a hot loop (the "too_many_data_frames" bursts in the
+# owner's live log, 2026-10-19).
+SEGMENT_RETRY_BACKOFF_SECONDS = 1.5
 
 # Job states (Media3's set — the persisted vocabulary in manifest.json).
 STATE_QUEUED = "queued"
@@ -786,6 +791,11 @@ class DownloadManager:
 
             done, queue = await anyio.to_thread.run_sync(_scan_segments, segs_dir, uris)
             progress["done"] = done
+            # One attempt counter for the WHOLE job: a requeued segment
+            # can land on any worker, so a per-worker counter would reset
+            # and one bad segment could be retried 18 times (6 workers x
+            # 3 attempts) instead of the 3 the cap promises.
+            attempts: dict[str, int] = {}
             workers = [
                 asyncio.create_task(
                     self._worker(
@@ -796,6 +806,7 @@ class DownloadManager:
                         progress,
                         episode_session,
                         cancel,
+                        attempts,
                     ),
                     name=f"segment-worker-{episode_session}-{i}",
                 )
@@ -874,46 +885,58 @@ class DownloadManager:
         progress: dict,
         episode_session: str,
         cancel: asyncio.Event,
+        attempts: dict[str, int],
     ):
-        # HLS jobs run one worker per segment PARALLEL to the cross-job
-        # limiter: without this, N queued episodes fetched Nx6 segments
-        # concurrently and bounded nothing.
-        async with self._job_limiter:
-            # One permanently-failing segment (404) used to be re-queued
-            # forever — the job livelocked and never failed. Bounded now.
-            attempts: dict[str, int] = {}
-            while queue and not cancel.is_set():
-                try:
-                    index, uri = queue.pop(0)
-                except IndexError:
-                    return
-                segment_url = uri if uri.startswith("http") else f"{base_url}/{uri}"
-                name = f"{index:05d}-" + os.path.basename(uri.split("?")[0])
-                part_path = os.path.join(segs_dir, name + ".part")
-                final_path = os.path.join(segs_dir, name)
-                try:
+        # The segment workers of one job SHARE the attempt counter: a
+        # requeued segment can be picked up by a different worker, so a
+        # per-worker counter reset itself and one segment could be tried
+        # PARALLEL_SEGMENTS x MAX_SEGMENT_ATTEMPTS times (18) instead of
+        # the 3 the cap promises.
+        while queue and not cancel.is_set():
+            try:
+                index, uri = queue.pop(0)
+            except IndexError:
+                return
+            segment_url = uri if uri.startswith("http") else f"{base_url}/{uri}"
+            name = f"{index:05d}-" + os.path.basename(uri.split("?")[0])
+            part_path = os.path.join(segs_dir, name + ".part")
+            final_path = os.path.join(segs_dir, name)
+            try:
+                # The permit is taken per FETCH, not for the worker's
+                # whole life: the limiter bounds concurrent fetches, and a
+                # worker waiting out its backoff must not sit on a global
+                # cross-job slot while it does nothing.
+                async with self._job_limiter:
                     await self._download_file(segment_url, headers, part_path, final_path)
-                except Exception as ex:
-                    tries = attempts.get(uri, 0) + 1
-                    attempts[uri] = tries
-                    if tries >= MAX_SEGMENT_ATTEMPTS:
-                        # Fail the job: _run's except records the error and
-                        # the row becomes retryable, not permanently stuck.
-                        raise RuntimeError(f"segment {name} failed {tries} times: {ex}") from ex
-                    logger.warning(
-                        "segment %s failed (attempt %d/%d): %s",
-                        name,
-                        tries,
-                        MAX_SEGMENT_ATTEMPTS,
-                        ex,
-                    )
-                    # Put it back for the next pass; a later retry can pick it up.
-                    queue.append((index, uri))
-                    continue
-                progress["done"] += 1
-                if self.on_progress is not None:
-                    with contextlib.suppress(Exception):
-                        self.on_progress(episode_session, dict(progress))
+            except Exception as ex:
+                tries = attempts.get(uri, 0) + 1
+                attempts[uri] = tries
+                if tries >= MAX_SEGMENT_ATTEMPTS:
+                    # Fail the job: _run's except records the error and
+                    # the row becomes retryable, not permanently stuck.
+                    raise RuntimeError(f"segment {name} failed {tries} times: {ex}") from ex
+                logger.warning(
+                    "segment %s failed (attempt %d/%d): %s",
+                    name,
+                    tries,
+                    MAX_SEGMENT_ATTEMPTS,
+                    ex,
+                )
+                # Back off before requeueing. The wall-mounted CDNs
+                # answer a burst with "too_many_data_frames", and a hot
+                # retry loop turns that into a throttle spiral (owner's
+                # log, 2026-10-19: bursts of those warnings mid-series).
+                # The wait grows with the attempt and happens OUTSIDE the
+                # limiter, so the job's other segments — and other jobs —
+                # keep their permits.
+                await asyncio.sleep(min(SEGMENT_RETRY_BACKOFF_SECONDS * tries, 10.0))
+                # Put it back for the next pass; a later retry can pick it up.
+                queue.append((index, uri))
+                continue
+            progress["done"] += 1
+            if self.on_progress is not None:
+                with contextlib.suppress(Exception):
+                    self.on_progress(episode_session, dict(progress))
 
     async def _resolve_playlist(self, url: str, headers: dict) -> tuple[str, str]:
         """Return the media playlist URL + body (top variant for a master)."""

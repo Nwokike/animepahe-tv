@@ -235,3 +235,57 @@ def test_plain_summary_strips_tags_and_caps_at_a_sentence():
     # Short bodies come back whole.
     assert plain_summary("<p>Short.</p>") == "Short."
     assert plain_summary("") == ""
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-19 — Kayoanime's "★ 0.0" (the owner: "kayoanime discover and
+# search show rating as star 0.0... check if kayoanime expose it").
+# ---------------------------------------------------------------------------
+
+
+def test_a_zero_score_renders_no_star():
+    """Verified live: Kayoanime exposes no numeric rating (its 'rating'
+    field is the age certification), so nothing may be printed for it."""
+    from components.result_card import result_card
+    from core.state import Anime
+
+    anime = Anime(
+        id=1, title="Black Clover", type="TV", episodes=0, status="",
+        season="", year=2024, score=None, poster="", session="kayoanime:1",
+    )
+    card = result_card(anime, lambda s: None)
+
+    def _walk(control):
+        yield control
+        for child in getattr(control, "controls", []) or []:
+            yield from _walk(child)
+        content = getattr(control, "content", None)
+        if content is not None:
+            yield from _walk(content)
+
+    texts = [n.value for n in _walk(card) if isinstance(n, ft.Text)]
+    assert not any("★" in (t or "") for t in texts), (
+        "a rating the source does not publish must render as nothing"
+    )
+
+
+def test_a_real_score_still_renders():
+    from components.result_card import result_card
+    from core.state import Anime
+
+    anime = Anime(
+        id=1, title="Frieren", type="TV", episodes=28, status="Finished",
+        season="Fall", year=2023, score=9.3, poster="", session="anikato:2",
+    )
+    card = result_card(anime, lambda s: None)
+
+    def _walk(control):
+        yield control
+        for child in getattr(control, "controls", []) or []:
+            yield from _walk(child)
+        content = getattr(control, "content", None)
+        if content is not None:
+            yield from _walk(content)
+
+    texts = [n.value for n in _walk(card) if isinstance(n, ft.Text)]
+    assert any("★ 9.3" in (t or "") for t in texts)

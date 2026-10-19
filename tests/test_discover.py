@@ -270,15 +270,139 @@ async def test_a_string_filter_value_is_never_char_iterated():
 
 
 def test_the_screen_shapes_dropdown_values_to_the_protocol():
-    """The screen's _pick wraps multi-valued keys (categories/tags/…) in a
-    list and passes scalars through, so the provider receives its documented
-    shape whatever the dropdown emits."""
+    """The screen's _pick wraps the MULTI-VALUED keys in a list and passes
+    scalars through — and which keys are multi-valued is read from the
+    PROVIDER'S SPEC, not from a hardcoded list in the UI.
+
+    The hardcoded list was wrong the moment it was written: it wrapped
+    AniKato's genre/status/season in a list the site's form never wanted
+    (the request became ``genre[]=['1']`` and the grid came back empty —
+    2026-10-19), and it missed WordPress's "type" key. The provider
+    declares the shape; the screen renders it."""
     import screens.discover_screen as ds
 
-    assert "categories" in ds._LIST_VALUED_KEYS
-    assert "orderby" not in ds._LIST_VALUED_KEYS
-    shaped = lambda key, value: {
-        key: [value] if key in ds._LIST_VALUED_KEYS else value
-    }
+    spec = [
+        {"key": "categories", "kind": "choice", "multi": True, "options": []},
+        {"key": "orderby", "kind": "choice", "options": [{"value": "modified"}]},
+    ]
+    multi = ds._multi_valued_keys(spec)
+    assert "categories" in multi
+    assert "orderby" not in multi, "a sort is a single value"
+
+    shaped = lambda key, value: {key: [value] if key in multi else value}
     assert shaped("categories", "14893")["categories"] == ["14893"]
     assert shaped("orderby", "date")["orderby"] == "date"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "module_name, class_name",
+    [
+        ("services.providers.animeout", "AnimeOutProvider"),
+        ("services.providers.kayoanime", "KayoanimeProvider"),
+    ],
+)
+async def test_the_providers_declare_their_own_filter_shapes(module_name, class_name):
+    """Each provider says what its keys mean: "multi" for the ones that
+    take several values, "direction" for the ones whose sort can be
+    flipped. The screen reads those flags, so a provider that changes its
+    own vocabulary needs no UI change."""
+    import importlib
+
+    module = importlib.import_module(module_name)
+    cls = getattr(module, class_name)
+    client = _Client({"/categories": _Resp(json_data=WP_CATEGORIES)})
+    provider = cls(client=client)
+    provider._cache_get = lambda key: None
+    provider._cache_put = lambda key, value, ttl: None
+
+    spec = await provider.filters()
+    by_key = {s["key"]: s for s in spec}
+    assert by_key["categories"].get("multi") is True, (
+        "the category key takes several values — the screen must send a list"
+    )
+    assert by_key["orderby"].get("direction") is True, (
+        "WordPress's orderby has a direction (asc/desc) the screen may toggle"
+    )
+
+
+@pytest.mark.asyncio
+async def test_anikato_declares_no_direction_because_its_form_has_none():
+    """AniKato's own /filter form has NO order parameter (verified live
+    2026-10-19: genre[], term_type[], status[], season[], sort, ep_min,
+    ep_max, year[], rating[], source[], language[]). A direction toggle
+    there flips an arrow and changes nothing — so the provider declares
+    none, and the screen shows no toggle."""
+    from services.providers.anikato import AniKatoProvider
+
+    provider = AniKatoProvider()
+    provider._cache_get = lambda key: None
+    provider._cache_put = lambda key, value, ttl: None
+
+    async def _options():
+        return (
+            [{"value": "1", "label": "Action"}],
+            [{"value": "tv", "label": "TV"}],
+            [{"value": "finished-airing", "label": "Finished"}],
+            [{"value": "fall", "label": "Fall"}],
+        )
+
+    provider._discover_filter_options = _options
+    spec = await provider.filters()
+    by_key = {s["key"]: s for s in spec}
+    for key in ("genre", "type", "status", "season"):
+        assert by_key[key].get("multi") is True, (
+            f"{key} is an ARRAY input on the site's form — the screen must "
+            "send a list"
+        )
+    assert "direction" not in by_key["sort"], (
+        "AniKato's form has no order parameter — declaring a direction "
+        "would put a dead control on the screen"
+    )
+
+
+def test_the_sort_default_is_what_the_request_carries():
+    """The dropdown shows the site's first sort option when nothing is
+    picked, so the REQUEST must carry it — a displayed value that is never
+    sent is a lie (the owner's "the numbering... does not update",
+    2026-10-19)."""
+    import screens.discover_screen as ds
+
+    filters = [
+        {"key": "orderby", "kind": "choice", "options": [{"value": "modified"}]},
+    ]
+    assert ds._sort_defaults(filters) == {"orderby": "modified"}
+    assert ds._effective_selections({}, filters) == {"orderby": "modified"}
+    # An explicit pick is never overwritten.
+    assert ds._effective_selections({"orderby": "date"}, filters) == {
+        "orderby": "date"
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filters, expected",
+    [
+        ({"genre": ["1"], "type": "tv"}, ["genre%5B%5D=1", "term_type%5B%5D=tv"]),
+        ({"genre": "1"}, ["genre%5B%5D=1"]),
+        ({"status": ["fall", "winter"]}, ["status%5B%5D=fall", "status%5B%5D=winter"]),
+    ],
+)
+async def test_anikato_sends_its_array_filters_as_repeated_parameters(
+    filters, expected
+):
+    """The site's form takes genre[]=1&genre[]=2, not a stringified list.
+
+    Stringifying the list outright sent ``genre[]=%5B%271%27%5D`` — the
+    site matched nothing and the grid came back empty (2026-10-19)."""
+    from services.providers.anikato import AniKatoProvider
+
+    client = _Client({"/filter": _Resp(text="<html></html>")})
+    provider = AniKatoProvider(client=client)
+    await provider.browse(filters, 1)
+    url = client.calls[0][0]
+    for part in expected:
+        assert part in url, url
+    assert "genre%5B%5D=%5B" not in url, (
+        "a stringified list matches nothing on the site"
+    )
