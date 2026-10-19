@@ -542,3 +542,85 @@ and `kwik.one` are unrelated sites (404 on `/f/`).
   and whether the per-quality direct file is worth the extra Cloudflare
   surface when the HLS download already produces a verified file on disk
   (AniKato 253.9 MB MPEG-TS, Kayoanime 847.2 MB MKV).
+
+### 7. Is it the SAME kwik? Yes — the same URL, from both ends
+
+The owner's follow-up: *"study kwik_resolver.py and how we do animepahe —
+I thought it was the same kwik?"* It is, and the proof is a single URL.
+
+**From AnimePahe's side.** `services/providers/animepahe_provider.py` reads the
+site's own `m=links` payload, which carries two URLs per rendition:
+`kwik` (the STREAM link) and `kwik_pahewin` (the FILE link — "the pahe.win
+share link for that rendition", read verbatim onto `Source.download_url`).
+Fetching that pahe.win link with our own primp client (a plain curl is
+WAF-blocked; primp's TLS impersonation passes) returns a page whose only
+kwik link is:
+
+```
+https://kwik.cx/f/nHkd7KvJyRxT
+```
+
+**From AniKato's side.** The site's own script (`anikoto/js/mapper.js`)
+asks `mapper.nekostream.site` for the same episode and gets
+`pahe.nekostream.site/{code}` → `testpahe.nekostream.site/{code}` → a 302 to:
+
+```
+https://kwik.cx/f/nHkd7KvJyRxT
+```
+
+**The same token, the same host, the same route, the same file** —
+`AnimePahe_Black_Clover_-_001_360p_SubsPlease.mp4`. AniKato's "download"
+is not AniKato's; it is AnimePahe's file reached through a third-party
+mapper, and the mapper's own normalizer names it: `kiwi-stream` →
+`animepahe` → the label `Kiwi-Stream`.
+
+**Our own scraper already speaks all three kwik routes.**
+`services/animepahe.py` scans the play page with
+`https?://kwik\.[a-z]+/(?:e|f|d)/[A-Za-z0-9_-]+` — `/e/` (stream),
+`/f/` (file page) and `/d/` (the download endpoint). The mapper's link is
+the `/f/` one.
+
+**The route split — and this is the part that decides the plan** (live
+probes, primp chrome impersonation):
+
+| route | what it is | Cloudflare |
+|---|---|---|
+| `kwik.cx/` | landing | 200, no wall |
+| `kwik.cx/e/{id}` | the PACKED stream page → our `KwikResolver` unpacks it to an m3u8 | **not challenged** (a bogus id answers 404, not 403) — this is what AnimePahe streams through, and it needs no clearance |
+| `kwik.cx/f/{id}` | the FILE page (title, size, MD5, the Download button) | **challenged** (`403`, `cf-mitigated: challenge`) — it clears in a real browser and the clearance then persists |
+| `kwik.cx/d/{id}` | the download itself (a CSRF'd POST → the media URL) | not challenged: it answers `419 Page Expired` (Laravel CSRF) with no Cloudflare involved. The 419 is the missing `_token`+session, and the session can be minted from the unchallenged landing page — but the CSRF token is only on the challenged `/f/` page |
+
+So the owner's premise is right about the STREAM and not about the FILE:
+**kwik plays without a second verify, but kwik's file page is the one
+route Cloudflare guards.** And the mapper exposes ONLY files (no stream
+variant — `/stream`, `/play` and the `?type=stream` variants all answer
+404 or the same download payload).
+
+**What that means for AniKato.** AniKato does not need kwik to avoid a
+WebView: its own stream (megaplay → `fetch.nexabloom.top` → master.m3u8)
+is already unchallenged and already verified on disk (253.9 MB MPEG-TS).
+What the kwik route would ADD is a direct, per-quality file download
+(360/720/1080 SubsPlease MP4s) instead of the HLS segments the engine
+assembles — and that file route needs a kwik.cx clearance, i.e. the
+WebView mechanism, on a different host than AnimePahe's. Wiring it is
+therefore a *phase*, not a flag.
+
+**The order change that follows (owner's order, 2026-10-19).** With the
+cost of each source established, the fixed order becomes:
+
+```
+AniKato  ->  Kayoanime  ->  AnimePahe  ->  AnimeOut
+```
+
+- **AniKato** — plain SSR + JSON, no wall on the catalogue, and a stream
+  that needs no clearance.
+- **Kayoanime** — plain WordPress + Drive, no wall anywhere.
+- **AnimePahe** — the catalogue is Cloudflare-walled, so it needs the
+  verification gate before it can be browsed.
+- **AnimeOut** — the catalogue answers, but its file host is walled
+  behind a challenge and then a plain nginx 403: it can serve art and
+  titles, not episodes.
+
+`PROVIDER_ORDER` in `services/providers/base.py` now reads exactly that,
+and the startup tests pin the new failover chain (AniKato → Kayoanime →
+AnimePahe → AnimeOut).

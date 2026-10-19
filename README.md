@@ -41,8 +41,11 @@ Get the latest version of AnimePahe TV. Modern phones and TVs use the **ARM64** 
 
 ## Features
 
-- **Independent sources, one at a time** — four backends (AniKato, AnimeOut,
-  AnimePahe, Kayoanime), each with its own catalog, artwork, playback and Cloudflare story. The app resolves
+- **Independent sources, one at a time** — four backends (AniKato, Kayoanime,
+  AnimePahe, AnimeOut — in that order, by what each one COSTS the user: the
+  first two answer with no verification, AnimePahe's catalogue is
+  Cloudflare-gated, AnimeOut's file host is walled), each with its own
+  catalog, artwork, playback and Cloudflare story. The app resolves
   one source behind a startup splash (a stored pin, or an automatic race of the open sources) and
   then *is* that source: nothing else is consulted, and switching re-runs the whole gate.
 - **The art decides the layout** — the screen sniffs the shape of the artwork the active source
@@ -192,7 +195,7 @@ flet build apk --release
 # Build for Windows
 flet build windows --release
 
-# Tests (606 passing; the whole ruff gate is clean)
+# Tests (609 passing; the whole ruff gate is clean)
 python -m pytest tests/ -q
 python -m ruff check --select F src/ tests/
 

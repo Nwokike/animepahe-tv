@@ -1,8 +1,10 @@
 """Resolve the session's source once, at startup — the owner's fixed order.
 
-The order (2026-10-15): the app tries **AniKato, AnimeOut, AnimePahe,
-Kusonime, Kayoanime** (PROVIDER_ORDER) and the first one that answers
-serves the session. A stored provider name pins directly with no probe.
+The order (2026-10-15, re-ordered 2026-10-19): the app tries
+**AniKato, Kayoanime, AnimePahe, AnimeOut** (PROVIDER_ORDER) and the
+first one that answers serves the session. The order follows what each
+source costs the user: no verification first, the Cloudflare gate
+last. A stored provider name pins directly with no probe.
 There is no "automatic" option in any UI — not the picker, not settings,
 not the header badge — and this file guards that by scanning the UI
 sources. The gate flips ready even when the first fetch fails; a manual
@@ -95,11 +97,17 @@ def _controller(pref="", health=None, latest=None):
 
 
 def test_the_fixed_order_is_the_owners_order():
+    """AniKato -> Kayoanime -> AnimePahe -> AnimeOut (owner, 2026-10-19).
+
+    The order is what each source COSTS the user: the first two answer
+    with no verification, AnimePahe's catalogue is Cloudflare-gated, and
+    AnimeOut's file host is walled behind a challenge and then a plain
+    nginx 403."""
     assert PROVIDER_ORDER == (
         "anikato",
-        "animeout",
-        "animepahe",
         "kayoanime",
+        "animepahe",
+        "animeout",
     )
 
 
@@ -151,21 +159,25 @@ def test_the_first_in_order_that_answers_serves():
     assert controller.router.pin == "anikato"
 
 
-def test_anikato_down_falls_to_animeout():
-    controller = _controller(health={"anikato": False, "animeout": True, "animepahe": True})
+def test_anikato_down_falls_to_kayoanime():
+    """The second of the owner's order is Kayoanime (no wall anywhere),
+    so it serves when AniKato does not answer."""
+    controller = _controller(
+        health={"anikato": False, "kayoanime": True, "animepahe": True}
+    )
     asyncio.run(controller.resolve_startup())
-    assert controller.router.pin == "animeout"
+    assert controller.router.pin == "kayoanime"
 
 
-def test_animeout_down_falls_to_animepahe():
-    """The third of the owner's mains: animepahe IS tried (and can win)
-    when the two above it do not answer."""
+def test_kayoanime_down_falls_to_animepahe():
+    """The third of the owner's order is AnimePahe: it IS tried (and can
+    win) when the two above it do not answer."""
     controller = _controller(
         health={
             "anikato": False,
-            "animeout": False,
+            "kayoanime": False,
             "animepahe": True,
-            "kayoanime": True,
+            "animeout": True,
         }
     )
     asyncio.run(controller.resolve_startup())
@@ -173,9 +185,11 @@ def test_animeout_down_falls_to_animepahe():
 
 
 def test_the_rest_follow_after_the_mains():
-    controller = _controller(health={"kayoanime": True})
+    """AnimeOut is last in the owner's order, but it is still TRIED when
+    everything above it is down."""
+    controller = _controller(health={"animeout": True})
     asyncio.run(controller.resolve_startup())
-    assert controller.router.pin == "kayoanime"
+    assert controller.router.pin == "animeout"
 
 
 def test_all_down_falls_back_to_the_first_in_order():

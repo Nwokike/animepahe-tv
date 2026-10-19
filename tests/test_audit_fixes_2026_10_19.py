@@ -356,7 +356,44 @@ def test_the_compact_poster_is_anchored_to_the_bottom_band():
 
 
 # ---------------------------------------------------------------------------
-# 7. The WordPress providers
+# 8. The provider order follows what each source costs the user
+# ---------------------------------------------------------------------------
+
+
+def test_the_provider_order_is_the_one_the_owner_asked_for():
+    """AniKato → Kayoanime → AnimePahe → AnimeOut (owner's order,
+    2026-10-19).
+
+    The order is not a preference list: it is what each source COSTS.
+    AniKato's catalogue is plain SSR/JSON and its stream (megaplay) needs
+    no clearance; Kayoanime is plain WordPress + Drive; AnimePahe's
+    catalogue is Cloudflare-walled and needs the verification gate;
+    AnimeOut's file host is walled behind a challenge and then a plain
+    nginx 403, so it can serve art and titles but not episodes.
+    """
+    from services.providers.base import PROVIDER_ORDER
+
+    assert PROVIDER_ORDER == ("anikato", "kayoanime", "animepahe", "animeout")
+
+
+def test_the_order_is_the_one_the_ui_and_the_startup_share():
+    """The picker, the startup gate and the router all read the SAME
+    order — there is no second list to drift."""
+    import app_shell
+    import main as app_main
+
+    for module, name in ((app_shell, "app_shell"), (app_main, "main")):
+        source = inspect.getsource(module)
+        assert "PROVIDER_ORDER" in source, f"{name} reads the shared order"
+
+    shell = inspect.getsource(app_shell)
+    assert "for n in PROVIDER_ORDER" in shell, (
+        "the picker lists the sources in the shared order"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9. The WordPress providers
 # ---------------------------------------------------------------------------
 
 

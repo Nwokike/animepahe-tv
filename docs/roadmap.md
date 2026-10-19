@@ -1,11 +1,14 @@
 # Roadmap — the multi-source app
 
 AnimePahe TV is a hybrid of independent backends: four sources (AniKato,
-AnimeOut, AnimePahe, Kayoanime), each treated like its own app —
+Kayoanime, AnimePahe, AnimeOut), each treated like its own app —
 its own catalog, artwork, playback and Cloudflare story. One source is
 resolved at startup behind a splash: a stored pin, or otherwise the FIXED
-ORDER — the app tries AniKato first, then AnimeOut, then AnimePahe, then
-Kayoanime, and the first one that answers serves the session.
+ORDER — the app tries AniKato first, then Kayoanime, then AnimePahe, then
+AnimeOut, and the first one that answers serves the session. The order
+follows what each source COSTS the user (owner's order, 2026-10-19): the
+two that answer with no verification first, the Cloudflare-gated one
+third, the one whose file host is walled last.
 There is no "automatic" option anywhere, in any UI (owner's order,
 2026-10-15). While the app is open the source changes only when the owner
 changes it. Grid orientation is automatic: the screen sniffs the shape of
@@ -15,7 +18,7 @@ ability only one source has appears only when that source is selected.
 **Standing rules.** Every phase starts with a full fresh read of all docs
 ("start afresh"), then a plan-mode presentation. Every step carries its own
 regression tests; commits per step; the full suite stays green at every
-commit (606 passing, warnings-as-errors, F-clean ruff gate). No new
+commit (609 passing, warnings-as-errors, F-clean ruff gate). No new
 dependencies without a study. Ads ship the owner's production unit ids
 (app 20208795, 2026-10-16) — no demo id anywhere.
 
@@ -45,11 +48,15 @@ swarm audit, and `docs/reference/`.
 
 ## Phase 2 — startup resolution & the independent-backend doctrine (complete)
 
-> **Revised 2026-10-15 (the owner's order).** The "Automatic" concept is
-> deleted everywhere — picker, settings, header badge. The app tries the
-> FIXED order **AniKato → AnimeOut → AnimePahe → Kayoanime**
+> **Revised 2026-10-15 (the owner's order), re-ordered 2026-10-19.** The
+> "Automatic" concept is deleted everywhere — picker, settings, header
+> badge. The app tries the FIXED order
+> **AniKato → Kayoanime → AnimePahe → AnimeOut**
 > (`PROVIDER_ORDER` in providers/base.py); the first that answers serves the
-> session, in memory only. A stored provider name pins directly. The
+> session, in memory only. The 2026-10-19 re-order follows the cost to the
+> user: AniKato and Kayoanime answer with no verification, AnimePahe's
+> catalogue is Cloudflare-gated, and AnimeOut's file host is walled behind
+> a challenge and then a plain nginx 403. A stored provider name pins directly. The
 > description below keeps Steps 1–8 as shipped; Step 2's "auto race" is what
 > this revision replaced.
 

@@ -30,7 +30,7 @@ the failure mode is real — the swarm audit traced ~8 criticals to following
 | dep-oauthlib.md | oauthlib 3.3.1 | **oauthlib 4.0.0** | ⚠ major, unused by app |
 | dep-small-transitives.md | certifi 2026.6.17 / idna 3.18 | **certifi 2026.7.22 / idna 3.20** | ⚠ minor |
 | dep-pytest-microdeps.md | pluggy 1.6.0 | **pluggy 1.7.0** | ⚠ minor |
-| dep-test-stack.md | ruff 0.15.20, 112 tests | **ruff 0.17.0, 606 tests** | ⚠ stale; §5 applied |
+| dep-test-stack.md | ruff 0.15.20, 112 tests | **ruff 0.17.0, 609 tests** | ⚠ stale; §5 applied |
 | dep-httpx.md | httpx 0.28.1 | 0.28.1 | current |
 | dep-httpcore.md | httpcore 1.0.9 | 1.0.9 | current |
 | dep-h11.md | h11 0.16.0 | 0.16.0 | current |

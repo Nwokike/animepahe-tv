@@ -1608,7 +1608,7 @@ class AppController:
 
         A stored preference pins directly (the owner's explicit choice).
         With no preference the app tries the fixed PROVIDER_ORDER — AniKato
-        first, then AnimeOut, then AnimePahe, then Kayoanime — and
+        first, then Kayoanime, then AnimePahe, then AnimeOut — and
         the first one that answers serves the session, pinned IN MEMORY ONLY
         (nothing is stored, so every launch re-tries the order). There is no
         user-facing "automatic" concept: this order is simply how the app

@@ -26,14 +26,27 @@ class CloudflareBlocked(Exception):
     to continue" — not as "the catalogue is empty". The router must not
     count it as a provider failure (the host is fine, it is challenging)."""
 
-# The owner's fixed priority (2026-10-15): the app tries these in order and
-# the first one that answers serves the session. This order IS the app's
-# behavior — there is no "automatic" option anywhere, in any UI, ever.
+# The owner's fixed priority (2026-10-15; re-ordered 2026-10-19): the app
+# tries these in order and the first one that answers serves the session.
+# This order IS the app's behavior — there is no "automatic" option
+# anywhere, in any UI, ever.
+#
+# The order follows what each source actually costs the user (the
+# owner's rule, 2026-10-19): a source that answers with NO verification
+# comes first, a source that needs the Cloudflare gate comes last.
+#   1. AniKato    — plain SSR + JSON, no wall on the catalogue, and its
+#                   stream (megaplay) needs no clearance either.
+#   2. Kayoanime  — plain WordPress + Drive, no wall anywhere.
+#   3. AnimePahe  — the catalogue is Cloudflare-walled, so it needs the
+#                   verification gate before it can be browsed.
+#   4. AnimeOut   — the catalogue answers, but its FILE host is walled
+#                   behind a challenge and then a plain nginx 403, so it
+#                   can serve art and titles but not episodes.
 PROVIDER_ORDER: tuple[str, ...] = (
     "anikato",
-    "animeout",
-    "animepahe",
     "kayoanime",
+    "animepahe",
+    "animeout",
 )
 
 # One page of an episode grid (Prev · Page N · Next). AnimePahe pages this
