@@ -9,27 +9,32 @@ on:
       build_version:
         description: "Build version"
         required: true
-        default: "1.0.9"
+        default: "2.0.0"
       build_number:
         description: "Build number"
         required: true
-        default: "10"
+        default: "20"
 
 permissions:
   contents: write
+
+# A superseded run must not queue behind a long build (Asase:23-25).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   PYTHONUTF8: "1"
   FLET_CLI_NO_RICH_OUTPUT: "1"
   UV_PYTHON: "3.14"
-  # Tag pushes carry the version (v1.2.3 -> 1.2.3, build number = UTC date
-  # stamp, monotonic without a counter to bump by hand); manual dispatches
+  # Tag pushes carry the version (v1.2.3 -> 1.2.3, build number = the run
+  # number, monotonic without a counter to bump by hand); manual dispatches
   # keep their explicit inputs.
-  BUILD_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.build_version || '1.0.9' }}
-  BUILD_NUMBER: ${{ startsWith(github.ref, 'refs/tags/v') && github.run_number || inputs.build_number || '10' }}
+  BUILD_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.build_version || '2.0.0' }}
+  BUILD_NUMBER: ${{ startsWith(github.ref, 'refs/tags/v') && github.run_number || inputs.build_number || '20' }}
 
 jobs:
-  # ─── 0. Create Release Tag & Placeholder ───────────────
+  # ─── 0. Create Release Tag & Placeholder ────────────
   prepare-release:
     runs-on: ubuntu-latest
     outputs:
@@ -64,10 +69,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Public Release Placeholder (optional mirror)
-        # The public mirror needs its own PAT; without it the build and
-        # the private release must still run (2026-10-16: a missing
-        # token failed prepare-release and produced no APK at all).
-        # Add the RELEASE_PAT secret to restore the mirror.
+        # The public mirror needs its own PAT; without it the build and the
+        # private release must still run (2026-10-16: a missing token failed
+        # prepare-release and produced no APK at all). Add the RELEASE_PAT
+        # secret to restore the mirror.
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
@@ -82,7 +87,18 @@ jobs:
             --title "$NAME" --notes "Automated build from $GITHUB_SHA" \
             || gh release edit "$TAG" --repo soco-live/animepahe-releases --title "$NAME"
 
-  # ─── 1. Android APK (universal) ───────────────────────────
+  # ─── The one Android job: caches + the gradle rebuild ─────────
+  # The old workflow ran the full `flet build` pipeline TWICE per APK
+  # family on cold runners (4-6 cold passes with 45-minute retries) and
+  # a redundant universal job — 37 minutes, and the run still failed.
+  # The house pattern, copied from the apps that build in <10 minutes:
+  #   DDGS build-all.yml:233-252   — the caches (their comment names exactly
+  #                                 our cost: the cold path re-downloads the
+  #                                 Flutter SDK + engine, "minutes each")
+  #   flet-notifications:162-166 / ktv-player:279 — after the desugaring
+  #                                 patch, only GRADLE needs re-running, not
+  #                                 the whole flet pipeline
+  #   Asase:134-148                — universal + split from one gradle rebuild
   build-apk:
     needs: [prepare-release]
     runs-on: ubuntu-latest
@@ -95,18 +111,40 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # ── Caches: the single biggest win (DDGS:233-252, nkiri-tv:42-45).
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: ${{ runner.os }}-uv-
+      - name: Cache Flutter SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter
+          key: flutter-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flutter-${{ runner.os }}-
+      - name: Cache flet templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.flet/cache
+          key: flet-tpl-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flet-tpl-${{ runner.os }}-
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: gradle-${{ runner.os }}-
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: echo "$KEYSTORE_BASE64" | base64 --decode > tv_keystore.jks
-      # ── Notifications need things pyproject cannot express (Sherlock's
-      # proven three-phase recipe, mirrored here): `flet build apk` stops
-      # at :app:checkReleaseAarMetadata because flutter_local_notifications
-      # (flet-notifications' Dart half) requires core-library desugaring.
-      #   1. generate the project (Gradle is expected to fail HERE only)
-      #   2. flet-notifications-patch injects desugaring + the receivers
-      #   3. build again — the patch survives, and --split-per-abi (or the
-      #      universal pass) is honoured.
+      # ── 1. Generate the project. Its Gradle pass is EXPECTED to stop at
+      # :app:checkReleaseAarMetadata — flutter_local_notifications (the
+      # flet-notifications Dart half) requires core-library desugaring, a
+      # manifest/gradle fact pyproject cannot express. The step only fails
+      # hard if the project was never written.
       - name: Generate the Android project
         env:
           FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
@@ -115,7 +153,7 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set +e
-          uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v
+          uv run --frozen flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
           status=$?
           set -e
           if [ "$status" -eq 0 ]; then
@@ -126,99 +164,36 @@ jobs:
             echo "::error::flet build apk failed before generating the Android project"
             exit 1
           fi
+      # ── 2. Patch: desugaring flags + the notification receivers
+      # (docs/reference/dep-flet-notifications.md §patcher.py).
       - name: Patch the generated Android project (notifications)
-        run: uv run flet-notifications-patch --project-root build/flutter
-      - name: Build APK (universal)
+        run: uv run --frozen flet-notifications-patch --project-root build/flutter
+      # ── 3. Rebuild with GRADLE ONLY — no second flet pipeline, no uv sync,
+      # no Python repackaging (flet-notifications:162-166, ktv-player:279).
+      # -Psplit-per-abi=true emits the per-ABI APKs; a plain assembleRelease
+      # in the same step emits the universal app-release.apk (Asase:142-148).
+      - name: Rebuild with gradle (split + universal)
+        working-directory: build/flutter/android
         env:
-          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
-          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
         run: |
-          # A Gradle build can be SIGTERM'd by the runner (exit 143) when
-          # two Android builds share the machine — one bounded retry heals
-          # that without serializing the jobs. The 45-min timeout turns a
-          # HUNG Gradle into a fast failure the retry can act on (the
-          # universal job once spun for an hour doing nothing, 2026-10-16).
-          for attempt in 1 2; do
-            timeout 2700 uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v && break
-            echo "::warning::universal build attempt $attempt failed — retrying"
-          done
-      - name: Upload to Private Release
-        if: github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
-          files: build/apk/*.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload to Public Release Repo (optional mirror)
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
-          TAG: ${{ needs.prepare-release.outputs.TAG_NAME }}
+          # Unpatched leftovers from the first pass must never be staged.
+          rm -f ../build/app/outputs/flutter-apk/*.apk
+          rm -f ../build/app/outputs/apk/release/*.apk
+          ./gradlew assembleRelease -Psplit-per-abi=true
+          # The universal APK, free from the same warmed-up Gradle.
+          ./gradlew assembleRelease
+      # ── 4. Stage every release APK under its final name.
+      - name: Stage APKs
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "RELEASE_PAT is not set — mirror upload skipped (the private release has the APK)."
-            exit 0
-          fi
-          gh release upload "$TAG" build/apk/*.apk --repo soco-live/animepahe-releases --clobber
-
-  # ─── 2. Android APK (split per ABI) ───────────────────────
-  build-apk-split:
-    # PARALLEL with build-apk (the house pattern in Sherlock/DDGS: every
-    # build job needs only prepare-release). It used to `needs: build-apk`
-    # — the universal APK had to FINISH before the split build started,
-    # doubling the wall-clock wait for no dependency at all (the owner's
-    # report, 2026-10-16). The two write different file sets into the same
-    # release, so they cannot collide.
-    needs: [prepare-release]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Free disk
-        run: sudo rm -rf /opt/hostedtoolcache/* /usr/share/dotnet /usr/local/lib/android/sdk/ndk/26* 2>/dev/null || true; df -h
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - name: Decode Keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 --decode > tv_keystore.jks
-      # Same three-phase recipe as the universal job (Sherlock's pattern).
-      - name: Generate the Android project
-        env:
-          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
-          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          rm -rf build/apk && mkdir -p build/apk
+          find build/flutter -name "*.apk" -not -path "*/intermediates/*" -exec cp {} build/apk/ \;
+          ls -lh build/apk/
+      - name: Size report
+        if: always()
         run: |
-          set +e
-          uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
-          status=$?
-          set -e
-          if [ "$status" -eq 0 ]; then
-            echo "flet build apk completed on the first pass; no patch required."
-          elif [ -f build/flutter/android/app/build.gradle.kts ]; then
-            echo "::warning::flet build apk stopped at its Gradle run (expected: core library desugaring missing). Project generated; patching and re-running."
-          else
-            echo "::error::flet build apk failed before generating the Android project"
-            exit 1
-          fi
-      - name: Patch the generated Android project (notifications)
-        run: uv run flet-notifications-patch --project-root build/flutter
-      - name: Build APK (split per ABI)
-        env:
-          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
-          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          for attempt in 1 2; do
-            timeout 2700 uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v && break
-            echo "::warning::split build attempt $attempt failed — retrying"
+          for a in build/apk/*.apk; do
+            echo "== $a ($(du -h "$a" | cut -f1))"
           done
       - name: Upload to Private Release
         if: github.event_name != 'pull_request'
