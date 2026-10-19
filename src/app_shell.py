@@ -137,7 +137,12 @@ def AppShell() -> ft.Control:
         spawn(controller._app_controller.choose_quality(index), name="choose-quality")
 
     def _on_tab(name: str):
+        # Picking a tab is itself a navigation act: without leaving the
+        # detail/player view the body would stay on it (active_view gates
+        # the body BEFORE active_tab, so a Downloads tap on an anime page
+        # did nothing — owner's report: "only this app dead-ends").
         set_active_tab(name)
+        set_active_view("tabs")
 
     # Dialog portal (Sherlock pattern): one dialog whose identity survives
     # re-renders; screens open sheets through the controller instead of

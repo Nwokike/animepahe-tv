@@ -24,6 +24,7 @@ from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from core.artwork import LANDSCAPE
 from core.theme import AppColors
+from core.tokens import GRID_COL
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
 from services.providers.base import owner_of
@@ -357,7 +358,7 @@ def HomeScreen() -> ft.Control:
             r,
             controller.open_anime,
             now_playing["anime"] == r.anime_session and now_playing["episode"] == r.session,
-            col={"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3},
+            col=GRID_COL,
             mode=grid_mode,
             provider=state.latest_source or state.current_source_name,
         )
@@ -391,7 +392,7 @@ def HomeScreen() -> ft.Control:
         # The grid + its pager through the shared ad-break helper: a banner
         # every 12 cards, then one before the pager (KTV's shape).
         grid_section = [
-            *grid_with_ads(release_cards, page, spacing=12, run_spacing=12),
+            *grid_with_ads(release_cards, page),
             pager,
         ]
 

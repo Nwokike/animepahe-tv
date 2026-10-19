@@ -20,9 +20,19 @@ from components.banner_ad import build_banner_ad
 from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
+from core.tokens import GRID_COL
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
+
+# Filter keys the providers accept as MULTIPLE values: `browse` joins them
+# with commas, so the value must be a LIST. The dropdown emits one string;
+# shaping it here makes the character-iteration bug impossible (picking
+# DVD=14893 used to request categories=1,4,8,9,3 — the owner's
+# "I see DVD 2 but open DVD and there are more", 2026-10-19).
+_LIST_VALUED_KEYS = frozenset(
+    {"categories", "tags", "genre", "term_type", "status", "season"}
+)
 
 
 def _filter_dropdown(spec: dict, selected, on_pick) -> ft.Control:
@@ -74,10 +84,17 @@ def DiscoverScreen() -> ft.Control:
 
     def _pick(key: str, value):
         selections = dict(state.discover_selections or {})
-        if value == "" or selections.get(key) == value:
-            selections.pop(key, None)  # a second tap clears the chip
+        # The dropdown emits one string; the WP providers' `browse`
+        # expects multi-value keys (categories/tags) as LISTS. Passing the
+        # raw string made animeout iterate its characters: picking DVD
+        # (14893) requested categories=1,4,8,9,3 — the owner's
+        # "I see DVD 2 but open DVD and there are more" (2026-10-19).
+        shaped: object = value
+        if value in (None, "") or selections.get(key) == value:
+            selections.pop(key, None)  # a second pick clears the filter
         else:
-            selections[key] = value
+            shaped = [value] if key in _LIST_VALUED_KEYS else value
+            selections[key] = shaped
         controller.load_discover(selections, 1)
 
     ft.use_effect(
@@ -164,7 +181,7 @@ def DiscoverScreen() -> ft.Control:
                 mode=grid_mode,
                 provider=state.discover_source or state.current_source_name,
             ),
-            col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
+            col=GRID_COL,
         )
         for anime in results
     ]
@@ -183,7 +200,7 @@ def DiscoverScreen() -> ft.Control:
     if results:
         # Every 12 cards, a break; then one more before the pager (KTV's
         # grid-then-banner-then-pager shape).
-        body.extend(grid_with_ads(cards, page, spacing=16, run_spacing=16))
+        body.extend(grid_with_ads(cards, page))
         body.append(
             ft_pager(
                 page=state.discover_page,

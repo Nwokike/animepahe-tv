@@ -20,6 +20,7 @@ from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from core.artwork import PORTRAIT
 from core.theme import AppColors
+from core.tokens import FONT_LG, FONT_XL, FONT_XXL, GRID_COL
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
 from services.providers.base import owner_of
@@ -542,7 +543,7 @@ def AnimeDetailScreen() -> ft.Control:
                     # match the Discover grid on every breakpoint — 2 up on
                     # a phone, denser on TV — instead of the old
                     # one-giant-card-per-row phone layout).
-                    col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
+                    col=GRID_COL,
                 )
             )
         return cards
@@ -550,7 +551,7 @@ def AnimeDetailScreen() -> ft.Control:
     grid = ft.Column(
         # A banner every 12 episodes, then one before the pager (the shared
         # grid rule — owner's order, 2026-10-16).
-        controls=grid_with_ads(_render_ep_cards(), page, spacing=12, run_spacing=12),
+        controls=grid_with_ads(_render_ep_cards(), page),
         spacing=12,
     )
 
@@ -781,6 +782,11 @@ def AnimeDetailScreen() -> ft.Control:
         ),
         expand=True,
     )
+    # The title scales with the viewport: a fixed 22 read oversized on a
+    # narrow phone and lost the synopsis's first line (owner, 2026-10-19).
+    # The step width is 180px, so a 360dp phone gets FONT_LG and a
+    # 720dp tablet the fuller FONT_XXL.
+    title_size = FONT_XXL if width >= 640 else (FONT_XL if width >= 480 else FONT_LG)
     compact_body = ft.Column(
         [
             # Space for the poster's band, then the title on its own line —
@@ -789,7 +795,7 @@ def AnimeDetailScreen() -> ft.Control:
             ft.Container(height=16),
             ft.Text(
                 title,
-                size=22,
+                size=title_size,
                 weight=ft.FontWeight.BOLD,
                 color=ft.Colors.ON_SURFACE,
                 max_lines=3,

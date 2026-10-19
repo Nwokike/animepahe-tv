@@ -239,3 +239,46 @@ def test_provider_without_browse_still_satisfies_the_protocol():
     from services.providers.base import Provider as _P
 
     assert isinstance(AnimePaheProvider(scraper=object()), _P)
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-19 — the string-vs-list filter shape (owner's DVD report)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_string_filter_value_is_never_char_iterated():
+    """The owner: "I see DVD 2, but then I open DVD and there are more than
+    that." The dropdown emits one string; `browse` joins a LIST. Joining the
+    raw string iterated its CHARACTERS: DVD=14893 became categories=1,4,8,9,3
+    — five unrelated categories. Both the screen and the provider now coerce
+    the shape, so the honest two are returned."""
+    from services.providers.animeout import AnimeOutProvider
+
+    client = _Client(
+        {
+            "/categories": _Resp(json_data=WP_CATEGORIES),
+            "/posts": _Resp(json_data=[]),
+        }
+    )
+    provider = AnimeOutProvider(client=client)
+    await provider.browse({"categories": "14893"}, 1)
+    params = next(c[1] for c in client.calls if "/posts" in c[0])
+    assert params["categories"] == "14893", (
+        "a bare string filter value must be sent intact, never char-joined"
+    )
+
+
+def test_the_screen_shapes_dropdown_values_to_the_protocol():
+    """The screen's _pick wraps multi-valued keys (categories/tags/…) in a
+    list and passes scalars through, so the provider receives its documented
+    shape whatever the dropdown emits."""
+    import screens.discover_screen as ds
+
+    assert "categories" in ds._LIST_VALUED_KEYS
+    assert "orderby" not in ds._LIST_VALUED_KEYS
+    shaped = lambda key, value: {
+        key: [value] if key in ds._LIST_VALUED_KEYS else value
+    }
+    assert shaped("categories", "14893")["categories"] == ["14893"]
+    assert shaped("orderby", "date")["orderby"] == "date"

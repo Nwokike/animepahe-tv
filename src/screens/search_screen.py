@@ -27,6 +27,7 @@ from core.constants import (
     MAX_SEARCH_QUERY_LENGTH,
 )
 from core.theme import AppColors
+from core.tokens import GRID_COL, GRID_RUN_SPACING, GRID_SPACING
 from hooks.use_debounce import use_debounce
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from services.hls_proxy import image_url
@@ -301,11 +302,11 @@ def SearchScreen() -> ft.Control:
                     ft.Container(height=16),
                     ft.ResponsiveRow(
                         controls=[
-                            _skeleton({"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2})
+                            _skeleton(GRID_COL)
                             for _ in range(10)
                         ],
-                        spacing=12,
-                        run_spacing=12,
+                        spacing=GRID_SPACING,
+                        run_spacing=GRID_RUN_SPACING,
                     ),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -392,7 +393,7 @@ def SearchScreen() -> ft.Control:
             _result_card(
                 a,
                 controller.open_anime,
-                col={"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2},
+                col=GRID_COL,
                 now_playing=state.current_anime_session == a.session,
                 mode=grid_mode,
                 provider=state.search_source or state.current_source_name,

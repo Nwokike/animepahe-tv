@@ -14,6 +14,7 @@ so a failed lookup is never a crash.
 import flet as ft
 
 from components.banner_ad import build_banner_ad
+from core.tokens import GRID_RUN_SPACING, GRID_SPACING
 
 AD_EVERY = 12
 
@@ -23,8 +24,8 @@ def grid_with_ads(
     page,
     *,
     every: int = AD_EVERY,
-    spacing: int = 16,
-    run_spacing: int = 16,
+    spacing: int = GRID_SPACING,
+    run_spacing: int = GRID_RUN_SPACING,
 ) -> list[ft.Control]:
     """ResponsiveRow chunks with a banner between them."""
     sections: list[ft.Control] = []

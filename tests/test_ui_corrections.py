@@ -79,15 +79,18 @@ def test_episode_card_is_portrait_like_discover():
 
 
 def test_the_episode_grid_uses_discover_spans():
+    """Episodes ride the ONE grid contract — the same token Discover, Search
+    and Home read, so a card is the same size everywhere and a change lands
+    everywhere (owner, 2026-10-19)."""
     import screens.anime_detail_screen as detail
+    from core.tokens import GRID_COL
 
     source = inspect.getsource(detail)
-    assert '"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2' in source, (
-        "episodes ride the Discover spans — 2 up on a phone, same on TV"
-    )
+    assert "col=GRID_COL" in source, "episodes ride the shared contract"
     assert '"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3' not in source, (
         "the old one-giant-card-per-row phone layout is gone"
     )
+    assert GRID_COL["xs"] == 6, "two up on a phone, like Discover"
 
 
 # ---------------------------------------------------------------------------
@@ -186,3 +189,50 @@ def test_the_compact_hero_is_banner_first_and_only_under_720px():
     # audit forbids those: they clip across densities).
     assert "compact_cover = ft.Container(" in source
     assert "bottom=-" not in source, "no negative absolute offsets in the hero"
+
+
+def test_no_screen_owns_its_own_grid_spans():
+    """The owner: "Why are you even hardcoding them individually? I expected
+    it to be something that you fix once and it's solved everywhere."
+
+    Every catalog screen must read the ONE token. A hardcoded col map
+    anywhere outside core/tokens.py is a regression."""
+    import screens.anime_detail_screen as detail
+    import screens.discover_screen as discover
+    import screens.home_screen as home
+    import screens.search_screen as search
+
+    for module in (home, discover, search, detail):
+        src = inspect.getsource(module)
+        assert '"xs":' not in src, f"{module.__name__} still hardcodes grid spans"
+        assert "col=GRID_COL" in src or "GRID_COL" in src, (
+            f"{module.__name__} does not read the shared grid contract"
+        )
+
+
+def test_picking_a_tab_leaves_the_detail_view():
+    """The owner: "I can be in a screen and click something in navigation
+    and I can't leave... if I'm in an anime detail screen and I press
+    downloads, I can't go to downloads unless I use the back button."
+    Root cause: the body is gated on active_view BEFORE active_tab, and
+    _on_tab only set_active_tab. Picking a tab must return to the tab
+    view too."""
+    import app_shell
+
+    src = inspect.getsource(app_shell)
+    on_tab = src[src.index("def _on_tab(") :][:600]
+    assert "set_active_tab(name)" in on_tab
+    assert 'set_active_view("tabs")' in on_tab, (
+        "picking a tab must leave the detail view — that is the dead-end fix"
+    )
+
+
+def test_the_detail_title_scales_with_the_viewport():
+    """A fixed 22px title read oversized on a phone (owner, 2026-10-19).
+    The title now steps down with the viewport width."""
+    import screens.anime_detail_screen as detail
+
+    src = inspect.getsource(detail)
+    assert "title_size = FONT_XXL if width >= 640" in src
+    assert "FONT_XL if width >= 480" in src
+    assert "FONT_LG" in src

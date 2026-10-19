@@ -94,3 +94,12 @@ CARD_ASPECT_LANDSCAPE: Final = 1.67
 CARD_ASPECT_PORTRAIT: Final = 0.67
 DIALOG_WIDTH_MD: Final = 500
 DIALOG_HEIGHT_MD: Final = 420
+
+# The ONE grid contract: every catalog grid in the app (Home, Discover,
+# Search, the detail episode grid) rides these ResponsiveRow column spans
+# and these grid spacings, so a card is the same size on every screen and
+# a fix here lands everywhere. Fix once, solved everywhere (owner's
+# requirement, 2026-10-19).
+GRID_COL: Final = {"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2}
+GRID_SPACING: Final = 16
+GRID_RUN_SPACING: Final = 16

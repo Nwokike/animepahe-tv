@@ -273,9 +273,16 @@ class AnimeOutProvider:
         }
         categories = filters.get("categories")
         if categories:
-            params["categories"] = ",".join(str(c) for c in categories)
+            # The protocol says LIST; the Discover dropdown emits one
+            # string. Coerce either shape: joining a bare string iterates
+            # its CHARACTERS (DVD=14893 became categories=1,4,8,9,3 —
+            # the owner's "DVD 2 but open DVD and more", 2026-10-19).
+            values = [categories] if isinstance(categories, str | int) else list(categories)
+            params["categories"] = ",".join(str(c) for c in values if str(c).strip())
         elif filters.get("tags"):
-            params["tags"] = ",".join(str(t) for t in filters["tags"])
+            tags = filters["tags"]
+            values = [tags] if isinstance(tags, str | int) else list(tags)
+            params["tags"] = ",".join(str(t) for t in values if str(t).strip())
         if filters.get("orderby"):
             params["orderby"] = str(filters["orderby"])
         resp = await self._client.get(f"{ANIMEOUT_API}/posts", params=params)

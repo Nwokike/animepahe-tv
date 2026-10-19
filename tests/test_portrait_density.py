@@ -38,10 +38,16 @@ def test_search_and_discover_grid_spacing_and_insets():
     from components import ad_breaks
 
     helper = inspect.getsource(ad_breaks)
-    assert "spacing: int = 16" in helper
-    assert "run_spacing: int = 16" in helper
+    # The density is the ONE token, not a per-screen literal (owner, 2026-10-19:
+    # "fix once and it's solved everywhere").
+    assert "spacing: int = GRID_SPACING" in helper
+    assert "run_spacing: int = GRID_RUN_SPACING" in helper
     # One ad every 12 cards, by the shared constant.
     assert "AD_EVERY = 12" in helper
+    from core.tokens import GRID_COL, GRID_RUN_SPACING, GRID_SPACING
+
+    assert GRID_COL == {"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2}
+    assert GRID_SPACING == 16 and GRID_RUN_SPACING == 16
 
     search_src = inspect.getsource(search)
     assert "grid_with_ads(" in search_src, "search uses the shared grid helper"

@@ -388,3 +388,53 @@ Three independent agents were dispatched to review all code from this session:
 
 
 
+
+
+## 2026-10-19 — the nav dead-end, the DVD filter, one grid contract
+
+Three reports from a live run, all reproduced and closed with evidence.
+
+### 1. The nav bar dead-end (only this app had it)
+"I can be in a screen and click something in navigation and I can't leave...
+if I'm in an anime detail screen and I press downloads, I can't go to
+downloads unless I use the back button."
+
+**Root cause:** in `app_shell.py` the body is gated on `active_view` FIRST
+(`if active_view == "anime": body = AnimeDetailScreen()`), and `_on_tab`
+only called `set_active_tab(name)`. A tab tap therefore set the tab but
+left the view on "anime" — the body never changed. Nothing in the house
+apps has this shape (KTV/Sherlock/DDGS all put tab state above view state
+or reset the view on pick).
+**Fix:** `_on_tab` also calls `set_active_view("tabs")`; test
+`test_picking_a_tab_leaves_the_detail_view` pins both halves.
+
+### 2. The Discover filters (the "numbering is false" report)
+"I'm currently seeing DVD 2, but then I open DVD and there are more than
+that... Maybe they're not updating."
+
+**Verified live** (AnimeOut WP categories, 2026-10-19): the counts ARE the
+site's own — DVD=2, Manga=1, Announcement=13, Uncategorized=0 — so the
+labels are honest, never hallucinated.
+**The real bug:** `_pick` sent the dropdown's value as a STRING, and
+`animeout.browse` does `",".join(str(c) for c in categories)` — which
+iterates a string's CHARACTERS. Picking DVD (14893) requested
+`categories=1,4,8,9,3`: five unrelated categories, hence "more than that".
+**Fixed on both sides:** the screen shapes multi-valued keys into the
+protocol's list (`_LIST_VALUED_KEYS`), and the provider coerces either
+shape. Live proof: `browse({"categories": "14893"})` now returns exactly
+the site's two DVD titles, and the regression tests cover both layers.
+
+### 3. One grid contract (Home was the last outlier)
+"Why are you even hardcoding them individually? I expected it to be
+something that you fix once and it's solved everywhere."
+
+`core/tokens.py` now owns `GRID_COL` (`{"xs": 6, "sm": 4, "md": 3, "lg": 2,
+"xl": 2}`) plus `GRID_SPACING`/`GRID_RUN_SPACING`; `ad_breaks` defaults to
+those tokens, and Home/Discover/Search/detail all read `col=GRID_COL`.
+Home's old `xs:12` (one giant card per row on a phone) is gone.
+`test_no_screen_owns_its_own_grid_spans` fails if any screen hardcodes a
+span again.
+
+### 4. Detail title scales with the viewport
+A fixed 22px title read oversized on a narrow phone. The hero title now
+steps 16 → 18 → 24 with the measured width (FONT_LG/XL/XXL).
