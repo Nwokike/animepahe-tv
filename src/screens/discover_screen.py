@@ -141,15 +141,13 @@ def DiscoverScreen() -> ft.Control:
             expand=True,
         )
 
-    # Dropdowns, not a chip wall (owner's order) — and Reset rides the
-    # same row, so the controls read as one compact filter bar.
+    # Dropdowns, not a chip wall (owner's order) — wrapped naturally
+    # without expand=True spacers (Expanded inside a wrap=True Row throws
+    # Flutter's "WrapParentData is not a subtype of FlexParentData" error).
     filter_row = ft.Row(
         [
-            *[
-                _filter_dropdown(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
-                for spec in filters
-            ],
-            ft.Container(expand=True),
+            _filter_dropdown(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
+            for spec in filters
         ],
         spacing=8,
         wrap=True,

@@ -102,6 +102,10 @@ def test_discover_drops_the_via_line_and_uses_dropdowns():
     assert "via {" not in source, "the header already names the source — no 'via'"
     assert "ft.Dropdown(" in source, "filters are dropdowns"
     assert "_filter_choices" not in source, "the chip wall is gone"
+    # Flutter's Wrap widget crashes with "type 'WrapParentData' is not a subtype
+    # of type 'FlexParentData'" if an Expanded/expand=True sits inside wrap=True.
+    filter_block = source[source.index("filter_row = ft.Row(") :][:400]
+    assert "expand=True" not in filter_block, "no expanding children inside wrap=True"
 
 
 # ---------------------------------------------------------------------------
