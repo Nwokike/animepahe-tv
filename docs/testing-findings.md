@@ -438,3 +438,107 @@ span again.
 ### 4. Detail title scales with the viewport
 A fixed 22px title read oversized on a narrow phone. The hero title now
 steps 16 → 18 → 24 with the measured width (FONT_LG/XL/XXL).
+
+## 2026-10-19 (later) — the tri-audit, and the AniKato "kwik" download chain
+
+### 5. The tri-audit (three independent agents, the plan's Part 2)
+
+Three read-only agents audited this session's change set against the
+installed `.venv` (the install wins over every doc), the owner's
+requirement list, and the house apps' own source. Their findings, and what
+was done with each:
+
+| # | Finding | Fixed |
+|---|---|---|
+| 1 | **AniKato's genre/type/status/season filters were DEAD** — the screen wrapped them in a list the site's form never wants, so the request became `genre[]=%5B%271%27%5D` and the grid came back empty. A regression introduced the same day. | The multi-valued keys now come from the PROVIDER's spec (`"multi": True`), and AniKato's `browse` accepts a list or a string and encodes lists as REPEATED array params (`genre[]=1&genre[]=2`). |
+| 2 | The Sort dropdown SHOWED "Recently updated" while the request carried no `orderby` at all — WordPress fell back to publish date. The owner's "the numbering… does not update". | The screen sends the spec's own first option (`_effective_selections`), and the provider defaults `orderby` to the same value. |
+| 3 | The sort-direction arrow flipped on AniKato, whose form has NO order parameter — a control that changed nothing. | The spec declares `"direction": True` where the source has one (the WordPress sources); AniKato declares none, so no arrow is drawn. |
+| 4 | Every header control (back disc, theme cycle, version pill, badge) was an `ft.Container` — and flet 1.0.4 gives a Container **no focus state** (28 control classes expose `on_focus`/`on_blur`; Container is not one), so a TV remote could never reach them. | All of them are Button-family controls now (`IconButton`/`TextButton`) with the house chip look and a PRIMARY focus ring. This is BETTER than the house apps, which use Containers (they are phone-first; this app is not). |
+| 5 | The up-to-date dialog clipped ~60 % of the bundled changelog (1128 characters of plain `ft.Text` in a FIXED 340x220 box, painting over the buttons). | The house shape (Sherlock/DDGS/KTV all build it this way): the notes are `ft.Markdown` in a SCROLLABLE column. |
+| 6 | The up-to-date dialog popped the topmost dialog UNCONDITIONALLY — it ate a SnackBar standing above it and orphaned the dialog itself. | The dismissal goes through the app's own registry (`close_app_dialog`, which pops only if that dialog is topmost), and the double-pop on `on_dismiss` is gone. |
+| 7 | A category count the site never published was printed as "(0)". | `label_with_count` in `providers/base.py`: a missing count prints nothing. |
+| 8 | One failing segment could be retried **18 times** (the cap was per worker; a requeued segment lands on any worker) and the backoff slept while holding a GLOBAL cross-job permit. | The attempt counter is shared by the job's workers, and the permit is taken per FETCH. |
+| 9 | The compact detail poster sat at the TOP of the cover (only `right` was set, so Flutter aligned it topStart) instead of the bottom band. | Both insets (`right` + `bottom`), so it is a fully positioned Stack child. |
+| 10 | The layout read the window WIDTH at render time and never re-evaluated — flet exposes `page.on_resize`, and the app never registered it. | `page.on_resize` bumps `state.viewport_version`, which the header and the detail screen read. |
+| 11 | Dead code (`_ORDER_OPTIONS`, `on_theme`, `_launch`), stale `tokens.__all__`, `Anime.score` typed `float` while Kayoanime assigns `None`, an empty star slot left in the card, "Discover" printed twice, the new `changelog.py` untracked while shipped code imports it. | All closed; `changelog.py` is tracked. |
+| 12 | Two dep docs contradicted the installed packages (`ft.Icons` is 8825 members, not 95; primp 2.0.1 RAISES `BuilderError` on an invalid impersonation instead of warning). | Both docs corrected. |
+
+**Suite: 606 passing under `-W error`, ruff clean.** The audit's own
+"no API-signature crash in the diff" verdict stands: the one crash-class
+risk it found was the untracked `core/changelog.py` (fixed by tracking
+it).
+
+### 6. AniKato's download part IS animepahe's — the kwik chain, proven
+
+The owner's question: *check if you can see the download part kwik, and
+whether it is the same with animepahe, to know if it is something we can
+wire.* Reproduced with the app's own anime (Black Clover, `anime_id`
+2121, `black-clover-g7tjy`, 170 episodes) and the site's own endpoints.
+
+**The chain, hop by hop (every hop fetched and read):**
+
+```
+1. GET /ajax/episode/list/2121            -> data-mal=34572, data-slug=1,
+                                               data-timestamp=1778012242
+2. GET https://mapper.nekostream.site/api/mal/34572/1/1778012242
+   (the site's OWN script, anikoto/js/mapper.js — not ours) ->
+   {"Kiwi":{"sub":{"download":{
+        "360p":"https://pahe.nekostream.site/yRVMl",
+        "720p":"https://pahe.nekostream.site/BfqIe",
+        "1080p":"https://pahe.nekostream.site/WjUUW"}}}}}
+3. GET pahe.nekostream.site/{code}          -> 200, an HTML page whose JS
+                                               hands over to testpahe...
+4. GET testpahe.nekostream.site/{code}      -> 302 Location: https://kwik.cx/f/{token}
+                                               (needs Referer: pahe.nekostream.site)
+5. GET https://kwik.cx/f/{token}            -> Cloudflare managed challenge
+                                               (cf-mitigated: challenge) —
+                                               CLEARED in a real browser
+6. the kwik file page                       -> "AnimePahe_Black_Clover_-_001_360p_SubsPlease.mp4"
+                                               MIME video/mp4, 52.82 MB, 636x360,
+                                               23.976 fps, MD5 fb46aa5dfc8bc1ea0ed7aa984c1ed86b,
+                                               uploaded 2021-04-12
+7. the download itself                      -> a CSRF'd POST to https://kwik.cx/d/{token}
+```
+
+**"Kiwi" IS animepahe.** The mapper's own normalizer is the proof:
+`kiwi-stream` -> `animepahe` -> the display label `Kiwi-Stream`. The file
+it returns is an AnimePahe file (SubsPlease, 2021). **AniKato's download
+part is not AniKato's at all** — the site borrows AnimePahe's files
+through a third-party mapper, exactly as the owner suspected.
+
+**The mapper is MAL-keyed and source-agnostic** (verified live):
+`mal=34572` (Black Clover) -> 3 links; `mal=21` (One Piece — a series
+AniKato does not even list) -> 2 links; the timestamp is not validated;
+`mal=154587` (Frieren) -> `400 Failed to get the list` (not in its
+database). So it is a **universal AnimePahe download resolver** keyed by
+MAL id, and any provider that exposes a MAL id can use it.
+
+**The kwik host family today** (2026-10-19, live): `kwik.cx` is the only
+live one ("Kwik: Just Another Video Hosting Service"); **`kwik.si` is a
+parked domain** (a microloan spam page — it 200s every path, so a stale
+`kwik.si` reference would silently "succeed" with a parking page);
+`kwik.pw`, `kwik.to`, `kwik.la`, `kwik.icu` are DNS-dead; `kwik.link`
+and `kwik.one` are unrelated sites (404 on `/f/`).
+
+**What it means for the app — wireable, with one caveat.**
+- The mapper API is open: no auth, no Cloudflare, no token. Per-quality
+  download links for ANY series in its database come from one GET.
+- The last hop needs a Cloudflare clearance on `kwik.cx`. The clearance
+  cookie is HttpOnly, so it cannot be lifted out of the browser — it has
+  to be EARNED by a real browser. That is the mechanism the app already
+  ships (the WebView solver) for AnimePahe; here it is a different HOST,
+  not a different mechanism. On the owner's phone (Android WebView) that
+  is where it would work; on desktop it needs a solve.
+- Our existing `services/kwik_resolver.py` resolves the kwik PAGE to an
+  m3u8 (streaming). The `/f/` file route is a DIFFERENT path (a CSRF'd
+  POST to `/d/{token}`), so wiring it is a small new step — not a
+  rewrite — and it would give AniKato a DIRECT, per-quality file
+  download (360/720/1080) instead of the HLS segments it assembles today.
+- **Not decided here.** This is a report; the wiring is a phase. The
+  open questions for that phase: whether the app may borrow a third
+  party's mapper API at all (it is AnimePahe's files reached through a
+  third party, and the owner asked whether the kwik shortlinks are the
+  same as AnimePahe's own — they are, but the mapper is nekostream's),
+  and whether the per-quality direct file is worth the extra Cloudflare
+  surface when the HLS download already produces a verified file on disk
+  (AniKato 253.9 MB MPEG-TS, Kayoanime 847.2 MB MKV).

@@ -197,7 +197,7 @@ dumped per class. Grouping below is editorial; module paths are verbatim.
 | Class | Module | Purpose |
 |---|---|---|
 | `Image` | `controls.core.image` | Displays an image (local asset / URL / bytes). |
-| `Icon` | `controls.core.icon` | Displays a built-in (`Icons`, 95-enum `IconData`) or custom icon. |
+| `Icon` | `controls.core.icon` | Displays a built-in (`Icons`, 8825-enum `IconData` in flet 1.0.4 — the count grew from the 95 this doc originally recorded) or custom icon. |
 | `Text` | `controls.core.text` | Styled text run (`TextStyle`, overflow, align — §6). |
 | `TextSpan` | `controls.core.text_span` | Inline span inside `Text.spans` with own style/events. |
 | `Markdown` | `controls.core.markdown` | Renders Markdown (`MarkdownStyleSheet/CodeTheme/ExtensionSet`). |

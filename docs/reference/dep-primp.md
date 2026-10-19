@@ -75,7 +75,7 @@ MRO: `ConnectError->RequestError->PrimpError`; `TimeoutError->RequestError->Prim
 - TLS/transport: `verify`, `ca_cert_file`, `https_only`, `http2_only`, `dns_resolver: str | list[str] | None`.
 - Extra client methods: `get_cookies(url) -> dict[str, str]`, `set_cookies(url, cookies)`.
 - `Client` is a sync context manager; `AsyncClient` an async one.
-- Invalid `impersonate` does NOT raise: prints `Impersonate '<x>' does not exist, using 'random'` and keeps the string on `.impersonate`.
+- Invalid `impersonate` DOES raise in 2.0.1: `primp.BuilderError: Invalid impersonate: "zzz_not_a_browser"` (verified live 2026-10-19). The 1.3.1 build this doc was compiled against only printed a warning and fell back to `random`. The short aliases (`chrome`, `firefox`, `safari`) are still valid.
 
 ### Impersonate profiles (from METADATA — the shipped enumeration)
 
