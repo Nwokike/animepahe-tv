@@ -177,6 +177,8 @@ def test_the_compact_hero_is_banner_first_and_only_under_720px():
     assert "compact_cover" in source and "compact_poster" in source, (
         "the compact hero is a cover with the poster over its edge"
     )
-    # The poster sits INSIDE the cover's Stack (absolute over the art),
-    # not in a side-by-side row.
-    assert "ft.Stack(\n        [hero_cover, compact_poster]" in source
+    # The poster sits INSIDE the cover's Stack, positioned over the art's
+    # lower band — WITHOUT a negative right/bottom offset (the independent
+    # audit forbids those: they clip across densities).
+    assert "compact_cover = ft.Container(" in source
+    assert "bottom=-" not in source, "no negative absolute offsets in the hero"

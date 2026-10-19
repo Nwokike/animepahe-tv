@@ -93,6 +93,28 @@ class AppColors:
             return True
 
 
+GLASS_BG = ft.Colors.with_opacity(0.05, ft.Colors.WHITE)
+GLASS_BORDER_COLOR = ft.Colors.with_opacity(0.10, ft.Colors.WHITE)
+LIGHT_GLASS_BG = ft.Colors.with_opacity(0.04, ft.Colors.BLACK)
+LIGHT_GLASS_BORDER = ft.Colors.with_opacity(0.08, ft.Colors.BLACK)
+
+
+def adaptive_glass_bg(page: ft.Page | None = None) -> str:
+    """Return card background color appropriate for current theme."""
+    mode = getattr(page, "theme_mode", None)
+    if mode == ft.ThemeMode.LIGHT:
+        return LIGHT_GLASS_BG
+    return GLASS_BG
+
+
+def adaptive_glass_border(page: ft.Page | None = None) -> str:
+    """Return card border color appropriate for current theme."""
+    mode = getattr(page, "theme_mode", None)
+    if mode == ft.ThemeMode.LIGHT:
+        return LIGHT_GLASS_BORDER
+    return GLASS_BORDER_COLOR
+
+
 class AppTheme:
     # The surface-container roles must be pinned to the app's own palette:
     # unspecified roles fall back to Material's baseline (purple-tinted),

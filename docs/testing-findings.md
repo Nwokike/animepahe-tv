@@ -352,4 +352,39 @@ before emitting success — a stale cookie can no longer be persisted and
 looped. The Android WebView path (the owner's phone) remains the place its
 clearance works; desktop retries must be earned by that verification.
 
+## 2026-10-17 — Independent Tri-Audit & Discover Crash Resolution
+
+### 1. Discover Screen Crash (`on_change` vs `on_select`)
+Owner report: Discover screen would not open after recent changes; app session terminated.
+- **Root cause:** Flet 1.0.4 replaced the old 0.x `on_change` callback on `ft.Dropdown` with `on_select` (and `on_text_change`). Passing `on_change` raised `TypeError: Dropdown.__init__() got an unexpected keyword argument 'on_change'`, crashing the session.
+- **Fix:** Switched callback to `on_select=lambda e, k=key: on_pick(k, e.control.value or "")`. Verified via headless Renderer execution across AnimeOut, AniKato, and KayoAnime filter sets.
+
+### 2. Tri-Audit Results
+Three independent agents were dispatched to review all code from this session:
+
+- **Agent 1: API Truth (Installed `.venv` as sole source of truth)**
+  - Examined all Flet 1.0.4, primp 2.0.1, anyio 4.15, and flet-yandex-ads 0.1.0 usage.
+  - 1 flagged item: primp `headers.get(...)` casing suspicion. Refuted by live probe: primp 2.0.1 normalizes all incoming header keys to lowercase (`content-disposition`, `content-length`, etc.). Code lookups are already lowercase and verified correct.
+
+- **Agent 2: Requirements Compliance (13 Requirements Checklist)**
+  - All 13 core requirements passed (nav bar on detail, SafeArea, Discover card sizing, dropdown filters, ad breaks every 12, KTV home order, 3 settings banners, phone detail banner-first, header back button, honest download progress, interstitial interval, production ad IDs, clean tests).
+  - 5 defects identified and resolved:
+    1. Duplicate synopsis on compact detail layout (rendered both inside `compact_body` and after hero). Fixed: rendered exactly once after hero.
+    2. Negative offset on compact poster (`bottom=-32`). Fixed: replaced with honest Stack height padding.
+    3. Offline banner stacked above header on Home. Fixed: positioned beneath header.
+    4. Fragile forward reference in Settings (`controller_ref` read before assignment). Fixed: hoisted assignment.
+    5. Dead `"__none__"` check in Search filter chips. Fixed: removed dead condition.
+
+- **Agent 3: House Pattern Alignment**
+  - Banner glass styling updated to `adaptive_glass_bg(page)` / `adaptive_glass_border(page)` with `BORDER_RADIUS_LG` tokens (eliminating white-tint box in dark mode).
+  - Settings screen headers and rows aligned with Sherlock standards (`core.tokens` spacing, uppercase section headers, subtle inter-row dividers, and centered version footer).
+  - Card focus interaction: dropped imperative `animate_scale` and `attach_focus_zoom` mutations (preventing `RuntimeError: Frozen controls cannot be updated` on frozen component subtrees), relying on declarative `card_button_style` FOCUSED borders.
+
+### 3. Build Workflow Optimization
+- Solved the 37-minute build time by introducing caching (`~/.cache/uv`, `~/flutter`, `~/.flet/cache`, `~/.gradle`).
+- Replaced second `flet build` pass with direct `./gradlew assembleRelease -Psplit-per-abi=true` (plus universal assemble).
+- Unified split and universal builds into one job; removed redundant 45-minute retry loops.
+- Added concurrency cancel-in-progress to avoid superseded queue backups.
+
+
 

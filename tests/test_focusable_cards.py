@@ -6,8 +6,13 @@ no on_blur and no per-state ``side`` — the remote can never focus it, so
 the "focus ring" reserved by the old 4px transparent border could never
 appear and the card could never be activated by D-pad. These tests assert
 each builder returns a focusable Button carrying the KTV focus styling.
-"""
 
+The focus cue is DECLARATIVE (``card_button_style``'s FOCUSED
+border/overlay). The audit of 2026-10-16 pinned the house standard: KTV
+removed the imperative on-focus scale mutation after the frozen-controls
+crash class, so no card carries on_focus/on_blur handlers or
+animate_scale any more.
+"""
 import sys
 
 sys.path.insert(0, __file__.rsplit("tests", 1)[0] + "src")
@@ -62,9 +67,13 @@ def _assert_focusable_card(card, aspect=1.67):
         assert card.controls, "a Stack card must carry its button"
         card = card.controls[0]
     assert isinstance(card, ft.Button), type(card).__name__
-    assert card.on_focus is not None
-    assert card.on_blur is not None
-    assert card.animate_scale is not None
+    # The D-pad cue is the DECLARATIVE per-state border in card_button_style:
+    # a FOCUSED side the Flutter focus system paints by itself. No
+    # imperative on_focus/on_blur handler, no animate_scale (the house
+    # standard after the frozen-controls crash class, 2026-10-16).
+    assert card.on_focus is None
+    assert card.on_blur is None
+    assert card.animate_scale is None
     sides = card.style.side
     assert sides[ft.ControlState.FOCUSED].width == 2.5
     assert sides[ft.ControlState.FOCUSED].color == "#F43F5E"
@@ -114,11 +123,12 @@ def test_episode_card_is_focusable():
 def test_result_card_is_focusable():
     card = _result_card(_Anime(), lambda a: None)
     assert isinstance(card, ft.Button)
-    assert card.on_focus is not None
-    assert card.animate_scale is not None
-    # Portrait poster keeps its 0.67 ratio (inner container).
-    inner = card.content
-    assert inner.aspect_ratio == 0.67
+    assert card.on_focus is None
+    assert card.on_blur is None
+    assert card.animate_scale is None
+    sides = card.style.side
+    assert sides[ft.ControlState.FOCUSED].width == 2.5
+    assert sides[ft.ControlState.FOCUSED].color == "#F43F5E"
 
 
 def test_cards_pass_col_through_for_responsive_rows():

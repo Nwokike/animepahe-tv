@@ -429,10 +429,13 @@ def HomeScreen() -> ft.Control:
         content = _cf_gate(content, state, controller)
     return ft.Column(
         [
+            _home_header(state, page, controller),
+            # The offline strip sits UNDER the header: above it, the strip
+            # pushed the whole header down and the app read top-heavy
+            # (independent audit, 2026-10-16).
             _offline_banner(lambda e: controller.open_downloads())
             if not state.is_online
             else ft.Container(width=0),
-            _home_header(state, page, controller),
             content,
         ],
         spacing=0,

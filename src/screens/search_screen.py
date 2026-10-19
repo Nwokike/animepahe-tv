@@ -373,7 +373,7 @@ def SearchScreen() -> ft.Control:
                 spacing=6,
                 wrap=True,
             )
-            if len(page_types) > 1 and type_filter not in ("__none__",)
+            if len(page_types) > 1
             else None
         )
         shown = [

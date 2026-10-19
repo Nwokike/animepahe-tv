@@ -57,9 +57,8 @@ def _filter_dropdown(spec: dict, selected, on_pick) -> ft.Control:
         width=170,
         text_size=12,
         label_style=ft.TextStyle(size=11),
-        border_radius=12,
         dense=True,
-        on_change=lambda e, k=key: on_pick(k, e.control.value or ""),
+        on_select=lambda e, k=key: on_pick(k, e.control.value or ""),
     )
 
 

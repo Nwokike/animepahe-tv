@@ -10,11 +10,24 @@ import contextlib
 import flet as ft
 
 from components.banner_ad import build_banner_ad
+from core.constants import APP_VERSION
 from core.logger_handler import (
     get_telemetry_snapshot,
     in_memory_log_handler,
 )
 from core.theme import AppColors, mode_for_token, token_for_mode
+from core.tokens import (
+    BORDER_RADIUS_LG,
+    BORDER_RADIUS_MD,
+    FONT_MD,
+    FONT_SM,
+    FONT_XS,
+    ICON_MD,
+    SPACING_MD,
+    SPACING_SM,
+    SPACING_XS,
+)
+from services.update_service import CURRENT_BUILD_NUMBER
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
 
@@ -27,33 +40,50 @@ def _section_header(text: str, subtitle: str = "") -> ft.Control:
     user read the rows to guess the section's job."""
     rows: list[ft.Control] = [
         ft.Text(
-            text,
-            size=12,
+            text.upper(),
+            size=FONT_SM,
             weight=ft.FontWeight.W_700,
             color=AppColors.PRIMARY,
+            style=ft.TextStyle(letter_spacing=1),
         )
     ]
     if subtitle:
         rows.append(
             ft.Text(
                 subtitle,
-                size=10,
+                size=FONT_XS,
                 color=ft.Colors.with_opacity(0.55, ft.Colors.ON_SURFACE),
             )
         )
     return ft.Container(
-        padding=ft.Padding.only(left=16, right=16, top=12, bottom=4),
+        padding=ft.Padding.only(left=16, right=16, top=12, bottom=SPACING_XS),
         content=ft.Column(rows, spacing=1, tight=True),
     )
 
 
 def _settings_card(controls: list) -> ft.Control:
+    filtered = [
+        c
+        for c in controls
+        if not (isinstance(c, ft.Container) and getattr(c, "height", None) == 0)
+    ]
+    card_items: list[ft.Control] = []
+    for idx, c in enumerate(filtered):
+        if idx > 0:
+            card_items.append(
+                ft.Divider(
+                    height=1,
+                    thickness=1,
+                    color=ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE),
+                )
+            )
+        card_items.append(c)
     return ft.Container(
-        content=ft.Column(controls=controls, spacing=0, tight=True),
+        content=ft.Column(controls=card_items, spacing=0, tight=True),
         margin=ft.Margin.only(left=16, right=16, bottom=8),
-        border_radius=12,
-        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
-        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE)),
+        border_radius=BORDER_RADIUS_LG,
+        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.OUTLINE)),
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
     )
 
@@ -63,10 +93,10 @@ def _setting_row(icon, title, subtitle, trailing=None) -> ft.Control:
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.Icon(icon, size=20, color=ft.Colors.ON_SURFACE_VARIANT),
+                    content=ft.Icon(icon, size=ICON_MD, color=ft.Colors.ON_SURFACE_VARIANT),
                     width=36,
                     height=36,
-                    border_radius=10,
+                    border_radius=BORDER_RADIUS_MD,
                     alignment=ft.Alignment.CENTER,
                     bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
                 ),
@@ -74,13 +104,13 @@ def _setting_row(icon, title, subtitle, trailing=None) -> ft.Control:
                     [
                         ft.Text(
                             title,
-                            size=14,
+                            size=FONT_MD + 2,
                             weight=ft.FontWeight.W_500,
                             color=ft.Colors.ON_SURFACE,
                         ),
                         ft.Text(
                             subtitle,
-                            size=11,
+                            size=FONT_SM,
                             color=ft.Colors.with_opacity(0.6, ft.Colors.ON_SURFACE),
                         ),
                     ],
@@ -89,10 +119,10 @@ def _setting_row(icon, title, subtitle, trailing=None) -> ft.Control:
                 ),
                 trailing or ft.Container(width=0, height=0),
             ],
-            spacing=12,
+            spacing=SPACING_MD,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+        padding=ft.Padding.symmetric(horizontal=SPACING_MD, vertical=SPACING_SM),
     )
 
 
@@ -274,6 +304,9 @@ def SettingsScreen() -> ft.Control:
         ("light", "Light", ft.Icons.LIGHT_MODE_ROUNDED),
         ("system", "System", ft.Icons.SETTINGS_SYSTEM_DAYDREAM_ROUNDED),
     ]
+    # Hoisted ABOVE the picker: an independent audit flagged the forward
+    # reference (the click handler read controller_ref before this line).
+    controller_ref = controller
     _current_theme = token_for_mode(state.theme_mode)
 
     def _pick_theme(token, mode):
@@ -465,7 +498,15 @@ def SettingsScreen() -> ft.Control:
                     ),
                 ]
             ),
-            ft.Container(height=24),
+            ft.Container(
+                content=ft.Text(
+                    f"v{APP_VERSION} (Build {CURRENT_BUILD_NUMBER})",
+                    size=11,
+                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ),
+                alignment=ft.Alignment.CENTER,
+                padding=ft.Padding.only(top=8, bottom=24),
+            ),
         ],
         spacing=0,
         expand=True,

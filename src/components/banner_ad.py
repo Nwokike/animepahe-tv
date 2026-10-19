@@ -29,6 +29,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from core.theme import adaptive_glass_bg, adaptive_glass_border
+from core.tokens import BORDER_RADIUS_LG
 from services.ads import AD_UNITS
 
 AD_BANNER_UNIT_ID = AD_UNITS.get("banner", "R-M-20208795-1")
@@ -130,8 +132,8 @@ def build_banner_ad(page=None, inline: bool = False) -> ft.Control:
         ),
         expand=True,
         padding=8,
-        border_radius=16,
-        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.WHITE),
-        border=ft.Border.all(1, ft.Colors.with_opacity(0.08, ft.Colors.WHITE)),
+        border_radius=BORDER_RADIUS_LG,
+        bgcolor=adaptive_glass_bg(page),
+        border=ft.Border.all(1, adaptive_glass_border(page)),
     )
     return ft.Row(controls=[glass], alignment=ft.MainAxisAlignment.CENTER)

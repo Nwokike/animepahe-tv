@@ -734,11 +734,14 @@ def AnimeDetailScreen() -> ft.Control:
             expand=True,
         ),
     )
+    # The poster hangs over the cover's lower edge WITHOUT a negative
+    # offset (independent audit: R8 forbids negative-position hacks — they
+    # clip across densities). The cover Stack is 20px TALLER than its art,
+    # so the poster sits in the real bottom band, fully on-screen.
     compact_poster = ft.Container(
         width=96,
         height=140,
         right=8,
-        bottom=-32,
         border_radius=10,
         clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
         border=ft.Border.all(2, ft.Colors.with_opacity(0.7, ft.Colors.BLACK)),
@@ -757,17 +760,33 @@ def AnimeDetailScreen() -> ft.Control:
         ),
     )
     # The cover is the anchor Stack (absolute children position against
-    # it); the poster hangs over its lower-right edge, the standard
-    # streaming-detail eye-line.
-    compact_cover = ft.Stack(
-        [hero_cover, compact_poster],
+    # it). The poster sits in the real bottom band — the cover's aspect is
+    # widened by 20px of honest Stack height, never a negative offset — so
+    # it reads as floating over the art's lower edge on every density.
+    compact_cover = ft.Container(
+        content=ft.Stack(
+            [
+                ft.Column(
+                    [
+                        hero_cover,
+                        # The poster's real band: 20px of empty Stack.
+                        ft.Container(height=20),
+                    ],
+                    spacing=0,
+                    tight=True,
+                ),
+                compact_poster,
+            ],
+            expand=True,
+        ),
         expand=True,
     )
     compact_body = ft.Column(
         [
-            # Space for the poster's overhang, then the title on its own
-            # line — the owner's "banner first, text under it" shape.
-            ft.Container(height=44),
+            # Space for the poster's band, then the title on its own line —
+            # the owner's "banner first, text under it" shape. The synopsis
+            # is NOT here: it renders once, after the hero, for both modes.
+            ft.Container(height=16),
             ft.Text(
                 title,
                 size=22,
@@ -782,8 +801,6 @@ def AnimeDetailScreen() -> ft.Control:
             _genre_chips(anime),
             ft.Container(height=12),
             follow_button,
-            ft.Container(height=14),
-            _synopsis_block(anime),
         ],
         spacing=0,
         tight=True,
@@ -829,8 +846,8 @@ def AnimeDetailScreen() -> ft.Control:
                     [
                         hero,
                         ft.Container(height=16),
-                        _synopsis_block(anime) if compact else ft.Container(width=0, height=0),
-                        ft.Container(height=24) if compact else ft.Container(height=0),
+                        _synopsis_block(anime),
+                        ft.Container(height=16),
                         ft.Row(
                             [
                                 ft.Text(

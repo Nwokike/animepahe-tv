@@ -18,9 +18,7 @@ import re
 import flet as ft
 
 from components.focus_styles import (
-    attach_focus_zoom,
     card_button_style,
-    card_focus_scale,
 )
 from core.artwork import LANDSCAPE, PORTRAIT
 from core.theme import AppColors
@@ -278,6 +276,13 @@ def card_frame(
     """The focusable frame every card shares: media, optional gradient,
     overlay layers, the shape, and the D-pad focus chain.
 
+    The focus cue is DECLARATIVE only — `card_button_style`'s FOCUSED
+    border/overlay. The house player (ktv focus_styles.py:17-76) removed
+    the imperative on-focus scale mutation after exactly the
+    "Frozen controls cannot be updated." crash class we hit this session
+    in the theme cycle; cards live inside frozen `@ft.component` trees, so
+    a mutation there is at best a suppressed no-op.
+
     Portrait cards use 8px padding inset (giving 16px total breathing room
     per card) to match nkiri-tv density exactly."""
     card_padding = padding if padding is not None else (8 if mode == PORTRAIT else 4)
@@ -285,17 +290,14 @@ def card_frame(
     if gradient is not None:
         layers.append(gradient)
     layers.extend(overlay)
-    return attach_focus_zoom(
-        ft.FilledButton(
-            content=ft.Container(
-                content=ft.Stack(controls=layers, expand=True),
-                border_radius=12,
-                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-                aspect_ratio=aspect_for(mode),
-            ),
-            style=card_button_style(padding=card_padding, radius=radius),
-            animate_scale=card_focus_scale(),
-            col=col,
-            on_click=on_click,
-        )
+    return ft.FilledButton(
+        content=ft.Container(
+            content=ft.Stack(controls=layers, expand=True),
+            border_radius=12,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            aspect_ratio=aspect_for(mode),
+        ),
+        style=card_button_style(padding=card_padding, radius=radius),
+        col=col,
+        on_click=on_click,
     )

@@ -110,7 +110,13 @@ def test_card_frame_carries_aspect_focus_and_click():
         on_click=lambda e: clicked.append(True),
     )
     assert frame.content.aspect_ratio == 1.67
-    assert frame.on_focus is not None and frame.on_blur is not None
+    # Declarative focus only (house standard, audit 2026-10-16): the FOCUSED
+    # border paints via the focus system; no imperative handler and no scale
+    # mutation inside a frozen component tree.
+    assert frame.on_focus is None and frame.on_blur is None
+    assert frame.animate_scale is None
+    sides = frame.style.side
+    assert sides[ft.ControlState.FOCUSED].width == 2.5
 
 
 def test_a_close_ratio_fills_the_cell_instead_of_frosting():
