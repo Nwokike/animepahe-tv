@@ -176,6 +176,10 @@ jobs:
         working-directory: build/flutter/android
         env:
           SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
+          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           # Unpatched leftovers from the first pass must never be staged.
           rm -f ../build/app/outputs/flutter-apk/*.apk
