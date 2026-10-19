@@ -23,14 +23,13 @@
 
 ## Download
 
-Get the latest version of AnimePahe TV. If you aren't sure which Android version to pick, choose the **Universal** APK.
+Get the latest version of AnimePahe TV. Modern phones and TVs use the **ARM64** APK.
 
 | Platform | Download | Size | Notes |
 |:--------:|:--------:|:----:|:------|
-| 🤖 **Android (ARM64)** | [**animepahe-tv-arm64-v8a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-arm64-v8a.apk) | ~31 MB | For modern 64-bit Android TVs and smartphones |
-| 🤖 **Android (ARM32)** | [**animepahe-tv-armeabi-v7a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-armeabi-v7a.apk) | ~30 MB | For older 32-bit Android devices and older Firesticks |
-| 🤖 **Android (x86_64)** | [**animepahe-tv-x86_64.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-x86_64.apk) | ~31 MB | For Android emulators / ChromeOS |
-| 🤖 **Android (Universal)** | [**animepahe-tv.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv.apk) | ~76 MB | Works on all devices (use if hardware type is unknown) |
+| 🤖 **Android (ARM64)** | [**animepahe-tv-arm64-v8a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-arm64-v8a.apk) | ~84 MB | For modern 64-bit Android TVs and smartphones |
+| 🤖 **Android (ARM32)** | [**animepahe-tv-armeabi-v7a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-armeabi-v7a.apk) | ~73 MB | For older 32-bit Android devices and older Firesticks |
+| 🤖 **Android (x86_64)** | [**animepahe-tv-x86_64.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-x86_64.apk) | ~91 MB | For Android emulators / ChromeOS |
 
 ---
 
