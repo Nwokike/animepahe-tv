@@ -20,14 +20,16 @@ back control lives INSIDE this header, never as a second bar stacked above
 it (the owner's report, 2026-10-16 — a separate AppBar put "back · Anime"
 ahead of the header).
 
-**Every control here is a Button-family control, never a Container.** That
-is not a style preference: against the installed flet 1.0.4, the controls
-that expose ``on_focus``/``on_blur`` are 28 classes — the Button family,
-TextField, Switch, Checkbox, Radio, Slider, Dropdown — and ``ft.Container``
-is NOT among them. A Container has no focus state, so on a TV remote it
-can never be highlighted, let alone activated. The house apps (Sherlock's
-version chip, KTV's header actions) are Containers; they are phone-first,
-and this app is not.
+**Every interactive control here is a Button-family control, never a
+Container.** That is not a style preference: against the installed flet
+1.0.4, the controls that expose ``on_focus``/``on_blur`` are 28 classes —
+the Button family, TextField, Switch, Checkbox, Radio, Slider, Dropdown —
+and ``ft.Container`` is NOT among them. A Container has no focus state, so
+on a TV remote it can never be highlighted, let alone activated. The house
+apps (Sherlock's version chip, KTV's header actions) are Containers; they
+are phone-first, and this app is not. (The one Container in this file is
+the zero-size placeholder that stands in for the backend badge below the
+tablet breakpoint — it is a layout spacer, not an interactive control.)
 """
 
 import flet as ft
@@ -68,7 +70,14 @@ def _chip_style(
 ) -> ft.ButtonStyle:
     """The house chip look (Sherlock's version chip / DDGS's version chip):
     a soft tinted plate with a rounded radius — on a Button-family control
-    so it can take D-pad focus, with a PRIMARY ring when focused."""
+    so it can take D-pad focus, with a PRIMARY ring when focused.
+
+    The COMPACT visual density matters: Flutter's M3 button defaults keep
+    a 40px minimum height, which would make our chip twice as tall as
+    the house's Container chip (11px text + 4px padding ≈ 21px) beside
+    a 32px app icon. COMPACT pulls the minimum to ~32px, and the chip
+    keeps the house's proportions.
+    """
     return ft.ButtonStyle(
         bgcolor=bgcolor or ft.Colors.TRANSPARENT,
         color=color or ft.Colors.ON_SURFACE,
@@ -81,6 +90,7 @@ def _chip_style(
             ft.ControlState.PRESSED: ft.Colors.with_opacity(0.12, AppColors.PRIMARY),
             ft.ControlState.DEFAULT: ft.Colors.TRANSPARENT,
         },
+        visual_density=ft.VisualDensity.COMPACT,
         elevation=0,
     )
 
@@ -144,11 +154,16 @@ def _version_pill(state, page) -> ft.Control:
 
     update_data = state.update_data if state.update_available else None
     if update_data:
+        # The house names the BUILD on the update chip ("Update: v2.1.0
+        # Available!" — Sherlock, DDGS, KTV all do); ours said only
+        # "Update Available!", which hid the number the owner wants.
+        version = str(update_data.get("version", "") or "").strip()
+        title = f"Update: {version} Available!" if version else "Update Available!"
         return ft.TextButton(
             content=ft.Row(
                 [
                     ft.Text(
-                        "Update Available!",
+                        title,
                         size=11,
                         weight=ft.FontWeight.BOLD,
                         color=AppColors.PRIMARY,
@@ -167,7 +182,7 @@ def _version_pill(state, page) -> ft.Control:
                 padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                 default_border=ft.BorderSide(1.5, AppColors.PRIMARY),
             ),
-            tooltip="A new version is available — tap to view",
+            tooltip="New update available — tap to view",
             on_click=lambda e: show_update_dialog(page, update_data) if page else None,
         )
     return ft.TextButton(
@@ -184,7 +199,7 @@ def _version_pill(state, page) -> ft.Control:
             color=ft.Colors.ON_SURFACE_VARIANT,
             padding=ft.Padding.symmetric(horizontal=10, vertical=4),
         ),
-        tooltip="What's New — version and changelog",
+        tooltip="What's New — version & changelog",
         on_click=lambda e: show_update_dialog(page, None) if page else None,
     )
 
@@ -355,11 +370,28 @@ def app_header(
         tight=True,
     )
 
-    return ft.Container(
-        padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
-        content=ft.Row(
+    # A narrow screen gets a VERTICAL header: the title on the first
+    # line, the actions on the second, and the whole block scrolls
+    # vertically when the actions do not fit. One horizontal row of seven
+    # controls squeezed into 360dp is unusable — the owner's report: "the
+    # header on the home screen on a small screen is too long... Vertical
+    # scrolling." A wide screen keeps the single row.
+    narrow = (getattr(page, "width", 0) or 0) < BREAKPOINT_TABLET
+    if narrow:
+        content: ft.Control = ft.Column(
+            [left, right],
+            spacing=4,
+            tight=True,
+            scroll=ft.ScrollMode.AUTO,
+        )
+    else:
+        content = ft.Row(
             [left, right],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
+        )
+
+    return ft.Container(
+        padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
+        content=content,
     )

@@ -79,7 +79,8 @@ def test_the_version_pill_is_always_tappable():
     from components import app_header
 
     source = inspect.getsource(app_header)
-    assert 'tooltip="What\'s New — version and changelog"' in source
+    # The house's own tooltip wording (Sherlock/DDGS/KTV all use it).
+    assert 'tooltip="What\'s New — version & changelog"' in source
     # The quiet pill's destination is the up-to-date dialog (no data).
     assert "show_update_dialog(page, None)" in source
     # The update state opens the update dialog with its data.

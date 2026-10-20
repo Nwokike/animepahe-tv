@@ -472,3 +472,66 @@ def test_the_kayoanime_category_filter_accepts_a_bare_string():
 
     params = asyncio.run(_run())
     assert params.get("categories") == "14893", params
+
+
+def test_a_narrow_header_is_a_vertical_scroller():
+    """The owner's report: "the header on the home screen on a small
+    screen is too long... Vertical scrolling."
+
+    A narrow header stacks the title and the actions and scrolls
+    VERTICALLY; a wide one keeps the single row. This test builds both
+    and looks at the shape, not at the source text."""
+    import flet as ft
+
+    from components.app_header import app_header
+
+    class _State:
+        current_source_name = "anikato"
+        theme_mode = ft.ThemeMode.DARK
+        update_available = False
+        update_data = None
+        viewport_version = 0
+
+    class _Controller:
+        def open_backend_picker(self):
+            pass
+
+    class _Page:
+        theme_mode = ft.ThemeMode.DARK
+
+        def __init__(self, width):
+            self.width = width
+
+    narrow = app_header(_State(), _Page(360), _Controller())
+    wide = app_header(_State(), _Page(1280), _Controller())
+
+    def _root_column(control):
+        inner = getattr(control, "content", None)
+        return inner if isinstance(inner, ft.Column) else None
+
+    narrow_column = _root_column(narrow)
+    assert narrow_column is not None, (
+        "a narrow header must be a COLUMN (title on one line, actions on "
+        "the next), not one squeezed horizontal row"
+    )
+    assert narrow_column.scroll == ft.ScrollMode.AUTO, (
+        "the narrow header scrolls VERTICALLY"
+    )
+    wide_column = _root_column(wide)
+    assert wide_column is None, "a wide header keeps the single row"
+
+
+def test_the_quality_rows_are_flat():
+    """The house's option list is flat rows, not filled buttons. A bare
+    ft.Button wears Flutter's M3 ElevatedButton defaults (a fill, a
+    shadow, a 20-radius pill), so the rows must carry the flat style."""
+    import flet as ft
+
+    import app_shell
+
+    style = app_shell._flat_row_style()
+    assert style.elevation == 0, "no shadow on a flat row"
+    assert style.bgcolor == ft.Colors.TRANSPARENT, "no fill on a flat row"
+    assert style.side[ft.ControlState.FOCUSED].width == 2.5, (
+        "the flat row still carries the house focus ring"
+    )

@@ -45,6 +45,8 @@ import re
 
 import primp
 
+from core.constants import KWIK_USER_AGENT
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["KwikFile", "KwikFileResolver"]
@@ -107,9 +109,7 @@ class KwikFileResolver:
 
     def _headers(self, referer: str) -> dict:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": KWIK_USER_AGENT,
             "Referer": referer,
         }
         if self._clearance:

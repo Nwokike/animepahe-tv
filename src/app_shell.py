@@ -40,6 +40,34 @@ _TAB_ICONS = (
 _RAIL_MIN_WIDTH = 600
 
 
+def _flat_row_style() -> ft.ButtonStyle:
+    """The option rows' style: a FLAT row, not a filled button.
+
+    A bare ft.Button wears Flutter's M3 ElevatedButton defaults — a
+    surfaceContainerLow fill, PRIMARY rose text, an elevation-1 shadow
+    and a 20-radius rounded rect — so a stack of them reads as chunky
+    grey pills. The house's option list (KTV's quality/audio rows) is
+    flat text on the dialog surface. This is that: no fill, no shadow,
+    the surface colour, and the house's focus cue.
+    """
+    return ft.ButtonStyle(
+        bgcolor=ft.Colors.TRANSPARENT,
+        color=ft.Colors.ON_SURFACE,
+        elevation=0,
+        padding=ft.Padding.symmetric(horizontal=4, vertical=10),
+        shape=ft.RoundedRectangleBorder(radius=8),
+        side={
+            ft.ControlState.FOCUSED: ft.BorderSide(2.5, AppColors.PRIMARY),
+            ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT),
+        },
+        overlay_color={
+            ft.ControlState.FOCUSED: ft.Colors.with_opacity(0.08, AppColors.PRIMARY),
+            ft.ControlState.HOVERED: ft.Colors.with_opacity(0.04, AppColors.PRIMARY),
+            ft.ControlState.DEFAULT: ft.Colors.TRANSPARENT,
+        },
+    )
+
+
 def _is_tv(page) -> bool:
     if page is None:
         return False
@@ -658,6 +686,7 @@ def _build_download_quality_dialog(state, controller) -> ft.Control:
         buttons.append(
             ft.Button(
                 content=label,
+                style=_flat_row_style(),
                 on_click=lambda e, i=i: controller.choose_download_quality(i),
             )
         )
@@ -824,6 +853,7 @@ def _build_quality_dialog(state, controller) -> ft.Control:
         buttons.append(
             ft.Button(
                 content=label,
+                style=_flat_row_style(),
                 disabled=resolving,
                 on_click=lambda e, i=i: controller.choose_quality(i),
             )

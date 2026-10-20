@@ -41,12 +41,13 @@ WATCHDOG_SECONDS = 20.0
 DEFER_SEEK_POLL_SECONDS = 4.0
 POSITION_CHECKPOINT_SECONDS = 10.0
 
-KWIK_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
+# The browser identity the kwik family expects — ONE constant, shared
+# with the kwik FILE resolver (core/constants.py): a Cloudflare
+# clearance is bound to the user agent that earned it, so the two must
+# never drift.
+from core.constants import KWIK_USER_AGENT
 
-
+__all__ = ["KWIK_USER_AGENT"]
 # Playback speeds for the chip, index 2 is normal.
 def _mpv_props(referer: str) -> dict:
     """mpv tuning for network media. The source's own referer rides

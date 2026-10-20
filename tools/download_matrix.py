@@ -184,7 +184,7 @@ async def run_backend(name: str, query: str) -> None:
 
 async def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    backends = args or ["anikato", "animeout", "animepahe", "kayoanime"]
+    backends = args or ["anikato", "kayoanime", "animepahe", "animeout"]
     query = "black clover"
     if "--query" in sys.argv:
         query = sys.argv[sys.argv.index("--query") + 1]

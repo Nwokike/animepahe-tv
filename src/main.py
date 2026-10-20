@@ -219,9 +219,10 @@ class AppController:
         self.scraper = AnimePaheScraper()
         # The data layer: the ROUTER. Every provider is a complete app in
         # its own way, registered in the owner's fixed order — the app
-        # tries AniKato, AnimeOut, AnimePahe, then the rest; the first one
-        # that answers serves the session. Per-request failover, never
-        # locked; no user-facing "automatic" concept exists.
+        # tries AniKato, then Kayoanime, then AnimePahe, then AnimeOut;
+        # the first one that answers serves the session. Per-request
+        # failover, never locked; no user-facing "automatic" concept
+        # exists.
         from services.animeout_solver import AnimeOutSolver
         from services.providers.anikato import AniKatoProvider
         from services.providers.animeout import AnimeOutProvider

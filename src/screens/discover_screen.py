@@ -145,30 +145,6 @@ def _selection_label(spec: dict, selected) -> str:
     )
 
 
-def _selection_label(spec: dict, selected) -> str:
-    """The label a pill shows for the value it holds.
-
-    A multi-valued key holds a LIST; a single-valued key holds a string.
-    Stringifying the list ("['1']") matches no option, so the pill would
-    revert to the group label and never show what was picked."""
-    label = spec.get("label", spec["key"])
-    options = spec.get("options") or []
-    if isinstance(selected, list):
-        labels = []
-        for value in selected:
-            text = next(
-                (str(o.get("label", o["value"])) for o in options if str(o["value"]) == str(value)),
-                str(value),
-            )
-            labels.append(text)
-        return ", ".join(labels) if labels else label
-    current = "" if selected in (None, "") else str(selected)
-    return next(
-        (str(o.get("label", o["value"])) for o in options if str(o["value"]) == current),
-        label,
-    )
-
-
 def _pill(
     label: str,
     icon: str,

@@ -1,6 +1,14 @@
 APP_NAME = "AnimePahe TV"
 APP_VERSION = "2.0.0"
 
+# The browser identity the kwik family expects. ONE constant: the player
+# and the kwik FILE resolver must present the same string (a Cloudflare
+# clearance is bound to the user agent that earned it).
+KWIK_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
 LBL_SEARCH_EMPTY = "Search for anime to get started."
 
 LBL_CF_BLOCKED_TITLE = "Cloudflare Security Check"
