@@ -121,6 +121,54 @@ _PILL_ICON = {
 }
 
 
+def _selection_label(spec: dict, selected) -> str:
+    """The label a pill shows for the value it holds.
+
+    A multi-valued key holds a LIST; a single-valued key holds a string.
+    Stringifying the list ("['1']") matches no option, so the pill would
+    revert to the group label and never show what was picked."""
+    label = spec.get("label", spec["key"])
+    options = spec.get("options") or []
+    if isinstance(selected, list):
+        labels = []
+        for value in selected:
+            text = next(
+                (str(o.get("label", o["value"])) for o in options if str(o["value"]) == str(value)),
+                str(value),
+            )
+            labels.append(text)
+        return ", ".join(labels) if labels else label
+    current = "" if selected in (None, "") else str(selected)
+    return next(
+        (str(o.get("label", o["value"])) for o in options if str(o["value"]) == current),
+        label,
+    )
+
+
+def _selection_label(spec: dict, selected) -> str:
+    """The label a pill shows for the value it holds.
+
+    A multi-valued key holds a LIST; a single-valued key holds a string.
+    Stringifying the list ("['1']") matches no option, so the pill would
+    revert to the group label and never show what was picked."""
+    label = spec.get("label", spec["key"])
+    options = spec.get("options") or []
+    if isinstance(selected, list):
+        labels = []
+        for value in selected:
+            text = next(
+                (str(o.get("label", o["value"])) for o in options if str(o["value"]) == str(value)),
+                str(value),
+            )
+            labels.append(text)
+        return ", ".join(labels) if labels else label
+    current = "" if selected in (None, "") else str(selected)
+    return next(
+        (str(o.get("label", o["value"])) for o in options if str(o["value"]) == current),
+        label,
+    )
+
+
 def _pill(
     label: str,
     icon: str,
@@ -335,20 +383,14 @@ def DiscoverScreen() -> ft.Control:
     for spec in value_specs:
         key = spec["key"]
         selected = (state.discover_selections or {}).get(key)
-        options = spec.get("options") or []
-        current = "" if selected in (None, "") else str(selected)
-        label = spec.get("label", key)
-        shown = next(
-            (str(o.get("label", o["value"])) for o in options if str(o["value"]) == current),
-            label,
-        )
+        shown = _selection_label(spec, selected)
         filter_controls.append(
             _menu_button(
                 shown,
                 _PILL_ICON.get(key, ft.Icons.FILTER_LIST_OUTLINED),
-                bool(current),
-                _filter_menu(spec, current, _pick),
-                tooltip=f"Filter by {label.lower()}",
+                bool(selected) and selected != "",
+                _filter_menu(spec, selected, _pick),
+                tooltip=f"Filter by {spec.get('label', key).lower()}",
             )
         )
     # The SORT, on its own row: a house pill that opens the source's own
@@ -363,11 +405,7 @@ def DiscoverScreen() -> ft.Control:
         if not selected:
             options = spec.get("options") or []
             selected = str(options[0]["value"]) if options else None
-        options = spec.get("options") or []
-        shown = next(
-            (str(o.get("label", o["value"])) for o in options if str(o["value"]) == str(selected)),
-            spec.get("label", spec["key"]),
-        )
+        shown = _selection_label(spec, selected)
         sort_controls.append(
             _menu_button(
                 shown,
@@ -388,9 +426,12 @@ def DiscoverScreen() -> ft.Control:
 
         sort_controls.append(
             ft.IconButton(
-                icon=ft.Icons.ARROW_UPWARD_ROUNDED
+                # The house convention: the icon names the mode the tap
+                # LANDS ON, not the one it is leaving. "asc" (oldest
+                # first) taps to "desc" (newest first) → down arrow.
+                icon=ft.Icons.ARROW_DOWNWARD_ROUNDED
                 if order == "asc"
-                else ft.Icons.ARROW_DOWNWARD_ROUNDED,
+                else ft.Icons.ARROW_UPWARD_ROUNDED,
                 icon_size=ICON_SM,
                 icon_color=AppColors.PRIMARY,
                 # The house pill's own outline (radius 8, the same 1px
@@ -407,7 +448,7 @@ def DiscoverScreen() -> ft.Control:
                         ),
                     },
                 ),
-                tooltip="Oldest first" if order == "asc" else "Newest first",
+                tooltip="Newest first" if order == "asc" else "Oldest first",
                 on_click=_toggle_order,
             )
         )

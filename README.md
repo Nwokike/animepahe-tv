@@ -46,7 +46,8 @@ Get the latest version of AnimePahe TV. Modern phones and TVs use the **ARM64** 
   first two answer with no verification, AnimePahe's catalogue is
   Cloudflare-gated, AnimeOut's file host is walled), each with its own
   catalog, artwork, playback and Cloudflare story. The app resolves
-  one source behind a startup splash (a stored pin, or an automatic race of the open sources) and
+  one source behind a startup splash (a stored pin, or the fixed order
+  AniKato → Kayoanime → AnimePahe → AnimeOut) and
   then *is* that source: nothing else is consulted, and switching re-runs the whole gate.
 - **The art decides the layout** — the screen sniffs the shape of the artwork the active source
   serves and paints itself in landscape or portrait automatically: grids, shelves and cards all
@@ -56,7 +57,7 @@ Get the latest version of AnimePahe TV. Modern phones and TVs use the **ARM64** 
 - **Continue Watching** — a shelf on Home that picks up exactly where you stopped; positions
   persist across launches.
 - **In-app Player** — `flet-video` (mpv) with a quality selector when the master playlist offers
-  variants, resume from your saved position, next/previous episode buttons, and a 10s-network-timeout
+  variants, resume from your saved position, next/previous episode buttons, and a 20s-network-timeout
   watchdog so a dead stream fails into Retry instead of hanging.
 - **Offline Downloads** — save any episode (or a whole series) for offline: parallel segments,
   `Range`-resumable, cancel-safe, grouped by series with progress and sizes. Downloaded episodes
@@ -85,7 +86,7 @@ Get the latest version of AnimePahe TV. Modern phones and TVs use the **ARM64** 
 | Sources | Provider protocol + `ProviderRouter` (breaker per provider, owner-scoped catalog ops, health in Settings) |
 | Cloudflare | `flet-webview-all` on Android/iOS/TV; pywebview subprocess for desktop dev (UA-pinned, renderer-guarded) |
 | Durable state | Atomic JSON in the data tier (`FLET_APP_STORAGE_DATA`): history, continue watching, positions, clearance, downloads, artwork defaults |
-| Stream resolution | Per-source: AniKato's encrypted MegaPlay manifests, AnimePahe's Kwik unpack, Kayoanime's Drive, AnimeOut's DDL chain |
+| Stream resolution | Per-source: AniKato's encrypted MegaPlay manifests, AnimePahe's Kwik unpack, Kayoanime's Drive, AnimeOut's DDL chain (files walled) |
 | Artwork | `core/artwork.py` (byte sniffing) + `services/artwork_probe.py` (cache-first range probes) |
 | Ads | `flet-yandex-ads` (banner, interstitial, rewarded, app open) |
 | State Management | `@observable` AppState + context providers + a controller bridge |
@@ -189,13 +190,13 @@ uv sync
 # Run in development
 flet run
 
-# Build for Android
-flet build apk --release
+# Build for Android (split per ABI — the release job's shape)
+flet build apk --release --split-per-abi
 
 # Build for Windows
 flet build windows --release
 
-# Tests (609 passing; the whole ruff gate is clean)
+# Tests (616 passing; the whole ruff gate is clean)
 python -m pytest tests/ -q
 python -m ruff check --select F src/ tests/
 
