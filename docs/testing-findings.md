@@ -624,3 +624,31 @@ AniKato  ->  Kayoanime  ->  AnimePahe  ->  AnimeOut
 `PROVIDER_ORDER` in `services/providers/base.py` now reads exactly that,
 and the startup tests pin the new failover chain (AniKato → Kayoanime →
 AnimePahe → AnimeOut).
+
+### 8. The re-audit round (six agents, every part of the project)
+
+Six independent read-only agents covered the whole change set: the
+Discover screen and the three providers' filter code; the header, the
+update dialog and the state/tokens; the kwik resolver and its AniKato
+wiring; the test suite's strength; the docs against the code; and a
+full-app sweep for leftover nonsense. What they found, and what
+happened:
+
+| # | Finding | Fixed |
+|---|---|---|
+| 1 | **The up-to-date dialog CRASHED.** `ft.Markdown(..., size=12)` — flet 1.0.4's Markdown has no `size` field, so the version pill (the most-tapped control in the header) raised on tap. The test that should have caught it only matched source TEXT. | The `size=` is gone; the dialog is now the house's shape (verified icon + "You're up to date", "✓ Latest version · vX", the notes as Markdown with the GITHUB_WEB extension set and a tappable-link handler, a scrollable column, "Check for Updates" + "Close"). The dismissal goes through the app's own registry (it popped the topmost dialog unconditionally, eating a SnackBar above it). The test now BUILDS the dialog. |
+| 2 | The router was still registered in the OLD order, so the Settings screen (which renders `router.provider_names` under "The app tries them in this order at launch") told the user a lie. | The router is built from `PROVIDER_ORDER`; the Settings order, the startup gate and the picker all read the same list. |
+| 3 | Home's three injected header actions (Airing schedule, Surprise me, Search) were still `ft.Container` — unreachable by a TV remote while the pill beside them lit up. | They are `ft.IconButton`s. |
+| 4 | A multi-valued pill never showed the value it held: the stored list stringified to "['1']" and matched no option. | `_selection_label` reads the list properly. |
+| 5 | The direction arrow named the mode it was LEAVING, not the one the tap lands on (the house convention). | Flipped. |
+| 6 | The quality dialogs' rows were chunky filled pills (Flutter's M3 ElevatedButton defaults) where the house shows flat rows. | `_flat_row_style()`: no fill, no shadow, the house focus ring. |
+| 7 | The header chip rendered at Flutter's 40px button minimum — twice the house's ~21px chip, beside a 32px app icon. | `visual_density=ft.VisualDensity.COMPACT`. |
+| 8 | The narrow header squeezed seven controls into 360dp in one horizontal row. | A narrow header is a vertically scrolling block: the title on the first line, the actions on the second. |
+| 9 | **The kwik path was dead on arrival.** `_episode_mal_id` parsed the RAW JSON body, whose attribute quotes are escaped, so the MAL id was always 0 and `kwik_file_sources` always returned []. | It parses the `result` HTML. The mapper is keyed by MAL id, so this was the whole feature. |
+| 10 | The Discover filters were rebuilt as Material Dropdowns and then as pills that wrapped to several lines — the owner's "they put the filter and the sort" and "KTV Player is even in one line". | KTV's `filter_bar.py` copied verbatim: one horizontal line of outlined pills that scrolls horizontally, the sort on its own row, and no "Min episodes" field. |
+| 11 | Dead code (a duplicated `_selection_label`), stale provider-order comments in `main.py` and `tools/download_matrix.py`, a second copy of the kwik User-Agent, an overclaimed header docstring, and 18 stale doc claims. | All closed; the User-Agent is one shared constant (`core/constants.py`). |
+
+The lesson the audits repeated, and this project now guards with
+tests: **a test that only matches source text passes while the app is
+broken.** The dialog test that missed the `ft.Markdown` crash is the
+proof.

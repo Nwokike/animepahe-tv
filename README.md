@@ -196,7 +196,7 @@ flet build apk --release --split-per-abi
 # Build for Windows
 flet build windows --release
 
-# Tests (616 passing; the whole ruff gate is clean)
+# Tests (618 passing; the whole ruff gate is clean)
 python -m pytest tests/ -q
 python -m ruff check --select F src/ tests/
 

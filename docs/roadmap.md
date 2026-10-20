@@ -18,7 +18,7 @@ ability only one source has appears only when that source is selected.
 **Standing rules.** Every phase starts with a full fresh read of all docs
 ("start afresh"), then a plan-mode presentation. Every step carries its own
 regression tests; commits per step; the full suite stays green at every
-commit (609 passing, warnings-as-errors, F-clean ruff gate). No new
+commit (618 passing, warnings-as-errors, F-clean ruff gate). No new
 dependencies without a study. Ads ship the owner's production unit ids
 (app 20208795, 2026-10-16) — no demo id anywhere.
 
