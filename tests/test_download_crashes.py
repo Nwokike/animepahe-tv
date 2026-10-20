@@ -257,10 +257,18 @@ def test_pause_actually_stops_the_task():
             def aiter_bytes(self, chunk_size=None):
                 async def gen():
                     yield b"x" * 4096  # first chunk lands on disk
+                    # The generator only resumes when the consumer asks
+                    # for the NEXT chunk — which happens AFTER the write
+                    # of this one. So this event is the proof that the
+                    # first chunk was handed to the writer, without
+                    # depending on when the buffered handle is flushed.
+                    chunk_sent.set()
                     await release.wait()  # then stall mid-download
                     yield b"y" * 4096  # must never be written
 
                 return gen()
+
+        chunk_sent = asyncio.Event()
 
         class _SlowClient:
             async def get(self, url, headers=None, stream=False, timeout=None):
@@ -273,14 +281,20 @@ def test_pause_actually_stops_the_task():
 
         # Bounded waits, not fixed sleeps: a fixed 20ms raced the writer
         # under machine load (observed flake) and proved nothing.
-        async def _until(predicate, timeout=2.0):
+        async def _until(predicate, timeout=5.0):
             async with asyncio.timeout(timeout):
                 while not predicate():
                     await asyncio.sleep(0.01)
 
         job_dir = mgr._job_dir("unknown", "ep1")
         part_path = os.path.join(job_dir, "file.mkv.part")
-        await _until(lambda: os.path.exists(part_path))
+        # Wait for the FIRST CHUNK to be handed to the writer. The file's
+        # size is no proof at this point: the handle is buffered, so the
+        # bytes only reach the disk when it is closed — which is what
+        # the pause does. Waiting for the size here deadlocked (it is
+        # 0 until the flush); waiting only for the file to EXIST let the
+        # pause land before the first write under load (the flake).
+        await _until(lambda: chunk_sent.is_set() and os.path.exists(part_path))
 
         assert mgr.pause("ep1") is True
         # The writer must actually STOP — not run on in the background.

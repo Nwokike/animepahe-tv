@@ -113,11 +113,15 @@ def _home_header(state, page, controller) -> ft.Control:
     from components.app_header import app_header
 
     def _action(icon, tip, handler, colour=None) -> ft.Control:
-        return ft.Container(
-            content=ft.Icon(icon, color=colour or ft.Colors.ON_SURFACE, size=20),
-            padding=10,
-            border_radius=10,
-            ink=True,
+        # An ICON BUTTON, not a Container: flet 1.0.4 gives a Container
+        # no focus state, so these three header actions (Airing
+        # schedule, Surprise me, Search) could never be reached by a TV
+        # remote — while the pill beside them lit up (2026-10-19
+        # re-audit).
+        return ft.IconButton(
+            icon=icon,
+            icon_size=20,
+            icon_color=colour or ft.Colors.ON_SURFACE,
             tooltip=tip,
             on_click=handler,
         )

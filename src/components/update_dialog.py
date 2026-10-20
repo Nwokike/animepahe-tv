@@ -23,25 +23,44 @@ logger = logging.getLogger(__name__)
 def _show_up_to_date(page: ft.Page) -> None:
     """'You're up to date' — the version pill's destination.
 
-    The house pattern (KTV components/version_dialog.py, Sherlock
-    components/update_dialog.py, DDGS components/update_dialog.py — all
-    three build this dialog the same way): a "You're up to date" title
-    with the verified icon, the current version, the bundled changelog
-    as MARKDOWN in a SCROLLABLE column, and a live re-check.
+    The house pattern, copied from Sherlock's components/update_dialog.py
+    and DDGS's components/update_dialog.py (both build this dialog the
+    same way): a "You're up to date" title with the verified icon, the
+    current version, the bundled changelog as MARKDOWN, and a live
+    re-check.
 
-    Two things the house gets right that this copy did not (2026-10-19
-    audit): the notes were a plain ``ft.Text`` in a FIXED 340x220 box, so
-    the 1128-character changelog painted ~160px over the buttons; and
-    the dismissal popped the topmost dialog unconditionally, which
-    dismissed a SnackBar standing above this one and orphaned the
-    dialog itself."""
+    Three things the house gets right that this copy did not (the
+    2026-10-19 re-audit caught all three):
+    - The notes are `ft.Markdown` with the GITHUB_WEB extension set and
+      a tappable-link handler. `ft.Markdown` in flet 1.0.4 has NO
+      `size` field — passing one raises TypeError and the dialog never
+      opens, and the version pill is the most-tapped control in the
+      header.
+    - The notes FLOW: the outer Column scrolls and the notes are not
+      boxed in a fixed-height window. The old fixed 340x220 box clipped
+      ~60 % of the changelog and painted over the buttons.
+    - A re-check that finds nothing shows a SNACKBAR, not the same
+      dialog again (a button that re-opens itself looks like a no-op).
+    """
     from core.changelog import notes_for
     from core.constants import APP_VERSION
+    from core.notify import show_snack
 
     def _dismiss():
         # The app's own registry: it pops only if THIS dialog is the
         # topmost open one, so a snackbar above it is not eaten.
         close_app_dialog(page)
+
+    def _launch(url: str):
+        """Open a link in the changelog (the house's on_tap_link)."""
+
+        async def _run():
+            try:
+                await get_shared_services(page).launch_url(url)
+            except Exception as ex:
+                logger.info("changelog link launch failed: %s", ex)
+
+        page.run_task(_run)
 
     async def _recheck(e=None):
         _dismiss()
@@ -59,8 +78,8 @@ def _show_up_to_date(page: ft.Page) -> None:
         app_state.update_data = data or {}
         if data:
             show_update_dialog(page, data)
-        else:
-            show_update_dialog(page, None)
+            return
+        show_snack(page, f"You're up to date on v{APP_VERSION}")
 
     dlg = ft.AlertDialog(
         modal=False,
@@ -75,30 +94,22 @@ def _show_up_to_date(page: ft.Page) -> None:
             spacing=8,
         ),
         content=ft.Column(
-            [
-                ft.Text(f"✓ Latest version · v{APP_VERSION}", size=13),
-                ft.Container(height=4),
+            controls=[
+                ft.Text(f"\u2713 Latest version \u00b7 v{APP_VERSION}", size=13),
                 ft.Text("What's New:", size=13, weight=ft.FontWeight.W_600),
                 ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Markdown(
-                                notes_for(APP_VERSION),
-                                selectable=True,
-                                size=12,
-                            )
-                        ],
-                        scroll=ft.ScrollMode.AUTO,
-                        # A bounded, SCROLLABLE box: the notes are a
-                        # variable-length list, and a fixed height with
-                        # no scroll cut the tail off the dialog.
-                        height=220,
+                    content=ft.Markdown(
+                        notes_for(APP_VERSION),
+                        selectable=True,
+                        extension_set=ft.MarkdownExtensionSet.GITHUB_WEB,
+                        on_tap_link=lambda e: _launch(e.data or ""),
                     ),
-                    width=340,
+                    width=360,
                 ),
             ],
+            spacing=8,
+            scroll=ft.ScrollMode.AUTO,
             tight=True,
-            spacing=0,
         ),
         actions=[
             ft.OutlinedButton(
@@ -112,8 +123,8 @@ def _show_up_to_date(page: ft.Page) -> None:
         # NO on_dismiss handler here: flet 1.0.4 wraps on_dismiss and
         # removes the dialog from the stack BEFORE calling it, so a
         # handler that pops again closes whatever else is on top (the
-        # re-check path appended the new dialog while this one was still
-        # closing, and the round-trip popped the NEW one).
+        # re-check path appends the new dialog while the old one is still
+        # closing).
     )
     show_app_dialog(page, dlg)
 

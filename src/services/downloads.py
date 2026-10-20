@@ -650,8 +650,10 @@ class DownloadManager:
             ):
                 # A paused job keeps its STOPPED state — overwriting it
                 # with queued would make the next enqueue resume a job the
-                # user paused.
-                state = STATE_STOPPED if episode_session in self._stop_reason else STATE_QUEUED
+                # user paused. Anything else that did not complete
+                # FAILED, so the row can be retried (retry() accepts
+                # failed/stopped/completed, 2026-10-19 re-audit).
+                state = STATE_STOPPED if episode_session in self._stop_reason else STATE_FAILED
                 self._write_manifest(
                     manifest_path,
                     {
@@ -870,9 +872,14 @@ class DownloadManager:
             manifest_path = os.path.join(job_dir, "manifest.json")
             manifest = self._read_manifest(manifest_path)
             if manifest.get("state") != STATE_COMPLETED:
-                # A paused job keeps its STOPPED state.
+                # A paused job keeps its STOPPED state. Anything else that
+                # did not complete FAILED — and it must SAY so: the
+                # manifest said "queued", but retry() only accepts
+                # failed/stopped/completed, so a failed download could
+                # never be retried from the row (a dead end, 2026-10-19
+                # re-audit).
                 manifest["state"] = (
-                    STATE_STOPPED if episode_session in self._stop_reason else STATE_QUEUED
+                    STATE_STOPPED if episode_session in self._stop_reason else STATE_FAILED
                 )
                 self._write_manifest(manifest_path, manifest)
 

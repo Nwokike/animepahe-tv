@@ -21,7 +21,7 @@ from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
 from core.theme import AppColors
-from core.tokens import GRID_COL
+from core.tokens import FONT_LG, FONT_MD, GRID_COL, ICON_MD, ICON_SM
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -82,46 +82,142 @@ def _effective_selections(selections: dict | None, filters: list[dict]) -> dict:
     return out
 
 
-def _filter_dropdown(spec: dict, selected, on_pick) -> ft.Control:
-    """One filter group as a Dropdown — the owner's order: genre, type,
-    status, season and sort collapse into compact pickers instead of a
-    wall of chips. Radio semantics per key: picking a value replaces the
-    previous one; "All" (an empty value) clears it — except for order-only
-    groups (Sort), where "All" would be meaningless."""
-    key = spec["key"]
-    label = spec.get("label", key)
-    options = spec.get("options") or []
-    if spec.get("kind") == "number":
-        field = ft.TextField(
-            value=str(selected or ""),
-            hint_text=label,
-            width=110,
-            height=44,
-            text_size=12,
-            keyboard_type=ft.KeyboardType.NUMBER,
-            on_submit=lambda e, k=key: on_pick(k, (e.control.value or "").strip()),
-            on_blur=lambda e, k=key: on_pick(k, (e.control.value or "").strip()),
-        )
-        return field
-    items = [] if key in _NO_ALL_KEYS else [ft.DropdownOption(key="", text="All")]
-    items += [
-        ft.DropdownOption(key=str(o["value"]), text=str(o.get("label", o["value"])))
-        for o in options
-    ]
-    # The sort dropdown lands on its first REAL option rather than an
-    # empty (nonexistent) "All": the site's own default order.
-    if key in _NO_ALL_KEYS and not selected and items:
-        selected = str(options[0]["value"])
-    return ft.Dropdown(
-        label=label,
-        value="" if selected in (None, "") else str(selected),
-        options=items,
-        width=170,
-        text_size=12,
-        label_style=ft.TextStyle(size=11),
-        dense=True,
-        on_select=lambda e, k=key: on_pick(k, e.control.value or ""),
+# The filter bar, copied from the house's own: KTV Player's
+# components/filter_bar.py ("Country / Category / Custom are
+# PopupMenuButton triggers that render as compact outlined pills (icon +
+# label + chevron)"). The owner's instruction was to do EXACTLY what their
+# own apps do, so the constants, the pill and the trigger below are the
+# house's, unchanged.
+#
+# The house's shape also settles the sort: in the Apple TV / KTV bar the
+# SORT is not one of the filters, so here it gets its own row (the
+# owner's report, 2026-10-19: "they put the filter and the sort").
+_TRIGGER_STYLE = ft.ButtonStyle(
+    bgcolor=ft.Colors.TRANSPARENT,
+    elevation=0,
+    shadow_color=ft.Colors.TRANSPARENT,
+    overlay_color=ft.Colors.with_opacity(0.06, ft.Colors.WHITE),
+    padding=ft.Padding.all(0),
+    shape=ft.RoundedRectangleBorder(radius=8),
+)
+
+# Menu dropdown styling — PopupMenuButton uses direct params, not MenuStyle
+_MENU_BG = ft.Colors.SURFACE
+_MENU_SHADOW = ft.Colors.with_opacity(0.15, ft.Colors.BLACK)
+_MENU_ELEVATION = 4
+_MENU_PADDING = ft.Padding.symmetric(vertical=4)
+_MENU_SHAPE = ft.RoundedRectangleBorder(radius=8)
+
+# The pill's icon per filter group, in the house's idiom (a leading icon
+# that names the group).
+_PILL_ICON = {
+    "genre": ft.Icons.LOCAL_MOVIES_OUTLINED,
+    "type": ft.Icons.CATEGORY_OUTLINED,
+    "status": ft.Icons.SELL_OUTLINED,
+    "season": ft.Icons.CALENDAR_MONTH_OUTLINED,
+    "categories": ft.Icons.LOCAL_MOVIES_OUTLINED,
+    "orderby": ft.Icons.SORT_ROUNDED,
+    "sort": ft.Icons.SORT_ROUNDED,
+}
+
+
+def _pill(
+    label: str,
+    icon: str,
+    is_selected: bool,
+    show_arrow: bool = True,
+    compact: bool = True,
+    tooltip: str = "",
+) -> ft.Control:
+    """Compact outlined pill: icon + text + chevron (TV-minimum 48px tall).
+
+    The house's pill, verbatim (KTV components/filter_bar.py)."""
+    border_color = (
+        AppColors.PRIMARY
+        if is_selected
+        else ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT)
     )
+    bg = (
+        ft.Colors.with_opacity(0.08, AppColors.PRIMARY)
+        if is_selected
+        else ft.Colors.TRANSPARENT
+    )
+    font_size = FONT_MD if compact else FONT_LG
+    icon_size = ICON_SM if compact else ICON_MD
+    # Vertical padding keeps the pill at the ~48px touch target: compact
+    # text (12px) + 2x8 vertical + border ~= 44-48px on density 1 screens.
+    pad = (
+        ft.Padding.symmetric(horizontal=8, vertical=8)
+        if compact
+        else ft.Padding.symmetric(horizontal=12, vertical=10)
+    )
+
+    controls: list[ft.Control] = [
+        ft.Icon(icon, size=icon_size),
+        ft.Text(label, size=font_size, no_wrap=True),
+    ]
+    if show_arrow:
+        controls.append(ft.Icon(ft.Icons.ARROW_DROP_DOWN, size=icon_size))
+
+    return ft.Container(
+        content=ft.Row(
+            controls=controls,
+            spacing=2,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=pad,
+        border=ft.Border.all(1, border_color),
+        border_radius=8,
+        bgcolor=bg,
+        tooltip=tooltip or None,
+    )
+
+
+def _menu_button(label: str, icon: str, is_selected: bool, items, tooltip: str = "") -> ft.Control:
+    """The house's trigger: a PopupMenuButton whose content is the pill."""
+    return ft.PopupMenuButton(
+        content=_pill(label, icon, is_selected, tooltip=tooltip),
+        items=items,
+        menu_position=ft.PopupMenuPosition.UNDER,
+        style=_TRIGGER_STYLE,
+        bgcolor=_MENU_BG,
+        shadow_color=_MENU_SHADOW,
+        elevation=_MENU_ELEVATION,
+        menu_padding=_MENU_PADDING,
+        shape=_MENU_SHAPE,
+    )
+
+
+def _filter_menu(spec: dict, selected, on_pick) -> list[ft.PopupMenuItem]:
+    """The options of one filter, as the house's menu items.
+
+    Radio semantics per key: picking a value replaces the previous one;
+    "All" (an empty value) clears it — except for order-only groups
+    (Sort), where "All" would be meaningless.
+    """
+    key = spec["key"]
+    options = spec.get("options") or []
+    current = "" if selected in (None, "") else str(selected)
+    items: list[ft.PopupMenuItem] = []
+    if key not in _NO_ALL_KEYS:
+        items.append(
+            ft.PopupMenuItem(
+                content=ft.Text("All", size=FONT_MD),
+                checked=not current,
+                on_click=lambda e, k=key: on_pick(k, ""),
+            )
+        )
+    for option in options:
+        value = str(option["value"])
+        items.append(
+            ft.PopupMenuItem(
+                content=ft.Text(str(option.get("label", value)), size=FONT_MD),
+                checked=value == current,
+                on_click=lambda e, k=key, v=value: on_pick(k, v),
+            )
+        )
+    return items
+
 
 @ft.component
 def DiscoverScreen() -> ft.Control:
@@ -222,19 +318,66 @@ def DiscoverScreen() -> ft.Control:
             expand=True,
         )
 
-    # Dropdowns, not a chip wall (owner's order) — wrapped naturally
-    # without expand=True spacers (Expanded inside a wrap=True Row throws
-    # Flutter's "WrapParentData is not a subtype of FlexParentData" error).
-    filter_controls: list[ft.Control] = [
-        _filter_dropdown(spec, (state.discover_selections or {}).get(spec["key"]), _pick)
-        for spec in filters
-    ]
-    # The sort-direction toggle: only where the SOURCE has a direction to
-    # toggle — the provider's spec says so ("direction": True). AniKato's
-    # own form has no order parameter, so the arrow there flipped and
-    # changed nothing (2026-10-19). An IconButton, so a D-pad can reach
-    # it: a Container takes no focus at all in flet 1.0.4.
-    if any(spec.get("direction") for spec in filters):
+    # The FILTERS are a row of house pills; the SORT is its own control on
+    # its own row (the owner's report, 2026-10-19: "they put the filter
+    # and the sort" — the sort is not one of the filters). Wrapped
+    # naturally, without expand=True spacers (Expanded inside a wrap=True
+    # Row throws Flutter's "WrapParentData is not a subtype of
+    # FlexParentData" error).
+    #
+    # The numeric groups (AniKato's "Min episodes") are NOT rendered:
+    # the house's filter bar is a row of value pickers, and the owner's
+    # call was to drop the minimum-episode field.
+    filter_specs = [spec for spec in filters if spec.get("kind") != "number"]
+    sort_specs = [spec for spec in filter_specs if spec.get("key") in _NO_ALL_KEYS]
+    value_specs = [spec for spec in filter_specs if spec.get("key") not in _NO_ALL_KEYS]
+    filter_controls: list[ft.Control] = []
+    for spec in value_specs:
+        key = spec["key"]
+        selected = (state.discover_selections or {}).get(key)
+        options = spec.get("options") or []
+        current = "" if selected in (None, "") else str(selected)
+        label = spec.get("label", key)
+        shown = next(
+            (str(o.get("label", o["value"])) for o in options if str(o["value"]) == current),
+            label,
+        )
+        filter_controls.append(
+            _menu_button(
+                shown,
+                _PILL_ICON.get(key, ft.Icons.FILTER_LIST_OUTLINED),
+                bool(current),
+                _filter_menu(spec, current, _pick),
+                tooltip=f"Filter by {label.lower()}",
+            )
+        )
+    # The SORT, on its own row: a house pill that opens the source's own
+    # order list, plus the direction arrow where the SOURCE has a
+    # direction to toggle (the provider's spec says so, "direction":
+    # True). AniKato's own form has no order parameter, so the arrow
+    # there flipped and changed nothing (2026-10-19) — no arrow is
+    # drawn for it.
+    sort_controls: list[ft.Control] = []
+    for spec in sort_specs:
+        selected = (state.discover_selections or {}).get(spec["key"])
+        if not selected:
+            options = spec.get("options") or []
+            selected = str(options[0]["value"]) if options else None
+        options = spec.get("options") or []
+        shown = next(
+            (str(o.get("label", o["value"])) for o in options if str(o["value"]) == str(selected)),
+            spec.get("label", spec["key"]),
+        )
+        sort_controls.append(
+            _menu_button(
+                shown,
+                _PILL_ICON.get(spec["key"], ft.Icons.SORT_ROUNDED),
+                True,
+                _filter_menu(spec, str(selected), _pick),
+                tooltip=f"Sort by {spec.get('label', spec['key']).lower()}",
+            )
+        )
+    if any(spec.get("direction") for spec in sort_specs):
         order = str((state.discover_selections or {}).get(_ORDER_KEY) or "desc")
 
         def _toggle_order(e=None):
@@ -243,20 +386,25 @@ def DiscoverScreen() -> ft.Control:
             selections[_ORDER_KEY] = "asc" if current == "desc" else "desc"
             controller.load_discover(_effective_selections(selections, filters), 1)
 
-        filter_controls.append(
+        sort_controls.append(
             ft.IconButton(
                 icon=ft.Icons.ARROW_UPWARD_ROUNDED
                 if order == "asc"
                 else ft.Icons.ARROW_DOWNWARD_ROUNDED,
-                icon_size=16,
+                icon_size=ICON_SM,
                 icon_color=AppColors.PRIMARY,
+                # The house pill's own outline (radius 8, the same 1px
+                # border, the same 8/8 padding as the filter pills), with
+                # the focus ring the house's focus cue uses.
                 style=ft.ButtonStyle(
-                    bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
-                    shape=ft.RoundedRectangleBorder(radius=12),
-                    padding=ft.Padding.all(12),
+                    bgcolor=ft.Colors.with_opacity(0.08, AppColors.PRIMARY),
+                    shape=ft.RoundedRectangleBorder(radius=8),
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=8),
                     side={
                         ft.ControlState.FOCUSED: ft.BorderSide(2.5, AppColors.PRIMARY),
-                        ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT),
+                        ft.ControlState.DEFAULT: ft.BorderSide(
+                            1, ft.Colors.with_opacity(0.3, ft.Colors.OUTLINE_VARIANT)
+                        ),
                     },
                 ),
                 tooltip="Oldest first" if order == "asc" else "Newest first",
@@ -268,6 +416,17 @@ def DiscoverScreen() -> ft.Control:
         spacing=8,
         wrap=True,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+    sort_row = (
+        ft.Row(
+            sort_controls,
+            spacing=8,
+            wrap=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.END,
+        )
+        if sort_controls
+        else None
     )
 
     results = state.discover_results or []
@@ -292,6 +451,8 @@ def DiscoverScreen() -> ft.Control:
         header,
         ft.Container(height=10),
         filter_row,
+        # The SORT has its own row — it is not one of the filters.
+        *([sort_row] if sort_row is not None else []),
         # An ad under the filter row, before the results (KTV's search
         # screen slot: under the header, above the grid).
         build_banner_ad(page, inline=True),

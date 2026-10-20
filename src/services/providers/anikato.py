@@ -210,6 +210,24 @@ def _parse_episode_list(html: str) -> list[tuple[int, str, bool, bool, int]]:
     return entries
 
 
+def _quality_to_resolution(quality: str) -> int:
+    """'1080p' -> 1080. A label the site writes some other way yields
+    0 — never a guess."""
+    match = re.search(r"(\d+)", str(quality))
+    return int(match.group(1)) if match else 0
+
+
+def _parse_mal_id(html: str) -> int:
+    """The series' MyAnimeList id, from the episode list's own links.
+
+    The kwik file route is keyed by MAL id (the mapper's own API), and
+    AniKato's episode list carries ``data-mal`` on every episode link
+    (live-verified 2026-10-19: Black Clover = 34572). 0 means the site
+    did not publish one."""
+    match = re.search(r'data-mal="(\d+)"', html)
+    return int(match.group(1)) if match else 0
+
+
 def _parse_servers(html: str) -> list[tuple[str, str]]:
     """Server groups: (type 'sub'|'dub', link-id) — both groups, nothing
     dropped."""
@@ -600,6 +618,24 @@ class AniKatoProvider:
         self._cache_put(key, data, CACHE_TTL_EPISODES)
         return data
 
+    async def _episode_mal_id(self, anime_id: int) -> int:
+        """The series' MAL id, from the episode list the provider already
+        fetches (cached like the entries)."""
+        key = f"malid_{anime_id}"
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+        try:
+            body = await self._get_text(
+                f"{BASE}/ajax/episode/list/{anime_id}?style=list&vrf={quote(_vrf(anime_id), safe='')}",
+                xhr=True,
+            )
+        except Exception:
+            body = ""
+        mal_id = _parse_mal_id(body)
+        self._cache_put(key, mal_id, CACHE_TTL_LATEST)
+        return mal_id
+
     async def _episode_entries(self, anime_id: int) -> list[tuple[int, str, bool, bool, int]]:
         key = f"eplist_{anime_id}"
         cached = self._cache_get(key)
@@ -854,6 +890,71 @@ class AniKatoProvider:
         except (primp.PrimpError, OSError, ValueError, KeyError):
             return False
 
+    async def kwik_file_sources(
+        self, anime_session: str, episode_session: str
+    ) -> list[Source]:
+        """The AnimePahe FILES for this episode, in the site's own
+        per-quality menu — AniKato's own download row is AnimePahe's
+        (the site's mapper.js hands out pahe.win/kwik links, and the
+        mapper's own normalizer calls that source "Kiwi" = animepahe;
+        proved live 2026-10-19, docs/testing-findings.md §6).
+
+        They are returned only when a kwik.cx clearance is already
+        stored: the kwik FILE page is the one kwik route Cloudflare
+        guards, and opening a verification window is the CALLER's
+        deliberate, user-visible decision — a provider never opens one
+        on its own (the same rule the animepahe solver follows).
+        """
+        from services.kwik_files import KwikFileResolver
+        from services.store import get_store
+
+        _, slug = split_session(anime_session)
+        _, _, num_s = episode_session.rpartition("|")
+        if not slug or not num_s.isdigit():
+            return []
+        store = get_store()
+        stored = await store.get_clearance("kwik.cx")
+        if not stored:
+            return []
+        resolver = KwikFileResolver(
+            clearance=(stored.get("cookies", ""), stored.get("user_agent", ""))
+        )
+        try:
+            watch = await self._watch_page(slug)
+            entries = await self._episode_entries(watch["anime_id"])
+            mal_id = await self._episode_mal_id(watch["anime_id"])
+            if not mal_id:
+                return []
+            episode = int(num_s)
+            timestamp = next(
+                (ts for n, _ids, _s, _d, ts in entries if n == episode), 0
+            )
+            if not timestamp:
+                return []
+            files = await resolver.episode_files(mal_id, episode, timestamp)
+            results: list[Source] = []
+            for item in files:
+                url = await resolver.media_url(item.url)
+                if not url:
+                    continue
+                results.append(
+                    Source(
+                        url=url,
+                        resolution=_quality_to_resolution(item.quality),
+                        audio="jpn" if item.audio == "sub" else "eng",
+                        fansub="AnimePahe",
+                        size="",
+                        # The site's own file link, read verbatim.
+                        download_url=item.url,
+                    )
+                )
+            return results
+        except Exception as ex:
+            logger.info("anikato: kwik files failed: %s", ex)
+            return []
+        finally:
+            await resolver.close()
+
     async def sources(self, anime_session: str, episode_session: str) -> list[Source]:
         _, slug = split_session(anime_session)
         _, _, num_s = episode_session.rpartition("|")
@@ -923,6 +1024,13 @@ class AniKatoProvider:
                 )
             )
             seen_audio.add(kind)
+        # The AnimePahe FILES for this episode (AniKato's own download row
+        # IS AnimePahe's — proved live 2026-10-19). They join the list
+        # when a kwik.cx clearance is stored: a direct, per-quality MP4
+        # the player can open (only HLS routes through the proxy;
+        # progressive files go straight to the player). Without a
+        # clearance nothing is added and the megaplay path is untouched.
+        results.extend(await self.kwik_file_sources(anime_session, episode_session))
         return results
 
     async def episodes_for_title(self, title: str) -> list[Episode]:

@@ -230,15 +230,21 @@ class AppController:
         from services.providers.kayoanime import KayoanimeProvider
         from services.router import ProviderRouter
 
+        # The router is REGISTERED in the same fixed order the app tries
+        # (PROVIDER_ORDER). The Settings screen renders this list under
+        # the caption "The app tries them in this order at launch", so a
+        # registration order that differs from PROVIDER_ORDER makes the
+        # app TELL THE USER A LIE about its own behaviour (2026-10-19
+        # re-audit).
+        by_name = {
+            "anikato": AniKatoProvider(),
+            "animeout": AnimeOutProvider(solver=AnimeOutSolver(store=self.store)),
+            "animepahe": AnimePaheProvider(self.scraper),
+            "kayoanime": KayoanimeProvider(),
+        }
         self.router = ProviderRouter(
-            [
-                AniKatoProvider(),
-                AnimeOutProvider(
-                    solver=AnimeOutSolver(store=self.store),
-                ),
-                AnimePaheProvider(self.scraper),
-                KayoanimeProvider(),
-            ]
+            [by_name[name] for name in PROVIDER_ORDER if name in by_name]
+            + [p for name, p in by_name.items() if name not in PROVIDER_ORDER]
         )
         self._owner_of = owner_of
         self._default_owner = DEFAULT_OWNER
@@ -596,6 +602,37 @@ class AppController:
                         if page_num == 1 and not state.latest_releases and state.is_online:
                             state.cf_blocked = True
                         state.latest_version += 1
+
+    async def solve_kwik_clearance(self) -> bool:
+        """Earn a Cloudflare clearance for kwik.cx — the ONE kwik route
+        that is guarded: the FILE page (``/f/``). The kwik STREAM route
+        (``/e/``) is not challenged, and that is what AnimePahe streams
+        through; AniKato's own download row is AnimePahe's FILES, so
+        AniKato's kwik files need this clearance.
+
+        The clearance is stored PER HOST (the store keeps one per walled
+        host), so it never interferes with the animepahe one. The
+        verification window is the user's explicit act — the Verify
+        button — exactly like the animepahe solve.
+        """
+        from services.store import get_store
+        from services.webview_solver import WebViewSolver
+
+        page = getattr(self, "page", None)
+        if page is None:
+            return False
+        try:
+            cookies, ua = await WebViewSolver.solve_challenge(
+                page, "https://kwik.cx/", None
+            )
+        except Exception as ex:
+            logger.info("kwik clearance solve failed: %s", ex)
+            return False
+        if not cookies:
+            return False
+        await get_store().save_clearance(cookies, ua, "kwik.cx")
+        logger.info("kwik clearance solved and persisted")
+        return True
 
     async def retry_cloudflare(self):
         """Clear the Cloudflare session + caches, then reload the home feed."""

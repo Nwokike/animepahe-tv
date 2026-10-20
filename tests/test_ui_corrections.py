@@ -103,7 +103,11 @@ def test_discover_drops_the_via_line_and_uses_dropdowns():
 
     source = inspect.getsource(discover)
     assert "via {" not in source, "the header already names the source — no 'via'"
-    assert "ft.Dropdown(" in source, "filters are dropdowns"
+    assert "ft.PopupMenuButton(" in source, (
+        "the filters are the house's PopupMenuButton pills, the way the "
+        "owner's own apps do it (KTV components/filter_bar.py)"
+    )
+    assert "def _pill(" in source, "the house's pill, copied"
     assert "_filter_choices" not in source, "the chip wall is gone"
     # Flutter's Wrap widget crashes with "type 'WrapParentData' is not a subtype
     # of type 'FlexParentData'" if an Expanded/expand=True sits inside wrap=True.

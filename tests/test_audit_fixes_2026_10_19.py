@@ -52,39 +52,39 @@ def test_the_screen_has_no_hardcoded_list_of_filter_keys():
     assert "_multi_valued_keys" in source
 
 
-def test_the_sort_dropdown_has_no_all_option():
+def test_the_sort_pill_offers_no_all_option():
     """'There is no such thing as sort all.' The sort group never gets
-    the synthetic "All" first option — and it lands on the site's own
-    first real option instead."""
+    the synthetic "All" chip — and it lands on the site's own first real
+    option instead. A FILTER group does offer it (that is how a filter
+    clears)."""
     import screens.discover_screen as ds
 
-    spec = {
+    sort_spec = {
         "key": "orderby",
         "label": "Sort",
         "kind": "choice",
+        "direction": True,
         "options": [
             {"value": "modified", "label": "Recently updated"},
             {"value": "date", "label": "Newest"},
         ],
     }
-    dropdown = ds._filter_dropdown(spec, None, lambda k, v: None)
-    keys = [o.key for o in dropdown.options]
-    assert "" not in keys, "a sort group must not offer 'All'"
-    assert keys == ["modified", "date"]
-    assert dropdown.value == "modified", "it lands on the site's first option"
+    filter_spec = {
+        "key": "categories",
+        "label": "Category",
+        "kind": "choice",
+        "multi": True,
+        "options": [{"value": "14893", "label": "DVD"}],
+    }
 
-    # A NON-sort group still offers the clearing option.
-    other = ds._filter_dropdown(
-        {
-            "key": "categories",
-            "label": "Category",
-            "kind": "choice",
-            "options": [{"value": "14893", "label": "DVD"}],
-        },
-        None,
-        lambda k, v: None,
+    def _labels(spec, selected):
+        items = ds._filter_menu(spec, selected, lambda k, v: None)
+        return [item.content.value for item in items]
+
+    assert _labels(sort_spec, "modified") == ["Recently updated", "Newest"], (
+        "a sort group must not offer 'All'"
     )
-    assert next(o.key for o in other.options) == "", "a filter clears with 'All'"
+    assert _labels(filter_spec, "") == ["All", "DVD"], "a filter clears with 'All'"
 
 
 def test_the_direction_toggle_appears_only_where_the_source_has_a_direction():
@@ -144,20 +144,64 @@ def test_the_header_controls_are_button_family():
 # ---------------------------------------------------------------------------
 
 
-def test_the_up_to_date_dialog_scrolls_its_notes_as_markdown():
-    """The house shape (Sherlock, DDGS, KTV all build it this way):
-    the notes are MARKDOWN in a SCROLLABLE column. The old copy put a
-    1128-character plain Text in a FIXED 340x220 box, so ~160px of it
-    painted over the dialog's buttons."""
+def test_the_up_to_date_dialog_BUILDS_and_shows_its_notes():
+    """The house shape (Sherlock, DDGS, KTV all build it this way): the
+    notes are MARKDOWN and the outer column scrolls.
+
+    This test CONSTRUCTS the dialog. A source-text check could not catch
+    what the 2026-10-19 re-audit found: `ft.Markdown(..., size=12)`
+    raises TypeError on flet 1.0.4 (Markdown has no `size` field), so the
+    version pill — the most-tapped control in the header — died on tap
+    while the suite stayed green."""
     from components import update_dialog
 
-    source = inspect.getsource(update_dialog)
-    assert "ft.Markdown(" in source, "the notes render as markdown (real bullets)"
-    assert "scroll=ft.ScrollMode.AUTO" in source, "the notes scroll"
-    # No fixed-height plain-Text box of notes any more.
-    assert "height=220,\n" in source or "height=220" in source, (
-        "the notes box keeps a bounded HEIGHT — but it scrolls"
-    )
+    class _Page:
+        width = 1280
+
+        def show_dialog(self, dlg):
+            self.dlg = dlg
+
+        def pop_dialog(self):
+            pass
+
+        def update(self):
+            pass
+
+        def run_task(self, handler, *args, **kwargs):
+            handler(*args)
+
+    page = _Page()
+    captured = {}
+    update_dialog.show_app_dialog = lambda p, dlg: captured.setdefault("dlg", dlg)
+    update_dialog.close_app_dialog = lambda p: True
+    update_dialog.show_update_dialog(page, None)
+
+    dlg = captured["dlg"]
+    assert dlg is not None, "the up-to-date dialog must open"
+
+    # Walk the tree: the notes must be a real ft.Markdown, and the
+    # column that holds them must scroll.
+    stack = [dlg]
+    markdowns = []
+    scrolling = []
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ft.Markdown):
+            markdowns.append(node)
+        if isinstance(node, ft.Column) and getattr(node, "scroll", None):
+            scrolling.append(node)
+        stack.extend(getattr(node, "controls", []) or [])
+        inner = getattr(node, "content", None)
+        if inner is not None:
+            stack.append(inner)
+    assert markdowns, "the notes are markdown (real bullets, tappable links)"
+    assert scrolling, "the notes scroll — a fixed box clipped 60% of them"
+
+    # The markdown carries the house's extension set and a link handler.
+    md = markdowns[0]
+    assert md.extension_set == ft.MarkdownExtensionSet.GITHUB_WEB
+    assert md.on_tap_link is not None, "a link in the changelog is tappable"
+    assert not hasattr(md, "size"), "ft.Markdown has no size field in flet 1.0.4"
 
 
 def test_the_up_to_date_dialog_dismisses_through_the_registry():
