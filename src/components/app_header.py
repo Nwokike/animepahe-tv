@@ -6,12 +6,16 @@ screen's own name as a quiet subtitle beneath it.
 
 Right: the version/update pill, the screen's own extra actions, then the
 theme cycle. The whole right group rides a ``Row(scroll=AUTO)``: the
-house rule (Sherlock) is **scroll, never clip** — on a phone the actions
-pan instead of shoving the title off the edge, so the whole bar scrolls
-sideways when a screen adds many actions. The backend badge (the second
-source readout) rides the same row on WIDE screens only: on a narrow
-phone it is dropped because the title pill already opens the identical
-picker and the row needs the room (owner, 2026-10-19).
+house rule (Sherlock/KTV) is **scroll, never clip**, and the header is
+ALWAYS one horizontal bar — it never stacks into two lines on a narrow
+screen. The house's own mechanism (KTV's header) is an expanding spacer
+between the title and the action cluster, so the title keeps its place
+and the cluster pans sideways as the last resort. The PAGE scrolls
+vertically (its column owns the scroll); the header never does. The
+backend badge (the second source readout) rides the same row on WIDE
+screens only: on a narrow phone it is dropped because the title pill
+already opens the identical picker and the row needs the room (owner,
+2026-10-19).
 
 Every screen renders it, so switching backends (and theme) never depends on
 being on Home or finding Settings — the owner's reuse pattern from Sherlock
@@ -370,28 +374,21 @@ def app_header(
         tight=True,
     )
 
-    # A narrow screen gets a VERTICAL header: the title on the first
-    # line, the actions on the second, and the whole block scrolls
-    # vertically when the actions do not fit. One horizontal row of seven
-    # controls squeezed into 360dp is unusable — the owner's report: "the
-    # header on the home screen on a small screen is too long... Vertical
-    # scrolling." A wide screen keeps the single row.
-    narrow = (getattr(page, "width", 0) or 0) < BREAKPOINT_TABLET
-    if narrow:
-        content: ft.Control = ft.Column(
-            [left, right],
-            spacing=4,
-            tight=True,
-            scroll=ft.ScrollMode.AUTO,
-        )
-    else:
-        content = ft.Row(
-            [left, right],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-
+    # ONE horizontal bar, always. On a narrow screen it does NOT stack
+    # into two lines: the house's own mechanism (KTV's header) is an
+    # expanding spacer between the title and the action cluster, so the
+    # title keeps its place and the action cluster pans sideways as the
+    # last resort. The PAGE scrolls vertically (its Column owns the
+    # scroll), never the header itself.
     return ft.Container(
         padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
-        content=content,
+        content=ft.Row(
+            [
+                left,
+                ft.Container(expand=True),
+                right,
+            ],
+            alignment=ft.MainAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
     )

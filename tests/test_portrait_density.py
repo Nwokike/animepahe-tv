@@ -55,4 +55,6 @@ def test_search_and_discover_grid_spacing_and_insets():
 
     discover_src = inspect.getsource(discover)
     assert "grid_with_ads(" in discover_src, "discover uses the shared grid helper"
-    assert "left=24, right=24" in discover_src
+    # The house's gutters: the filter bar owns its own 8/4 padding and the
+    # page's inset is 16 (ktv-player's gutter), not the old 24.
+    assert "padding=ft.Padding.only(left=16, right=16, bottom=16)" in discover_src

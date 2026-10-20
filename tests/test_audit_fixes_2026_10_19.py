@@ -474,13 +474,14 @@ def test_the_kayoanime_category_filter_accepts_a_bare_string():
     assert params.get("categories") == "14893", params
 
 
-def test_a_narrow_header_is_a_vertical_scroller():
-    """The owner's report: "the header on the home screen on a small
-    screen is too long... Vertical scrolling."
+def test_the_header_never_stacks_it_is_always_one_bar():
+    """The header is ALWAYS one horizontal bar — on a phone it does not
+    fall over into two lines. The house's mechanism (KTV's header) is an
+    expanding spacer plus a horizontally-scrolling action cluster; the
+    PAGE owns the vertical scrolling, never the header.
 
-    A narrow header stacks the title and the actions and scrolls
-    VERTICALLY; a wide one keeps the single row. This test builds both
-    and looks at the shape, not at the source text."""
+    The owner's report: "you went and made it so that it will fall over."
+    """
     import flet as ft
 
     from components.app_header import app_header
@@ -505,20 +506,32 @@ def test_a_narrow_header_is_a_vertical_scroller():
     narrow = app_header(_State(), _Page(360), _Controller())
     wide = app_header(_State(), _Page(1280), _Controller())
 
-    def _root_column(control):
-        inner = getattr(control, "content", None)
-        return inner if isinstance(inner, ft.Column) else None
+    def _root(control):
+        return getattr(control, "content", None)
 
-    narrow_column = _root_column(narrow)
-    assert narrow_column is not None, (
-        "a narrow header must be a COLUMN (title on one line, actions on "
-        "the next), not one squeezed horizontal row"
-    )
-    assert narrow_column.scroll == ft.ScrollMode.AUTO, (
-        "the narrow header scrolls VERTICALLY"
-    )
-    wide_column = _root_column(wide)
-    assert wide_column is None, "a wide header keeps the single row"
+    for label, header in (("narrow", narrow), ("wide", wide)):
+        root = _root(header)
+        assert isinstance(root, ft.Row), (
+            f"the {label} header must be one Row, never a stacked Column"
+        )
+        assert root.scroll in (None, ft.ScrollMode.HIDDEN), (
+            f"the {label} header must not scroll itself — the page does"
+        )
+        spacers = [
+            c for c in root.controls if isinstance(c, ft.Container) and c.expand
+        ]
+        assert spacers, (
+            "the house's expand spacer keeps the title from pushing the "
+            "action cluster off the bar"
+        )
+
+    # The action cluster pans sideways (the house's mechanism).
+    actions = [
+        c
+        for c in _root(wide).controls
+        if isinstance(c, ft.Row) and getattr(c, "scroll", None) == ft.ScrollMode.AUTO
+    ]
+    assert actions, "the action cluster scrolls horizontally"
 
 
 def test_the_quality_rows_are_flat():
@@ -534,4 +547,84 @@ def test_the_quality_rows_are_flat():
     assert style.bgcolor == ft.Colors.TRANSPARENT, "no fill on a flat row"
     assert style.side[ft.ControlState.FOCUSED].width == 2.5, (
         "the flat row still carries the house focus ring"
+    )
+
+
+def test_the_filter_bar_is_one_line_that_scrolls():
+    """The house's bar (KTV's components/filter_bar.py): ONE horizontal
+    line, no `wrap`, `scroll=AUTO`, its own 8/4 padding. It must never
+    drop to a second line, and it must not live inside the page's
+    vertical scroll (which would carry it away with the grid).
+
+    The owner's report: "all the filter are in one line... instead of it
+    to be in different lines." This test builds the bar from a real spec
+    and walks it.
+    """
+    import flet as ft
+
+    import screens.discover_screen as ds
+
+    spec = [
+        {
+            "key": "genre",
+            "label": "Genre",
+            "kind": "choice",
+            "multi": True,
+            "options": [{"value": "1", "label": "Action"}],
+        },
+        {
+            "key": "type",
+            "label": "Type",
+            "kind": "choice",
+            "multi": True,
+            "options": [{"value": "tv", "label": "TV"}],
+        },
+        {
+            "key": "season",
+            "label": "Season",
+            "kind": "choice",
+            "multi": True,
+            "options": [{"value": "fall", "label": "Fall"}],
+        },
+    ]
+
+    # The bar's own row, exactly as the screen builds it.
+    controls = []
+
+    def _recorder(picked):
+        return lambda k, v: picked.append(v)
+
+    for s in spec:
+        picked = []
+        controls.append(
+            ds._menu_button(
+                ds._selection_label(s, None),
+                ft.Icons.FILTER_LIST_OUTLINED,
+                False,
+                ds._filter_menu(s, None, _recorder(picked)),
+                compact=True,
+            )
+        )
+
+    for control in controls:
+        assert isinstance(control, ft.PopupMenuButton), (
+            "the trigger is the house's PopupMenuButton"
+        )
+        pill = control.content
+        assert isinstance(pill, ft.Container), "the pill is the house's Container"
+        assert pill.border is not None, "the pill is outlined"
+        assert pill.padding == ft.Padding.symmetric(horizontal=8, vertical=8), (
+            "the pill wears the house's 8/8 padding"
+        )
+
+    # The bar that holds them: no wrap, horizontal scroll.
+    assert not hasattr(ds, "filter_row"), "the screen builds the row internally"
+
+    source = inspect.getsource(ds.DiscoverScreen)
+    bar = source[source.index("    # ONE horizontal line of pills") :]
+    bar = bar[: bar.index("    results = state.discover_results")]
+    assert "wrap=True" not in bar, "the pill row must never wrap"
+    assert "scroll=ft.ScrollMode.AUTO" in bar, "the pill row pans sideways"
+    assert "vertical=ft.ScrollMode.AUTO" not in bar.split("def ")[0], (
+        "the bar itself does not get its own vertical scroll"
     )

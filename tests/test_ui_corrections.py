@@ -109,10 +109,18 @@ def test_discover_drops_the_via_line_and_uses_dropdowns():
     )
     assert "def _pill(" in source, "the house's pill, copied"
     assert "_filter_choices" not in source, "the chip wall is gone"
-    # Flutter's Wrap widget crashes with "type 'WrapParentData' is not a subtype
-    # of type 'FlexParentData'" if an Expanded/expand=True sits inside wrap=True.
-    filter_block = source[source.index("filter_row = ft.Row(") :][:400]
-    assert "expand=True" not in filter_block, "no expanding children inside wrap=True"
+    # The pill bar is ONE horizontal line that pans sideways — never a
+    # wrapping Wrap (whose Expand-ed children crash Flutter with
+    # "WrapParentData is not a subtype of FlexParentData"). NB: the only
+    # "wrap=True"-like substring allowed in this file is `no_wrap=True` on
+    # the label text, which is a text-overflow flag, not a Row wrap.
+    assert "wrap=True" not in source.replace("no_wrap=True", ""), (
+        "the pill row must never wrap"
+    )
+    assert "scroll=ft.ScrollMode.AUTO" in source, "the pill row pans sideways"
+    assert "filter_row = ft.Container(" in source, (
+        "the bar is KTV's Container-wrapped Row, not a bare Row"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -6,11 +6,11 @@ provider returns its filter spec at runtime (the site's own lists), this
 screen renders it. A provider whose source has no browse surface reports
 an empty spec and the screen says so — it never invents filters.
 
-Layout (owner's order, 2026-10-16): the filters are DROPDOWNS in a
-compact row — a wall of chips read as noise — an ad slot sits under the
-filter row, the grid is Discover-sized, and an ad break lands before the
-pager. The "via <source>" line is gone: the header already names the
-source, twice.
+Layout (owner's order): the filters are the HOUSE's outlined pills in
+ONE horizontal line that pans sideways when it overflows — KTV Player's
+components/filter_bar.py, copied — with the sort as its own control and
+an ad slot above the grid. The "via <source>" line is gone: the header
+already names the source, twice.
 """
 
 import flet as ft
@@ -21,7 +21,7 @@ from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
 from core.theme import AppColors
-from core.tokens import FONT_LG, FONT_MD, GRID_COL, ICON_MD, ICON_SM
+from core.tokens import BREAKPOINT_TABLET, FONT_LG, FONT_MD, GRID_COL, ICON_MD, ICON_SM, SPACING_XS
 from hooks.use_grid_mode import grid_sources, use_grid_mode
 from state.app_state import AppStateCtx
 from state.controller_ctx import ControllerMethodsCtx
@@ -197,10 +197,17 @@ def _pill(
     )
 
 
-def _menu_button(label: str, icon: str, is_selected: bool, items, tooltip: str = "") -> ft.Control:
+def _menu_button(
+    label: str,
+    icon: str,
+    is_selected: bool,
+    items,
+    tooltip: str = "",
+    compact: bool = True,
+) -> ft.Control:
     """The house's trigger: a PopupMenuButton whose content is the pill."""
     return ft.PopupMenuButton(
-        content=_pill(label, icon, is_selected, tooltip=tooltip),
+        content=_pill(label, icon, is_selected, compact=compact, tooltip=tooltip),
         items=items,
         menu_position=ft.PopupMenuPosition.UNDER,
         style=_TRIGGER_STYLE,
@@ -338,20 +345,27 @@ def DiscoverScreen() -> ft.Control:
                 expand=True,
                 scroll=ft.ScrollMode.AUTO,
             ),
-            padding=ft.Padding.only(left=24, right=24, bottom=16),
+            padding=ft.Padding.only(left=16, right=16, bottom=16),
             expand=True,
         )
 
     # The FILTERS are a row of house pills; the SORT is its own control on
     # its own row (the owner's report, 2026-10-19: "they put the filter
-    # and the sort" — the sort is not one of the filters). Wrapped
-    # naturally, without expand=True spacers (Expanded inside a wrap=True
-    # Row throws Flutter's "WrapParentData is not a subtype of
-    # FlexParentData" error).
+    # and the sort" — the sort is not one of the filters). The pills are
+    # ONE horizontal line that scrolls horizontally, never wrapping.
     #
     # The numeric groups (AniKato's "Min episodes") are NOT rendered:
     # the house's filter bar is a row of value pickers, and the owner's
     # call was to drop the minimum-episode field.
+    #
+    # KTV's responsive switch: the pills shrink below the tablet
+    # breakpoint (FONT_MD/ICON_SM, 8/8 padding) and keep the full size
+    # above it. `compact` is a per-render snapshot of the width.
+    try:
+        _page_width = float(getattr(page, "width", 0) or 0)
+    except (TypeError, ValueError):
+        _page_width = 0.0
+    compact = _page_width <= BREAKPOINT_TABLET
     filter_specs = [spec for spec in filters if spec.get("kind") != "number"]
     sort_specs = [spec for spec in filter_specs if spec.get("key") in _NO_ALL_KEYS]
     value_specs = [spec for spec in filter_specs if spec.get("key") not in _NO_ALL_KEYS]
@@ -367,6 +381,7 @@ def DiscoverScreen() -> ft.Control:
                 bool(selected) and selected != "",
                 _filter_menu(spec, selected, _pick),
                 tooltip=f"Filter by {spec.get('label', key).lower()}",
+                compact=compact,
             )
         )
     # The SORT, on its own row: a house pill that opens the source's own
@@ -389,6 +404,7 @@ def DiscoverScreen() -> ft.Control:
                 True,
                 _filter_menu(spec, str(selected), _pick),
                 tooltip=f"Sort by {spec.get('label', spec['key']).lower()}",
+                compact=compact,
             )
         )
     if any(spec.get("direction") for spec in sort_specs):
@@ -428,19 +444,31 @@ def DiscoverScreen() -> ft.Control:
                 on_click=_toggle_order,
             )
         )
-    filter_row = ft.Row(
-        filter_controls,
-        spacing=8,
-        wrap=True,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    # ONE horizontal line of pills, always — the house's bar (KTV's
+    # components/filter_bar.py): a Row with no `wrap` (the flet default
+    # is False) and `scroll=AUTO`, so the pills pan sideways when they
+    # outrun the screen instead of dropping to a second line. The bar owns
+    # its own 8/4 padding (KTV's) and the PAGE beneath it owns the vertical
+    # scrolling — the bar never scrolls away.
+    filter_row = ft.Container(
+        content=ft.Row(
+            filter_controls,
+            spacing=SPACING_XS,
+            scroll=ft.ScrollMode.AUTO,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.Padding.symmetric(horizontal=8, vertical=4),
     )
     sort_row = (
-        ft.Row(
-            sort_controls,
-            spacing=8,
-            wrap=True,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            alignment=ft.MainAxisAlignment.END,
+        ft.Container(
+            content=ft.Row(
+                sort_controls,
+                spacing=SPACING_XS,
+                scroll=ft.ScrollMode.AUTO,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+            alignment=ft.Alignment.CENTER_RIGHT,
         )
         if sort_controls
         else None
@@ -461,9 +489,14 @@ def DiscoverScreen() -> ft.Control:
         for anime in results
     ]
 
-    body: list[ft.Control] = [
-        # The shared header: the source pill/badge are on EVERY screen, so
-        # swapping a walled backend never depends on being on Home.
+    # The shared header: the source pill/badge are on EVERY screen, so
+    # swapping a walled backend never depends on being on Home.
+    #
+    # The filter bar is a FIXED strip: the results region beneath it owns
+    # the vertical scrolling (KTV's shape), so the pills never scroll away
+    # with the grid. Before this they sat inside the page's scrolling
+    # column, which carried them off-screen on the first flick.
+    fixed: list[ft.Control] = [
         app_header(state, page, controller, subtitle="Discover"),
         header,
         ft.Container(height=10),
@@ -474,11 +507,12 @@ def DiscoverScreen() -> ft.Control:
         # screen slot: under the header, above the grid).
         build_banner_ad(page, inline=True),
     ]
-    if results:
+    results: list[ft.Control] = []
+    if state.discover_results:
         # Every 12 cards, a break; then one more before the pager (KTV's
         # grid-then-banner-then-pager shape).
-        body.extend(grid_with_ads(cards, page))
-        body.append(
+        results.extend(grid_with_ads(cards, page))
+        results.append(
             ft_pager(
                 page=state.discover_page,
                 has_more=state.discover_has_more,
@@ -494,7 +528,7 @@ def DiscoverScreen() -> ft.Control:
             )
         )
     else:
-        body.append(
+        results.append(
             empty_or_offline(
                 state,
                 icon=ft.Icons.SEARCH_OFF_ROUNDED,
@@ -508,7 +542,20 @@ def DiscoverScreen() -> ft.Control:
             )
         )
     return ft.Container(
-        content=ft.Column(body, spacing=0, expand=True, scroll=ft.ScrollMode.AUTO),
-        padding=ft.Padding.only(left=24, right=24, bottom=16),
+        content=ft.Column(
+            [
+                ft.Column(fixed, spacing=0, tight=True),
+                # The results region scrolls vertically on its own.
+                ft.Column(
+                    results,
+                    spacing=0,
+                    expand=True,
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+            ],
+            spacing=0,
+            expand=True,
+        ),
+        padding=ft.Padding.only(left=16, right=16, bottom=16),
         expand=True,
     )
