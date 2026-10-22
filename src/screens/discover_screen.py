@@ -6,17 +6,25 @@ provider returns its filter spec at runtime (the site's own lists), this
 screen renders it. A provider whose source has no browse surface reports
 an empty spec and the screen says so — it never invents filters.
 
-Layout (owner's order): the filters are the HOUSE's outlined pills in
-ONE horizontal line that pans sideways when it overflows — KTV Player's
-components/filter_bar.py, copied — with the sort as its own control and
-an ad slot above the grid. The "via <source>" line is gone: the header
-already names the source, twice.
+Layout (owner's order): the filters AND the sort are the HOUSE's outlined
+pills in ONE horizontal line that pans sideways when it overflows — KTV
+Player's components/filter_bar.py, copied — with an ad slot above the
+grid. The "via <source>" line is gone: the header already names the
+source, twice.
+
+Search and Recent searches ride the SHARED header (owner, 2026-10-20:
+"the search and recents are alone on their line. Let us add them to the
+header. After all, Home also had a search"). Home injects its three
+actions into ``app_header`` the same way, so the two entry points to the
+search screen sit in the same place on both — and nothing on Discover
+occupies a row of its own below it.
 """
 
 import flet as ft
 
 from components.ad_breaks import grid_with_ads
 from components.banner_ad import build_banner_ad
+from components.guarded_controls import GuardedIconButton, GuardedTextButton
 from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
@@ -289,29 +297,7 @@ def DiscoverScreen() -> ft.Control:
 
     ft.use_effect(
         lambda: controller.load_discover_filters() if not state.discover_filters else None,
-        [],
-    )
-
-    header = ft.Row(
-        [
-            # No big screen title here: every other screen names itself in
-            # the shared header's subtitle, and a second "Discover" one
-            # screen below read as a stutter.
-            ft.Container(expand=True),
-            # No "via <source>" here — the shared header names the active
-            # source twice already (the title pill and the badge). An owner
-            # called it out (2026-10-16).
-            ft.IconButton(
-                icon=ft.Icons.SEARCH_ROUNDED,
-                tooltip="Search",
-                on_click=lambda e: controller.open_search(),
-            ),
-            ft.TextButton(
-                content="Reset",
-                on_click=lambda e: controller.load_discover({}, 1),
-            ),
-        ],
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        [state.current_source_name],
     )
 
     from flet import context as flet_context
@@ -321,14 +307,38 @@ def DiscoverScreen() -> ft.Control:
     except Exception:
         page = None
 
-    from components.app_header import app_header
+    # The screen's own actions ride the SHARED header, so there is no row
+    # of ours below it (owner, 2026-10-20: "the search and recents are
+    # alone on their line. Let us add them to the header. After all, Home
+    # also had a search"). Home injects its three the same way, so both
+    # search entry points sit in the same place.
+    def _header(**kwargs):
+        from components.app_header import app_header
+
+        return app_header(
+            state,
+            page,
+            controller,
+            subtitle="Discover",
+            extra_actions=[
+                GuardedIconButton(
+                    icon=ft.Icons.SEARCH_ROUNDED,
+                    tooltip="Search",
+                    on_click=lambda e: controller.open_search(),
+                ),
+                GuardedTextButton(
+                    content="Reset",
+                    on_click=lambda e: controller.load_discover({}, 1),
+                ),
+            ],
+            **kwargs,
+        )
 
     if not filters:
         return ft.Container(
             content=ft.Column(
                 [
-                    app_header(state, page, controller, subtitle="Discover"),
-                    header,
+                    _header(),
                     ft.Container(height=24),
                     empty_or_offline(
                         state,
@@ -349,10 +359,11 @@ def DiscoverScreen() -> ft.Control:
             expand=True,
         )
 
-    # The FILTERS are a row of house pills; the SORT is its own control on
-    # its own row (the owner's report, 2026-10-19: "they put the filter
-    # and the sort" — the sort is not one of the filters). The pills are
-    # ONE horizontal line that scrolls horizontally, never wrapping.
+    # The FILTERS and the SORT are ONE row of house pills (the owner's
+    # order, 2026-10-20: "Everything about filter and sorting should be in
+    # that same line"). The sort is still not one of the FILTERS — it keeps
+    # its own pill and its own direction control — but it rides the same
+    # bar, so the whole control strip is a single horizontal line.
     #
     # The numeric groups (AniKato's "Min episodes") are NOT rendered:
     # the house's filter bar is a row of value pickers, and the owner's
@@ -447,9 +458,10 @@ def DiscoverScreen() -> ft.Control:
     # ONE horizontal line of pills, always — the house's bar (KTV's
     # components/filter_bar.py): a Row with no `wrap` (the flet default
     # is False) and `scroll=AUTO`, so the pills pan sideways when they
-    # outrun the screen instead of dropping to a second line. The bar owns
-    # its own 8/4 padding (KTV's) and the PAGE beneath it owns the vertical
-    # scrolling — the bar never scrolls away.
+    # outrun the screen instead of dropping to a second line. The SORT
+    # pills join the same list, so filters and order are one bar with
+    # nothing on a second line (the owner, 2026-10-20).
+    filter_controls.extend(sort_controls)
     filter_row = ft.Container(
         content=ft.Row(
             filter_controls,
@@ -458,20 +470,6 @@ def DiscoverScreen() -> ft.Control:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-    )
-    sort_row = (
-        ft.Container(
-            content=ft.Row(
-                sort_controls,
-                spacing=SPACING_XS,
-                scroll=ft.ScrollMode.AUTO,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-            alignment=ft.Alignment.CENTER_RIGHT,
-        )
-        if sort_controls
-        else None
     )
 
     results = state.discover_results or []
@@ -489,20 +487,19 @@ def DiscoverScreen() -> ft.Control:
         for anime in results
     ]
 
-    # The shared header: the source pill/badge are on EVERY screen, so
-    # swapping a walled backend never depends on being on Home.
+    # The shared header (with this screen's own Search/Reset actions NOT
+    # in it — see _header) is on EVERY screen, so swapping a walled
+    # backend never depends on being on Home.
     #
     # The filter bar is a FIXED strip: the results region beneath it owns
     # the vertical scrolling (KTV's shape), so the pills never scroll away
     # with the grid. Before this they sat inside the page's scrolling
     # column, which carried them off-screen on the first flick.
     fixed: list[ft.Control] = [
-        app_header(state, page, controller, subtitle="Discover"),
-        header,
+        _header(),
         ft.Container(height=10),
+        # Filters AND sort in one scrolling line (owner's order).
         filter_row,
-        # The SORT has its own row — it is not one of the filters.
-        *([sort_row] if sort_row is not None else []),
         # An ad under the filter row, before the results (KTV's search
         # screen slot: under the header, above the grid).
         build_banner_ad(page, inline=True),

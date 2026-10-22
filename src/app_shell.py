@@ -17,6 +17,10 @@ import contextlib
 import flet as ft
 from flet import context as flet_context
 
+from components.guarded_controls import (
+    GuardedOutlinedButton,
+    GuardedTextButton,
+)
 from core.tasks import spawn
 from core.theme import AppColors
 from screens.anime_detail_screen import AnimeDetailScreen
@@ -428,7 +432,7 @@ def _use_resolve_overlay(state, controller) -> None:
                     color=ft.Colors.WHITE,
                 ),
                 ft.Container(height=8),
-                ft.TextButton(
+                GuardedTextButton(
                     content="Cancel",
                     on_click=lambda e: controller.cancel_resolve(),
                 ),
@@ -596,12 +600,12 @@ def _build_player_error(state, controller, message: str) -> ft.Control:
                 ft.Container(height=24),
                 ft.Row(
                     [
-                        ft.OutlinedButton(
+                        GuardedOutlinedButton(
                             content="Retry",
                             icon=ft.Icons.REFRESH_ROUNDED,
                             on_click=lambda e: _retry(),
                         ),
-                        ft.OutlinedButton(
+                        GuardedOutlinedButton(
                             content="Go Back",
                             icon=ft.Icons.ARROW_BACK_ROUNDED,
                             on_click=lambda e: _back(),

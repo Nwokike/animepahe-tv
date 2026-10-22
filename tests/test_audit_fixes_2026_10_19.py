@@ -126,15 +126,78 @@ def test_the_header_controls_are_button_family():
     """A Container takes no D-pad focus in flet 1.0.4 (28 control classes
     expose on_focus/on_blur; Container is not one of them). The house
     apps use Containers, but this app is TV-first: a Container control
-    is unreachable by the remote."""
-    from components import app_header
+    is unreachable by the remote.
 
-    source = inspect.getsource(app_header)
-    # The interactive controls are Buttons.
-    assert "ft.IconButton(" in source, "the back/theme controls are IconButtons"
-    assert "ft.TextButton(" in source, "the version pill/badge/title are TextButtons"
-    # And the pills carry a focus ring.
-    assert "ft.ControlState.FOCUSED" in source, (
+    Checked against the CONTROLS the header actually builds, not the
+    source text: the guarded subclasses (GuardedIconButton /
+    GuardedTextButton) subclass flet's Button family precisely so this
+    still holds, and a source-text match would pass while the built
+    control was a Container — the false-pass this project has been bitten
+    by before (docs/testing-findings.md, the ft.Markdown size= lesson).
+    """
+    import dataclasses
+
+    import flet as ft
+
+    from components.app_header import app_header
+
+    class _State:
+        current_source_name = "anikato"
+        theme_mode = ft.ThemeMode.DARK
+        update_available = False
+        update_data = None
+        viewport_version = 0
+
+    class _Controller:
+        def open_backend_picker(self):
+            pass
+
+    class _Page:
+        theme_mode = ft.ThemeMode.DARK
+        width = 1280
+
+    header = app_header(_State(), _Page(), _Controller(), on_back=lambda: None)
+
+    # The focusable classes in the installed flet, read from the package.
+    focusable = set()
+    for name in dir(ft):
+        obj = getattr(ft, name, None)
+        if not isinstance(obj, type):
+            continue
+        with contextlib.suppress(Exception):
+            fields = {f.name for f in dataclasses.fields(obj)}
+        if fields and "on_focus" in fields and "on_blur" in fields:
+            focusable.add(name)
+    assert "Container" not in focusable, (
+        "if flet 1.0.4 ever gives Container a focus state this test can be "
+        "relaxed — the assertion is the point"
+    )
+
+    def _walk(control):
+        yield control
+        for child in getattr(control, "controls", None) or []:
+            yield from _walk(child)
+        content = getattr(control, "content", None)
+        if content is not None and not isinstance(content, list):
+            yield from _walk(content)
+
+    interactive = [
+        c for c in _walk(header) if getattr(c, "on_click", None) is not None
+    ]
+    assert interactive, "the header must offer clickable controls"
+    for control in interactive:
+        assert any(
+            base.__name__ in focusable for base in type(control).__mro__
+        ), (
+            f"an interactive header control is not focusable by D-pad: "
+            f"{type(control).__name__}"
+        )
+
+    # And the pills carry a focus ring (built by _focus_sides/_chip_style,
+    # which live beside app_header in the same module).
+    import components.app_header as header_module
+
+    assert "ft.ControlState.FOCUSED" in inspect.getsource(header_module), (
         "a focusable control still needs a visible focus cue"
     )
 
@@ -474,13 +537,27 @@ def test_the_kayoanime_category_filter_accepts_a_bare_string():
     assert params.get("categories") == "14893", params
 
 
-def test_the_header_never_stacks_it_is_always_one_bar():
-    """The header is ALWAYS one horizontal bar — on a phone it does not
-    fall over into two lines. The house's mechanism (KTV's header) is an
-    expanding spacer plus a horizontally-scrolling action cluster; the
-    PAGE owns the vertical scrolling, never the header.
+def test_the_header_is_one_bar_and_its_scroller_is_visible_on_a_phone():
+    """The header NEVER stacks into two lines, and on a small screen its
+    action cluster scrolls HORIZONTALLY with a scrollbar you can see.
 
-    The owner's report: "you went and made it so that it will fall over."
+    Wide: one horizontal bar — the house's mechanism (KTV's header) is an
+    expanding spacer plus a horizontally-scrolling action cluster, and the
+    PAGE owns the page's own vertical scroll. (The owner's original
+    report, on a version that stacked it: "you went and made it so that it
+    will fall over.")
+
+    Narrow: the owner's 2026-10-20 instruction — the filter bar pans
+    sideways with a visible scroller, and the header should do the same,
+    "I see the vertical scroller when I'm on a small screen" (they meant
+    the horizontal scroller, always visible). ``ScrollMode.AUTO`` draws
+    the thumb only while dragging, so a phone user watching the header
+    simply ends has no cue that the theme cycle exists off-screen. So the
+    cluster is ``ScrollMode.ALWAYS`` below the breakpoint — one line, pans
+    sideways, thumb always drawn — and ``AUTO`` above it, where the row
+    fits.
+
+    A stacked Column here is the BUG this pins, not a style choice.
     """
     import flet as ft
 
@@ -512,10 +589,11 @@ def test_the_header_never_stacks_it_is_always_one_bar():
     for label, header in (("narrow", narrow), ("wide", wide)):
         root = _root(header)
         assert isinstance(root, ft.Row), (
-            f"the {label} header must be one Row, never a stacked Column"
+            f"the {label} header must be one Row — a stacked Column is the "
+            "'falling over' the owner rejected"
         )
         assert root.scroll in (None, ft.ScrollMode.HIDDEN), (
-            f"the {label} header must not scroll itself — the page does"
+            f"the {label} header must not scroll itself — its CLUSTER does"
         )
         spacers = [
             c for c in root.controls if isinstance(c, ft.Container) and c.expand
@@ -525,13 +603,28 @@ def test_the_header_never_stacks_it_is_always_one_bar():
             "action cluster off the bar"
         )
 
-    # The action cluster pans sideways (the house's mechanism).
-    actions = [
-        c
-        for c in _root(wide).controls
-        if isinstance(c, ft.Row) and getattr(c, "scroll", None) == ft.ScrollMode.AUTO
-    ]
-    assert actions, "the action cluster scrolls horizontally"
+    def _cluster(root):
+        return [
+            c
+            for c in root.controls
+            if isinstance(c, ft.Row) and getattr(c, "scroll", None) is not None
+        ]
+
+    # The cluster pans sideways at every width — the house rule: scroll,
+    # never clip.
+    for label, header in (("narrow", narrow), ("wide", wide)):
+        assert _cluster(_root(header)), (
+            f"the {label} action cluster must scroll horizontally"
+        )
+
+    # ...and on a phone its thumb is ALWAYS drawn, so the overflow is
+    # visible without a drag. On a wide screen the row fits and the thumb
+    # stays quiet (AUTO).
+    assert _cluster(_root(narrow))[0].scroll == ft.ScrollMode.ALWAYS, (
+        "a phone's header must show its scrollbar at rest, or the theme "
+        "cycle looks like the end of the row"
+    )
+    assert _cluster(_root(wide))[0].scroll == ft.ScrollMode.AUTO
 
 
 def test_the_quality_rows_are_flat():

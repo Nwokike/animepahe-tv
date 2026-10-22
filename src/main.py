@@ -1508,10 +1508,21 @@ class AppController:
         )
 
     async def open_random(self):
-        """Home header: surprise-me — a random anime's detail page."""
-        provider = self.router.get("anikato")
-        if provider is None:
-            self._show_error_snackbar("No source offers surprise-me yet.")
+        """Home header: surprise-me — a random anime's detail page.
+
+        The SERVING source's own random pick, never another backend's:
+        the app resolves one source and then IS that source (no
+        cross-source borrowing — the doctrine). AniKato's `/random` is
+        the only provider that has the ability, so any other chosen
+        source gets the honest message instead of silently opening an
+        AniKato page under a different source's chrome. That mismatch is
+        what the owner reported: the terminal showed a fetch, and
+        nothing appeared on screen, because the session that came back
+        belonged to a provider that was not the one in the header.
+        """
+        provider = self.router.get(self.router.pin) if self.router.pin else None
+        if provider is None or not hasattr(provider, "random_slug"):
+            self._show_error_snackbar("This source has no surprise-me.")
             return
         try:
             slug = await provider.random_slug()
@@ -1519,7 +1530,12 @@ class AppController:
             logger.warning("random failed: %s", ex)
             slug = None
         if slug:
-            await self.load_anime(f"anikato:{slug}")
+            # The session is prefixed with the provider that OWNED the
+            # pick, so the detail screen resolves through its own source
+            # (the same rule every other open path follows).
+            await self.load_anime(f"{provider.name}:{slug}")
+        else:
+            self._show_error_snackbar("That source returned no pick — try again.")
 
     def sources_status(self) -> dict:
         """Settings: per-provider live health as plain dicts."""
@@ -1715,6 +1731,13 @@ class AppController:
         # The header/badge name the choice immediately — even if this
         # source's first fetch fails (the gate card still offers Verify).
         state.current_source_name = self.router.pin or ""
+        # Reset Discover so it re-queries the new provider's filter spec
+        # instead of holding the old provider's filters and results.
+        state.discover_filters = []
+        state.discover_selections = {}
+        state.discover_results = []
+        state.discover_source = ""
+        state.discover_version += 1
         await self.store.save_backend(name)
         logger.info("content source set to: %s", self.router.pin or "the default order")
         spawn(self.resolve_startup(), name="backend-switch")
@@ -2587,6 +2610,15 @@ async def main(page: ft.Page):
     # Unhandled exceptions in event handlers land here — the only place a
     # crash is visible to the user at all. Console line (via logger) plus a
     # snack, so a broken tap never looks like a dead app.
+    #
+    # NOTE: this field is DECLARED by flet 1.0.4 but never invoked by it
+    # (grep the installed package — nothing reads ``Page.on_error``). So it
+    # is a useful belt-and-braces hook for anything a future flet release
+    # does route here, and it is NOT where the player's stale-control
+    # crash is handled. That one is cancelled per-control in
+    # ``before_event`` (components/guarded_controls.py), because flet's
+    # own ``dispatch_event`` catches the raise itself and reports it to
+    # the client before any handler-level hook could see it.
     def _on_page_error(e):
         message = str(getattr(e, "data", None) or e)
         logger.error("unhandled page error: %s", message)

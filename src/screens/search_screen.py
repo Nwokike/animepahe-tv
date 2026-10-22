@@ -16,6 +16,11 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
+from components.guarded_controls import (
+    GuardedFilledButton,
+    GuardedIconButton,
+    GuardedTextButton,
+)
 from components.offline_state import empty_or_offline
 from components.pagination import pager as ft_pager
 from components.result_card import result_card as _result_card
@@ -229,13 +234,13 @@ def SearchScreen() -> ft.Control:
 
     header = ft.Row(
         [
-            ft.IconButton(
+            GuardedIconButton(
                 icon=ft.Icons.EXPLORE_ROUNDED,
                 tooltip="Discover",
                 on_click=lambda e: controller.open_discover(),
             ),
             ft.Container(content=field, expand=True),
-            ft.FilledButton(
+            GuardedFilledButton(
                 content=ft.ProgressRing(width=16, height=16, stroke_width=2, color=ft.Colors.WHITE)
                 if searching
                 else "Search",
@@ -279,7 +284,7 @@ def SearchScreen() -> ft.Control:
     )
 
     clear_btn = (
-        ft.TextButton(content="Clear recent", on_click=_confirm_clear_recent)
+        GuardedTextButton(content="Clear recent", on_click=_confirm_clear_recent)
         if history
         else ft.Container(width=0, height=0)
     )
@@ -525,10 +530,20 @@ def SearchScreen() -> ft.Control:
                 # The shared header first: the source pill and badge live on
                 # EVERY screen, so swapping a walled backend never depends
                 # on being on Home (owner's reuse pattern).
-                app_header(state, page, controller, subtitle="Search"),
+                #
+                # "Clear recent" rides that same bar (owner, 2026-10-20:
+                # "the search and recents are alone on their line. Let us
+                # add them to the header"), so this screen puts nothing on
+                # a row of its own below it.
+                app_header(
+                    state,
+                    page,
+                    controller,
+                    subtitle="Search",
+                    extra_actions=[clear_btn] if history else None,
+                ),
                 header,
                 follows_shelf,
-                ft.Row([ft.Container(expand=True), clear_btn], spacing=8),
                 suggestion_rows,
                 ft.Container(content=results, expand=True),
             ],

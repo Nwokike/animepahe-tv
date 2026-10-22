@@ -218,3 +218,220 @@ def test_the_mal_id_is_read_from_the_episode_list():
     assert _quality_to_resolution("1080p") == 1080
     assert _quality_to_resolution("720") == 720
     assert _quality_to_resolution("weird") == 0
+
+
+# ---------------------------------------------------------------------------
+# EVERY quality and BOTH audios — the owner's question, answered by a test.
+#
+# "I think Anikato separates English with Japanese and stuff like that. So
+#  I hope you did not just hardcode one." (owner, 2026-10-20)
+#
+# Live probes (2026-10-20) settle what the mapper serves, and it is not a
+# fixed vocabulary: Black Clover ep 1 returns 360p/720p/1080p under "sub";
+# Naruto ep 1 returns 360p/800p under "sub". So both the quality LABELS and
+# the number of them come from the payload, and neither is written down
+# anywhere in this repo.
+# ---------------------------------------------------------------------------
+
+# The shape a series with both audio groups returns.
+SUB_AND_DUB_PAYLOAD = {
+    "Kiwi": {
+        "sub": {
+            "download": {
+                "360p": "https://pahe.nekostream.site/sub360",
+                "720p": "https://pahe.nekostream.site/sub720",
+                "1080p": "https://pahe.nekostream.site/sub1080",
+            }
+        },
+        "dub": {
+            "download": {
+                "360p": "https://pahe.nekostream.site/dub360",
+                "720p": "https://pahe.nekostream.site/dub720",
+            }
+        },
+    },
+    "status": {"time": 1792511062, "serves_from": "cache"},
+}
+
+
+@pytest.mark.asyncio
+async def test_every_quality_and_both_audios_come_back_from_the_mapper():
+    """Nothing is truncated to one: all five renditions, both audios."""
+    client = _Client({"/api/mal/": _Resp(200, json_data=SUB_AND_DUB_PAYLOAD)})
+    resolver = KwikFileResolver()
+    resolver._client = client
+
+    files = await resolver.episode_files(34572, 1, 1778012242)
+
+    assert [(f.audio, f.quality) for f in files] == [
+        ("sub", "360p"),
+        ("sub", "720p"),
+        ("sub", "1080p"),
+        ("dub", "360p"),
+        ("dub", "720p"),
+    ]
+    # Five distinct shortlinks — the mapper hands one link per rendition,
+    # not one link reused.
+    assert len({f.url for f in files}) == 5
+
+
+@pytest.mark.asyncio
+async def test_quality_labels_the_site_writes_differently_still_resolve():
+    """Naruto serves 360p and 800p (live, 2026-10-20): the label is read,
+    never assumed, so an unusual label still carries its resolution."""
+    client = _Client(
+        {
+            "/api/mal/": _Resp(
+                200,
+                json_data={
+                    "Kiwi": {
+                        "sub": {
+                            "download": {
+                                "360p": "https://pahe.nekostream.site/a",
+                                "800p": "https://pahe.nekostream.site/b",
+                            }
+                        }
+                    }
+                },
+            )
+        }
+    )
+    resolver = KwikFileResolver()
+    resolver._client = client
+
+    files = await resolver.episode_files(20, 1, 1729197616)
+    assert [f.quality for f in files] == ["360p", "800p"]
+
+
+def _stub_provider_for_kwik(provider, files, resolver_cls):
+    """Wire a provider whose watch/entries/mal reads and resolver are
+    fakes, so only the kwik-file branch is under test."""
+    import services.store as store_mod
+
+    async def _watch_page(_slug):
+        return {"anime_id": 2121}
+
+    async def _episode_entries(_anime_id):
+        return [(1, "ids", True, True, 1778012242)]
+
+    async def _episode_mal_id(_anime_id):
+        return 34572
+
+    async def _clearance(*_a, **_k):
+        return {"cookies": "cf_clearance=abc", "user_agent": "ua"}
+
+    provider._watch_page = _watch_page
+    provider._episode_entries = _episode_entries
+    provider._episode_mal_id = _episode_mal_id
+    store_mod.get_store = lambda: type(
+        "S", (), {"get_clearance": staticmethod(_clearance)}
+    )()
+    resolver_cls()
+
+
+@pytest.mark.asyncio
+async def test_every_kwik_file_reaches_the_picker_as_its_own_choice(monkeypatch):
+    """End to end, the way the play/download dialogs see them: the
+    provider turns each mapper entry into a Source, and the
+    controller's ``_source_choices`` turns each Source into a distinct
+    labelled row.
+
+    This is the guard on the owner's exact worry — a hardcode that kept
+    one quality would collapse here to a single row.
+    """
+    from services import kwik_files
+    from services.providers.anikato import AniKatoProvider
+
+    provider = AniKatoProvider()
+    renditions = [
+        ("sub", "1080p", "https://pahe.nekostream.site/sub1080"),
+        ("sub", "720p", "https://pahe.nekostream.site/sub720"),
+        ("sub", "360p", "https://pahe.nekostream.site/sub360"),
+        ("dub", "720p", "https://pahe.nekostream.site/dub720"),
+        ("dub", "360p", "https://pahe.nekostream.site/dub360"),
+    ]
+
+    class _FakeResolver:
+        def __init__(self, *a, **k):
+            pass
+
+        async def episode_files(self, *a):
+            return [
+                kwik_files.KwikFile(q, url, audio) for audio, q, url in renditions
+            ]
+
+        async def media_url(self, shortlink):
+            return f"https://kwik.cx/media/{shortlink.rsplit('/', 1)[-1]}"
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(kwik_files, "KwikFileResolver", _FakeResolver)
+    _stub_provider_for_kwik(provider, None, lambda: None)
+
+    sources = await provider.kwik_file_sources(
+        "anikato:black-clover-g7tjy", "black-clover-g7tjy|1"
+    )
+
+    # Five files in, five sources out — none dropped, none collapsed.
+    assert len(sources) == 5
+    assert sorted(s.resolution for s in sources) == [360, 360, 720, 720, 1080]
+    assert sorted(s.audio for s in sources) == ["eng", "eng", "jpn", "jpn", "jpn"]
+    assert all(s.fansub == "AnimePahe" for s in sources)
+    # The site's own file link rides along verbatim (the download row).
+    assert all(
+        s.download_url.startswith("https://pahe.nekostream.site/") for s in sources
+    )
+
+    # ...and the picker renders five DISTINCT rows.
+    from main import _source_choices
+
+    labels = [c["label"] for c in _source_choices(sources)]
+    assert len(labels) == 5
+    assert len(set(labels)) == 5
+    assert sum("1080p" in label for label in labels) == 1
+    assert sum("720p" in label for label in labels) == 2
+    assert sum("360p" in label for label in labels) == 2
+    assert sum("DUB (ENG)" in label for label in labels) == 2
+    assert sum("SUB (JPN)" in label for label in labels) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_kwik_file_that_cannot_be_resolved_never_hides_the_rest(
+    monkeypatch,
+):
+    """One unreachable quality is skipped on its own; the others still
+    reach the picker. (An early `return` on the first failure is what
+    would ship exactly one quality, which is what the owner suspected.)"""
+    from services import kwik_files
+    from services.providers.anikato import AniKatoProvider
+
+    provider = AniKatoProvider()
+
+    class _FakeResolver:
+        def __init__(self, *a, **k):
+            pass
+
+        async def episode_files(self, *a):
+            return [
+                kwik_files.KwikFile(
+                    "1080p", "https://pahe.nekostream.site/good", "sub"
+                ),
+                kwik_files.KwikFile(
+                    "720p", "https://pahe.nekostream.site/bad", "sub"
+                ),
+            ]
+
+        async def media_url(self, shortlink):
+            return None if "bad" in shortlink else "https://kwik.cx/media/good"
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(kwik_files, "KwikFileResolver", _FakeResolver)
+    _stub_provider_for_kwik(provider, None, lambda: None)
+
+    sources = await provider.kwik_file_sources(
+        "anikato:black-clover-g7tjy", "black-clover-g7tjy|1"
+    )
+    assert [s.resolution for s in sources] == [1080]

@@ -8,6 +8,8 @@ import sys
 
 import flet as ft
 
+from services.cf_judge import challenge_complete, target_host_of
+
 logger = logging.getLogger(__name__)
 
 
@@ -192,11 +194,6 @@ class WebViewSolver:
             if "cf_clearance" not in cookie_str:
                 return
 
-            lower_cookies = cookie_str.lower()
-            target_markers = ("animepahe_session", "serverid", "xsrf-token", "latest")
-            has_target_cookie = any(marker in lower_cookies for marker in target_markers)
-
-            # Check title and current URL to avoid premature completion on challenge interstitial
             # flet_webview's WebView exposes get_title()/get_user_agent()
             # directly (a JS round-trip method does not exist here).
             title = ""
@@ -207,36 +204,25 @@ class WebViewSolver:
             except Exception:
                 pass
 
-            title_lower = title.lower()
-            is_challenge_page = (
-                any(
-                    m in title_lower
-                    for m in [
-                        "just a moment",
-                        "attention required",
-                        "checking your browser",
-                        "cloudflare",
-                    ]
-                )
-                or "__cf_chl" in (current_url or "").lower()
-            )
-
-            if is_challenge_page and not has_target_cookie:
+            # The completion test is SHARED with the desktop solver
+            # (services/cf_judge.py): one rule, two transports. This file
+            # used to carry its own copy that demanded the literal string
+            # "animepahe" in the title and the animepahe session cookies,
+            # so on a phone AnimePahe solved and every other source —
+            # AnimeOut in particular — sat on "Waiting for verification"
+            # over an already-cleared challenge and timed out with nothing
+            # captured (owner's run, 2026-10-20).
+            if not challenge_complete(
+                cookie_keys=[k.split("=", 1)[0].strip() for k in cookie_str.split(";")],
+                url=current_url,
+                title=title,
+                target_host=target_host_of(url),
+            ):
                 logger.debug(
                     "Mobile solver: challenge still in progress (title=%s, url=%s)",
                     title,
                     current_url,
                 )
-                return
-
-            # Complete if target site cookies are set OR if title reached Animepahe
-            is_target_site = (
-                has_target_cookie
-                or "animepahe" in title_lower
-                or (current_url and "animepahe" in current_url.lower() and not is_challenge_page)
-            )
-
-            if not is_target_site:
                 return
 
             logger.info("Mobile solver verified challenge completion! Title: %s", title)
@@ -273,8 +259,12 @@ class WebViewSolver:
             else:
                 current_url = ""
             logger.info("WebView page started: %s", current_url)
-            # When we land on animepahe, try native cookie reader if challenge token is not present
-            if _cookie_manager and "animepahe" in current_url and "__cf_chl" not in current_url:
+            # Read native cookies on ANY navigation off the challenge
+            # host, not just animepahe's: the jar is where cf_clearance
+            # lands, and the target host is decided by the URL we were
+            # asked to solve (the hardcoded animepahe gate left every
+            # other source's capture to the 1.5 s poll alone).
+            if _cookie_manager and current_url and "__cf_chl" not in current_url:
                 cookies = await _android_cookies(current_url)
                 if cookies:
                     await _try_resolve(cookies, current_url=current_url)

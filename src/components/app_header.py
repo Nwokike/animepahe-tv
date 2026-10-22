@@ -5,14 +5,25 @@ source pill — "<Backend> TV ▾", the content-source switcher — with the
 screen's own name as a quiet subtitle beneath it.
 
 Right: the version/update pill, the screen's own extra actions, then the
-theme cycle. The whole right group rides a ``Row(scroll=AUTO)``: the
-house rule (Sherlock/KTV) is **scroll, never clip**, and the header is
-ALWAYS one horizontal bar — it never stacks into two lines on a narrow
-screen. The house's own mechanism (KTV's header) is an expanding spacer
-between the title and the action cluster, so the title keeps its place
-and the cluster pans sideways as the last resort. The PAGE scrolls
-vertically (its column owns the scroll); the header never does. The
-backend badge (the second source readout) rides the same row on WIDE
+theme cycle. **The header is ALWAYS one horizontal bar** — it never stacks
+into two lines on a narrow screen (the owner, on a version that did:
+"you went and made it so that it will fall over"). The house's own
+mechanism (KTV's header) is an expanding spacer between the title and the
+action cluster, so the title keeps its place and the cluster pans sideways
+as the last resort: the house rule (Sherlock/KTV) is **scroll, never
+clip**.
+
+The scroll MODE is the part the owner asked to see (2026-10-20): a
+``Row(scroll=AUTO)`` draws its thumb only while the user is dragging, so
+on a phone the cluster looks like it simply ends and the theme cycle is
+invisible off-screen. KTV's filter bar is the model — one line that pans
+sideways with a scroller you can see. So the cluster uses
+``ScrollMode.ALWAYS`` below the tablet breakpoint (thumb always drawn,
+even at rest) and ``AUTO`` above it, where the row fits and a permanent
+thumb would be noise. That is flet's own scrollbar flag
+(``ScrollMode.ALWAYS`` = "scroll bar is always shown"), nothing custom.
+
+The backend badge (the second source readout) rides the same row on WIDE
 screens only: on a narrow phone it is dropped because the title pill
 already opens the identical picker and the row needs the room (owner,
 2026-10-19).
@@ -38,6 +49,7 @@ tablet breakpoint — it is a layout spacer, not an interactive control.)
 
 import flet as ft
 
+from components.guarded_controls import GuardedIconButton, GuardedTextButton
 from core.constants import APP_NAME, APP_VERSION
 from core.theme import AppColors, next_theme_mode
 from core.tokens import BREAKPOINT_TABLET
@@ -163,7 +175,7 @@ def _version_pill(state, page) -> ft.Control:
         # "Update Available!", which hid the number the owner wants.
         version = str(update_data.get("version", "") or "").strip()
         title = f"Update: {version} Available!" if version else "Update Available!"
-        return ft.TextButton(
+        return GuardedTextButton(
             content=ft.Row(
                 [
                     ft.Text(
@@ -189,7 +201,7 @@ def _version_pill(state, page) -> ft.Control:
             tooltip="New update available — tap to view",
             on_click=lambda e: show_update_dialog(page, update_data) if page else None,
         )
-    return ft.TextButton(
+    return GuardedTextButton(
         content=ft.Text(
             f"v{APP_VERSION}",
             size=11,
@@ -222,7 +234,7 @@ def _backend_badge(state, controller) -> ft.Control:
     name = (state.current_source_name or "").strip()
     label = name.capitalize() if name else ""
     colour = AppColors.SUCCESS if name else ft.Colors.ON_SURFACE_VARIANT
-    return ft.TextButton(
+    return GuardedTextButton(
         content=ft.Row(
             [
                 ft.Container(width=8, height=8, border_radius=4, bgcolor=colour),
@@ -277,7 +289,7 @@ def app_header(
         # screen that called app_header with the new icon.
         _cycle_theme(page, controller, state)
 
-    theme_action = ft.IconButton(
+    theme_action = GuardedIconButton(
         icon=theme_icon_for(page, state),
         icon_size=20,
         icon_color=ft.Colors.ON_SURFACE,
@@ -286,24 +298,36 @@ def app_header(
         on_click=_default_theme,
     )
 
-    right = ft.Row(
-        [
-            # Wide screens keep the second source readout; a phone drops
-            # it (the title pill opens the same picker). Hidden, not
-            # clipped: a zero-size badge instead of a suspended row keeps
-            # the layout predictable on both breakpoints.
-            _backend_badge(state, controller)
-            if (getattr(page, "width", 0) or 0) >= BREAKPOINT_TABLET
-            else ft.Container(width=0, height=0),
-            _version_pill(state, page),
-            *(extra_actions or []),
-            theme_action,
-        ],
+    actions: list[ft.Control] = [
+        # Wide screens keep the second source readout; a phone drops
+        # it (the title pill opens the same picker). Hidden, not
+        # clipped: a zero-size badge instead of a suspended row keeps
+        # the layout predictable on both breakpoints.
+        _backend_badge(state, controller)
+        if (getattr(page, "width", 0) or 0) >= BREAKPOINT_TABLET
+        else ft.Container(width=0, height=0),
+        _version_pill(state, page),
+        *(extra_actions or []),
+        theme_action,
+    ]
+
+    # One horizontal bar at every width. The cluster pans sideways — the
+    # house rule (Sherlock/KTV): scroll, never clip — and the MODE is
+    # chosen by width, because that is the part the owner could not see:
+    # AUTO draws the thumb only while dragging, so a phone user watching
+    # the header ends has no cue that more controls exist. Below the
+    # breakpoint the thumb is always drawn (ScrollMode.ALWAYS is flet's
+    # own "scroll bar is always shown"); above it the row fits, and a
+    # permanent thumb would be noise, so it stays AUTO.
+    narrow = (getattr(page, "width", 0) or 0) < BREAKPOINT_TABLET
+    right_cluster = ft.Row(
+        actions,
         spacing=4,
         tight=True,
-        scroll=ft.ScrollMode.AUTO,  # the house rule: scroll, never clip.
+        scroll=ft.ScrollMode.ALWAYS if narrow else ft.ScrollMode.AUTO,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
+
 
     # The round back button (sub-screens only): a soft-tinted disc that
     # belongs to the header row — the modern "icon button on the bar",
@@ -312,7 +336,7 @@ def app_header(
     leading: list[ft.Control] = []
     if on_back is not None:
         leading.append(
-            ft.IconButton(
+            GuardedIconButton(
                 icon=ft.Icons.ARROW_BACK_ROUNDED,
                 icon_size=18,
                 icon_color=ft.Colors.ON_SURFACE,
@@ -330,7 +354,7 @@ def app_header(
         [
             *leading,
             ft.Image(src="icon.png", width=32, height=32, fit="contain"),
-            ft.TextButton(
+            GuardedTextButton(
                 content=ft.Column(
                     [
                         ft.Row(
@@ -374,21 +398,20 @@ def app_header(
         tight=True,
     )
 
-    # ONE horizontal bar, always. On a narrow screen it does NOT stack
-    # into two lines: the house's own mechanism (KTV's header) is an
-    # expanding spacer between the title and the action cluster, so the
-    # title keeps its place and the action cluster pans sideways as the
-    # last resort. The PAGE scrolls vertically (its Column owns the
-    # scroll), never the header itself.
+    # ONE horizontal bar, always, at every width — never a stack, never
+    # "falling over". The house's own mechanism (KTV's header): an expanding
+    # spacer between the title and the action cluster, so the title keeps
+    # its place and the cluster pans sideways as the last resort.
     return ft.Container(
         padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
         content=ft.Row(
             [
                 left,
                 ft.Container(expand=True),
-                right,
+                right_cluster,
             ],
             alignment=ft.MainAxisAlignment.START,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
     )
+

@@ -32,6 +32,12 @@ from typing import ClassVar
 import flet as ft
 import flet_video as fv
 
+from components.guarded_controls import (
+    GuardedContainer,
+    GuardedIconButton,
+    GuardedOutlinedButton,
+    GuardedTextButton,
+)
 from core.snapshots import save_snapshot
 from core.theme import AppColors
 
@@ -216,13 +222,20 @@ class ImmersivePlayer(ft.Stack):
     def _build(self):
         self.loading_ring = ft.ProgressRing(color=AppColors.PRIMARY, stroke_width=4)
         self.status_text = ft.Text("Loading stream...", size=14, color=ft.Colors.WHITE)
-        self.retry_btn = ft.OutlinedButton(
+        # Guarded buttons (GuardedOutlinedButton): this error card is
+        # mounted into page.overlay and REPLACED by key when the user
+        # retries, so the very button being pressed is unmounted. A tap
+        # that arrives after that was dispatched to a control whose
+        # parent chain no longer reaches a Page, which flet reports as a
+        # SESSION_CRASHED — the owner's live-APK crash. Cancelling the
+        # event in before_event turns it into a harmless no-op.
+        self.retry_btn = GuardedOutlinedButton(
             content="Retry",
             icon=ft.Icons.REFRESH_ROUNDED,
             visible=False,
             on_click=lambda e: self._manual_retry(),
         )
-        self.back_error_btn = ft.OutlinedButton(
+        self.back_error_btn = GuardedOutlinedButton(
             content="Go Back",
             icon=ft.Icons.ARROW_BACK_ROUNDED,
             on_click=lambda e: self._on_back(),
@@ -292,7 +305,7 @@ class ImmersivePlayer(ft.Stack):
         # top, right, and bottom properties inside Stack control only and
         # page.overlay" — the owner's live run, 2026-10-16). A Video's
         # controls are laid out as its overlay, not a Stack.
-        self.skip_chip = ft.Container(
+        self.skip_chip = GuardedContainer(
             content=ft.Text(
                 "Skip Intro",
                 size=13,
@@ -357,7 +370,7 @@ class ImmersivePlayer(ft.Stack):
             # variants — an empty picker is worse than no chip.
             quality_text = ft.Text("Auto", size=12)
             self.quality_texts.append(quality_text)
-            quality_chip = ft.Container(
+            quality_chip = GuardedContainer(
                 content=quality_text,
                 padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                 border_radius=6,
@@ -371,7 +384,7 @@ class ImmersivePlayer(ft.Stack):
 
             audio_text = ft.Text("Audio", size=12)
             self.audio_texts.append(audio_text)
-            audio_chip = ft.Container(
+            audio_chip = GuardedContainer(
                 content=audio_text,
                 padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                 border_radius=6,
@@ -386,7 +399,7 @@ class ImmersivePlayer(ft.Stack):
             speed_text = ft.Text("1.0x", size=12)
             self.speed_texts.append(speed_text)
             items.append(
-                ft.Container(
+                GuardedContainer(
                     content=speed_text,
                     padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                     border_radius=6,
@@ -396,7 +409,7 @@ class ImmersivePlayer(ft.Stack):
                 )
             )
             items.append(
-                ft.IconButton(
+                GuardedIconButton(
                     icon=ft.Icons.PHOTO_CAMERA_ROUNDED,
                     icon_size=16,
                     tooltip="Screenshot",
@@ -407,7 +420,7 @@ class ImmersivePlayer(ft.Stack):
             # surface (the quality/audio chips hide when a stream has no
             # options), so loading a local subtitle hangs here too.
             items.append(
-                ft.IconButton(
+                GuardedIconButton(
                     icon=ft.Icons.CLOSED_CAPTION_OUTLINED,
                     icon_size=16,
                     tooltip="Subtitle file",
@@ -416,10 +429,12 @@ class ImmersivePlayer(ft.Stack):
             )
             # VideoSkipNext/PreviousButton are value objects without event
             # handlers — real IconButtons are the supported way to add
-            # custom skip behaviour inside the bar.
+            # custom skip behaviour inside the bar. Both are Guarded: the
+            # shell replaces this whole player when the episode changes,
+            # so a queued tap would reach a control with no page.
             if self.on_previous is not None:
                 items.append(
-                    ft.IconButton(
+                    GuardedIconButton(
                         icon=ft.Icons.SKIP_PREVIOUS_ROUNDED,
                         icon_size=24,
                         tooltip="Previous episode",
@@ -428,7 +443,7 @@ class ImmersivePlayer(ft.Stack):
                 )
             if self.on_next is not None:
                 items.append(
-                    ft.IconButton(
+                    GuardedIconButton(
                         icon=ft.Icons.SKIP_NEXT_ROUNDED,
                         icon_size=24,
                         tooltip="Next episode",
@@ -438,8 +453,10 @@ class ImmersivePlayer(ft.Stack):
             items.append(fv.VideoFullscreenButton(icon_size=24))
             return items
 
+        # Shared across both control branches, so it must be guarded ONCE:
+        # a Back press unmounts the control that was pressed.
         top_bar = [
-            ft.IconButton(
+            GuardedIconButton(
                 icon=ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
                 on_click=lambda e: self._on_back(),
                 tooltip="Back",
@@ -1163,7 +1180,7 @@ class ImmersivePlayer(ft.Stack):
         sections: list[ft.Control] = []
         if len(variants) > 1:
             rows = [
-                ft.OutlinedButton(
+                GuardedOutlinedButton(
                     content=v["label"],
                     on_click=lambda e, i=v["index"]: _pick_variant(i),
                 )
@@ -1180,7 +1197,7 @@ class ImmersivePlayer(ft.Stack):
             sections.append(ft.Column(rows, tight=True, spacing=6))
         if len(tracks) >= 2:
             rows = [
-                ft.OutlinedButton(
+                GuardedOutlinedButton(
                     content=t["name"] + (f" ({t['language']})" if t["language"] else ""),
                     on_click=lambda e, n=t["name"]: _pick_audio(n),
                 )
@@ -1212,20 +1229,20 @@ class ImmersivePlayer(ft.Stack):
             if track.get("default"):
                 label += " (default)"
             sub_rows.append(
-                ft.OutlinedButton(
+                GuardedOutlinedButton(
                     content=label,
                     on_click=lambda e, idx=i: _pick_subtitle(idx),
                 )
             )
         if self._local_subtitle:
             sub_rows.append(
-                ft.OutlinedButton(
+                GuardedOutlinedButton(
                     content=f"Local: {self._local_subtitle['name']}",
                     on_click=lambda e: (_close(), self.apply_local_subtitle()),
                 )
             )
         sub_rows.append(
-            ft.TextButton(
+            GuardedTextButton(
                 content="Load from file…",
                 on_click=lambda e: (
                     _close(),
@@ -1245,7 +1262,7 @@ class ImmersivePlayer(ft.Stack):
             size_section.append(
                 ft.Row(
                     [
-                        ft.OutlinedButton(
+                        GuardedOutlinedButton(
                             content=f"{s}",
                             on_click=lambda e, sz=s: self._set_subtitle_size(sz),
                         )
@@ -1258,7 +1275,7 @@ class ImmersivePlayer(ft.Stack):
         size_section.append(
             ft.Row(
                 [
-                    ft.OutlinedButton(
+                    GuardedOutlinedButton(
                         content=label,
                         on_click=lambda e, n=name: self._set_fit(n),
                     )

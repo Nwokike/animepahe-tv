@@ -643,12 +643,250 @@ happened:
 | 5 | The direction arrow named the mode it was LEAVING, not the one the tap lands on (the house convention). | Flipped. |
 | 6 | The quality dialogs' rows were chunky filled pills (Flutter's M3 ElevatedButton defaults) where the house shows flat rows. | `_flat_row_style()`: no fill, no shadow, the house focus ring. |
 | 7 | The header chip rendered at Flutter's 40px button minimum — twice the house's ~21px chip, beside a 32px app icon. | `visual_density=ft.VisualDensity.COMPACT`. |
-| 8 | The narrow header squeezed seven controls into 360dp in one horizontal row. | A narrow header is a vertically scrolling block: the title on the first line, the actions on the second. |
+| 8 | The narrow header squeezed seven controls into 360dp in one horizontal row. | **SUPERSEDED 2026-10-20** — see the 2026-10-20 entry, item 2. The fix shipped here was the wrong shape (a stacked column the owner called "falling over"); what actually fixes it is `ScrollMode.ALWAYS` on the horizontal cluster below the breakpoint, so the overflow is visible. One bar, at every width. |
 | 9 | **The kwik path was dead on arrival.** `_episode_mal_id` parsed the RAW JSON body, whose attribute quotes are escaped, so the MAL id was always 0 and `kwik_file_sources` always returned []. | It parses the `result` HTML. The mapper is keyed by MAL id, so this was the whole feature. |
-| 10 | The Discover filters were rebuilt as Material Dropdowns and then as pills that wrapped to several lines — the owner's "they put the filter and the sort" and "KTV Player is even in one line". | KTV's `filter_bar.py` copied verbatim: one horizontal line of outlined pills that scrolls horizontally, the sort on its own row, and no "Min episodes" field. |
+| 10 | The Discover filters were rebuilt as Material Dropdowns and then as pills that wrapped to several lines — the owner's "they put the filter and the sort" and "KTV Player is even in one line". | KTV's `filter_bar.py` copied verbatim: one horizontal line of outlined pills that scrolls horizontally. **The sort's own row was MY misreading — superseded 2026-10-20** by the 2026-10-20 entry, item 1: filters AND sort on the SAME line. |
 | 11 | Dead code (a duplicated `_selection_label`), stale provider-order comments in `main.py` and `tools/download_matrix.py`, a second copy of the kwik User-Agent, an overclaimed header docstring, and 18 stale doc claims. | All closed; the User-Agent is one shared constant (`core/constants.py`). |
 
 The lesson the audits repeated, and this project now guards with
 tests: **a test that only matches source text passes while the app is
 broken.** The dialog test that missed the `ft.Markdown` crash is the
 proof.
+
+## 2026-10-20 — the owner's phone run, and the two host-blind hardcodes
+
+A run on the phone plus a PC run (`uv run flet run`, log pasted in full)
+surfaced six reports. Three were real defects, two were my own
+misreadings of the owner's earlier instruction, and one was a
+misdiagnosis that the code was right about. The pattern behind the two
+real defects is worth naming: **a source-specific behaviour hardcoded into
+shared code**, which works for the one source the owner exercises and
+silently fails for every other one.
+
+### 1. The Discover filter bar: filters AND sort on ONE line (my misreading)
+
+The owner: *"You successfully made the filters like KTV player as I asked,
+but then you went and put default in another line plus some other stuff on
+another line. Everything about filter and sorting should be in that same
+line."*
+
+The 2026-10-19 re-audit's row 10 shipped the sort on its own row. That was
+my reading of "they put the filter and the sort" — the owner's complaint
+was never that the sort was *mixed in* with the filters; it was that the
+whole control strip should be **one horizontal line**, which is what KTV's
+bar is. The sort keeps its own pill and its own direction control (it is
+not a filter — there is no "sort by all"), and it now rides the same
+scrolling row. No second row, no second line.
+
+### 2. The header's scrollbar is ALWAYS visible on a small screen (my misreading — corrected 2026-10-20, later)
+
+The owner: *"The way that you made that filter to be scrollable
+vertically, I expect you to make the header scrollable vertically... you
+can also make it in the header so that it can be scrollable vertically and
+I see the vertical scroller when I'm on a small screen."*
+
+I read "vertically" literally and rebuilt the narrow header as a stacked,
+vertically-scrolling column. The owner's next message: *"You knew I meant
+horizontal, not vertical, and you broke the whole thing anyway."* They had
+meant the HORIZONTAL scroller — the same one the filter bar shows — and
+the word "vertical" was a slip; the tell is "I don't know if it's auto
+true or what", which is flet's scroll MODE, not an axis.
+
+What was actually wrong, and what shipped: a `Row(scroll=AUTO)` draws its
+thumb only while the user is dragging, so on a phone the action cluster
+looks like it simply ends and the theme cycle sits invisibly off-screen.
+The fix is flet's own scrollbar flag, nothing custom — the cluster uses
+`ScrollMode.ALWAYS` below the tablet breakpoint (thumb always drawn, even
+at rest, so the overflow is visible without a drag) and `AUTO` above it,
+where the row fits and a permanent thumb is noise. The header stays ONE
+horizontal bar at every width, with the house's expanding spacer and
+sideways pan — never a stack. The 2026-10-19 two-line narrow header was
+what the owner called "falling over"; stacking it again is the bug the
+test now pins.
+
+**The lesson, and it is the same one as §1:** when the owner's wording
+disagrees with an earlier complaint of theirs, the earlier complaint is
+the stronger signal — they had already rejected a stacked narrow header in
+plain terms, so a reading that produced one should have been questioned
+before it was built.
+
+### 3. "Surprise me" did nothing on screen (hardcode #1)
+
+The owner: *"there is this surprise me. When I press it, like it's in the
+header, when I press it, nothing happens. But in my terminal, I see
+something happening."*
+
+`AppController.open_random` asked for `self.router.get("anikato")` — a
+**provider name, hardcoded** — instead of the provider that is serving.
+`router.get` returns the provider object by name regardless of the
+session's source, so with kayoanime/animeout/animepahe selected the
+terminal showed a fetch for an AniKato `/random` slug, and the screen
+showed nothing, because the detail screen then resolved a session owned by
+a provider that was not the one the header named. `load_schedule`, right
+beside it, read `self.router.pin` correctly — the two functions disagreed.
+
+Fixed: `open_random` resolves the serving source (`self.router.pin`),
+requires the ability on that provider (`hasattr(provider,
+"random_slug")` — AniKato is the only source with the ability, so any
+other source now gets the honest message instead of a silent no-op), and
+prefixes the session with the provider that OWNED the pick. This is the
+doctrine's "an ability only one source has appears only when that source
+is selected", applied to a header action.
+
+### 4. AnimeOut's Cloudflare was never captured on the phone (hardcode #2 — the real one)
+
+The owner: *"after solving verifying I am human in anime page, it worked
+perfectly. But then after doing it in anime out, it did not work... 403
+page, waiting for verification. It did not capture the clearance or
+something similar. But that of animepahe works... since we implemented
+solver for animeout, I've never tested it on my phone. So check if there
+is something that we did to make it work on phone, specifically for
+animepahe, that we have not done for animeout."*
+
+Yes — and it was not the wall. The app solves challenges through two
+transports: an in-app `flet_webview` WebView on Android/TV (the phone
+path) and a pywebview/WebView2 subprocess on desktop. Each carried its
+**own copy** of "did the challenge finish?", and the phone's copy named
+animepahe in three places:
+
+- the completion cookie markers were animepahe's session cookies only
+  (`animepahe_session`, `serverid`, `xsrf-token`, `latest`);
+- "is this the target site" required the literal string `animepahe` in
+  the title or the URL;
+- the navigation handler read the cookie jar only when
+  `"animepahe" in current_url`.
+
+AnimePahe is first in the fixed order and the only source whose phone
+solve the owner had exercised, so the drift went unnoticed. On the phone,
+AnimeOut's challenge cleared, `cf_clearance` landed in the jar, and the
+judge never agreed — the WebView sat on "Waiting for verification..." over
+a finished challenge until the 300 s budget expired with nothing captured.
+On desktop the same solve succeeded because the pywebview child's judge
+fell through to "a plain web-server page means the origin answered" (the
+AnimeOut file host lands on an nginx 403 with only `cf_clearance` in the
+jar).
+
+**Fixed by making the judge one thing.** `src/services/cf_judge.py` is a
+pure, host-agnostic `challenge_complete(cookie_keys, url, title,
+target_host)` and both solvers now call it. The rules, and their order
+(which the pre-existing tests pin): cf_clearance must exist; Cloudflare's
+hard block is a stop, not a wait; the site's own cookies are the strongest
+positive and outrank every negative below; a running challenge
+(`__cf_chl`, a challenge title) is never complete; an empty title is a
+racing read and never complete; **the host we were asked to clear is a
+positive signal** (the rule the phone was missing — for a host with no
+session cookies of its own, it is the only signal there is); a plain
+web-server page means the origin answered. `target_host_of` derives the
+bare label from the URL, so a page titled "AnimeOut — ..." counts.
+
+### 5. The player crash: a superseded tap, not a bug (the owner's APK error)
+
+The owner: *"I think I got that error from player"* —
+`RuntimeError: IconButton(91830) Control must be added to the page first`
+(`session.py:459 dispatch_event → base_control.py:502 _trigger_event →
+base_control.py:310 page`).
+
+Read against the installed flet 1.0.4, that error has exactly one meaning:
+**the client sent an event for a control the app had already replaced.**
+`session.__resolve_event_control` keeps every control it ever saw in
+`__index`; when the id no longer resolves to a live control it returns the
+stale one anyway (`session.py:424`), and `_trigger_event`'s `self.page`
+then walks a parent chain that no longer reaches a `Page` and raises.
+
+Where the race comes from here: the player, the resolve spinner and the
+error card mount imperatively into `page.overlay` (`app_shell._use_player_overlay`),
+and the player's mount key is `(episode_session, resource)` — so pressing
+Retry, Next, Previous or Close unmounts the very control being pressed and
+mounts a fresh stage in its place. The removal reaches the client
+asynchronously, so a queued or double tap for the old button is dispatched
+to a control that is gone.
+
+There was nothing to fix in the logic: the app deliberately replaces the
+control, and the race is inherent to that. What was wrong was the
+REPORTING — `page.on_error` turned it into "Something went wrong.", telling
+the owner their tap broke the app when the tap had been superseded by the
+app's own next action. `core/stale_control.is_stale_control_error` now
+recognises the shape (a control identity opening a line, then o
+
+### 8. The player crash, the shared CF judge, and two UI corrections (same day, later)
+
+A second PC log (`uv run flet run`, pasted in full) plus the owner's
+follow-up messages produced four findings. The PC log's
+`HttpException: Connection closed before full header was received` lines
+over `http://127.0.0.1:<port>/image?url=...` are the web renderer's
+flaky connection during the first launch, then `Session was garbage
+collected` when the app closed — noise, not a defect (the host probe for
+those images still answers 200).
+
+#### 5. The player's `IconButton` crash: a stale click on a superseded control
+
+The owner: *"I think I got that error from player"* — the built-APK
+traceback this document already carried. Read against the installed flet
+1.0.4 the mechanism is now fully proved and reproduced headlessly
+(`tests/test_stale_control_events.py`):
+
+1. `session.__index` is a `weakref.WeakValueDictionary`, and a control
+   whose handlers close over `self`
+   (`on_click=lambda e: self._on_back()`) keeps itself, its parent `Video`
+   and that Video's `top_button_bar` alive for the process lifetime — so
+   the index entry survives the unmount.
+2. `__resolve_event_control` therefore returns the dead control, and
+   `_trigger_event`'s `self.page` walks a parent chain that reaches no
+   `Page` and raises. flet's `dispatch_event` catches it and reports
+   `SESSION_CRASHED` to the client — the red error screen.
+
+The race window is the app's own design: `app_shell._use_player_overlay`
+mounts the player into `page.overlay` with `(episode_session, resource)`
+as its key, so pressing Back / Retry / Next / Close unmounts the very
+control being pressed.
+
+**Fixed with flet's own seam.** `BaseControl.before_event(e)` runs at the
+TOP of `_trigger_event`, strictly before `self.page`, and returning
+`False` cancels the dispatch cleanly. `components/guarded_controls.py`
+subclasses the Button family plus `Container` (the house's chip shape)
+with that guard; every clickable control in the player mount — the 19 the
+test enumerates — now carries it, and a late click on any of them is a
+harmless no-op.
+
+**What the first attempt got wrong, pinned so it cannot come back.** I
+guarded `Page.on_error` — which flet 1.0.4 DECLARES but never invokes, and
+whose `dispatch_event` catches the raise before any handler-level hook
+exists. That guard was dead code and the APK kept crashing; the last test
+in the file is the evidence. The lesson repeats the one from
+2026-10-19: **a test that only matches source text passes while the app is
+broken** — here, a guard that looks right in the source while the runtime
+never calls it.
+
+#### 6. Sharing the CF judge broke the desktop subprocess
+
+Same day, the owner's log showed the desktop solve stop capturing:
+`Error reading cookies: No module named 'services'`, on every poll, over a
+challenge that had already cleared. Cause: the pywebview child is spawned
+as a standalone script (`python desktop_cf_solver.py <url>`), so `src/`
+is not on its `sys.path` and `from services.cf_judge import ...` raises
+inside its own cookie poll. The shared judge was introduced and this file
+never updated for it.
+
+Fixed by bootstrapping `src/` onto the child's `sys.path` at import time;
+`tests/test_cf_judge_shared.py` now loads the module the way the
+subprocess does and asserts the judge is reachable, so a standalone-path
+break fails in CI instead of on the owner's machine.
+
+#### 7. Search and Recent searches move into the shared header
+
+The owner: *"Good job with the discover screen so far, but the search and
+recents are alone on their line. Let us add them to the header. After all,
+Home also had a search."* Discover's Search icon and Reset button moved
+into `app_header`'s `extra_actions` (Home already injects its three the
+same way), and the Search screen's "Clear recent" moved into its own
+header. Nothing on either screen occupies a row of its own below the
+header now. Every control touched in the move is a guarded one, so the
+stale-click race cannot follow it.
+
+#### 8. The header's scroller: MODE, not axis
+
+The owner's correction is recorded in the 2026-10-20 entry, item 2 above
+(the row was written before it arrived). The narrow header is ONE horizontal bar at every
+width — never a stack — and below the breakpoint its action cluster uses
+`ScrollMode.ALWAYS` so the thumb is drawn at rest and a phone user can
+see the overflow instead of assuming the row simply ends.

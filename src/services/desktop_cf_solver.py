@@ -16,6 +16,16 @@ import time
 
 import webview
 
+# This script is spawned STANDALONE (python desktop_cf_solver.py <url>),
+# so the project's ``src/`` is not on sys.path and the shared package is
+# not importable by default. Put it there before importing anything of
+# ours — otherwise ``from services.cf_judge import ...`` raises
+# ModuleNotFoundError mid-solve, which is exactly what happened when the
+# judge was first shared (owner's run, 2026-10-20).
+_PROJECT_SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_SRC not in sys.path:
+    sys.path.insert(0, _PROJECT_SRC)
+
 # The UA clearance is bound to; the parent process falls back to this same
 # string, so the two can never disagree.
 FALLBACK_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36 Edg/149.0.0.0"
@@ -95,51 +105,29 @@ _CHALLENGE_TITLE_MARKERS = (
 def is_challenge_complete(window, cookie_keys: set[str]) -> bool:
     """Did the challenge actually finish?
 
-    Rules, in order (the 1.0.9 discipline, kept two-host honest):
-    - cf_clearance must exist at all;
-    - a challenge URL/title is never complete;
-    - an EMPTY title is never complete — that read races a navigation and
-      is what shipped an unusable clearance for animepahe (owner's run,
-      2026-10-16): the solver "succeeded" while the interstitial was still
-      looping, and primp could never use the cookie;
-    - the site's own cookies, a title naming the site, or a plainly
-      non-Cloudflare page (public.animeout.xyz lands on an nginx 403 with
-      only cf_clearance in the jar) are POSITIVE completion signals.
+    The rule itself lives in ``services/cf_judge.py`` — ONE judge, two
+    transports — so this window (desktop) and the phone's WebView cannot
+    drift apart again. See that module's docstring for the rules and the
+    owner's report that forced them to be shared.
+
+    This function keeps its shape because the desktop child can read the
+    URL, the title and the cookies directly; it forwards those facts and
+    lets the judge answer.
     """
-    if "cf_clearance" not in cookie_keys:
-        return False
+    from services.cf_judge import challenge_complete, target_host_of
 
-    # The site's own cookies are the strongest signal — the challenge
-    # redirected and the app's session began.
-    if any(
-        any(marker in key.lower() for marker in _TARGET_COOKIE_MARKERS)
-        for key in cookie_keys
-    ):
-        return True
-
-    # Check URL for challenge tokens
-    try:
-        curr_url = (window.get_current_url() or "").lower()
-        if "__cf_chl" in curr_url:
-            return False
-    except Exception:
-        pass
-
-    try:
+    url = ""
+    with contextlib.suppress(Exception):
+        url = window.get_current_url() or ""
+    title = ""
+    with contextlib.suppress(Exception):
         title = str(window.evaluate_js("document.title") or "").strip()
-    except Exception:
-        return False
-    title_lower = title.lower()
-    if not title_lower:
-        # A title read that raced a navigation — never judge it complete.
-        return False
-    if any(marker in title_lower for marker in _CHALLENGE_TITLE_MARKERS):
-        return False
-    if "animepahe" in title_lower or "anime" in title_lower:
-        return True
-    # A plain web-server page (the DDL host's nginx 403) means the
-    # challenge cleared and the origin answered.
-    return any(marker in title_lower for marker in _NOT_A_CHALLENGE_MARKERS)
+    return challenge_complete(
+        cookie_keys=cookie_keys,
+        url=url,
+        title=title,
+        target_host=target_host_of(getattr(window, "original_url", "") or url),
+    )
 
 
 def _split_cookies(cookies) -> tuple[set[str], list[str]]:
