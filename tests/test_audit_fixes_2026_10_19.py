@@ -537,27 +537,25 @@ def test_the_kayoanime_category_filter_accepts_a_bare_string():
     assert params.get("categories") == "14893", params
 
 
-def test_the_header_is_one_bar_and_its_scroller_is_visible_on_a_phone():
+def test_the_header_is_one_bar_and_the_narrow_cluster_pans_like_the_filter_bar():
     """The header NEVER stacks into two lines, and on a small screen its
-    action cluster scrolls HORIZONTALLY with a scrollbar you can see.
+    action cluster pans sideways EXACTLY the way Discover's filter bar
+    does — with a chevron that shows (and drives) the pan.
 
-    Wide: one horizontal bar — the house's mechanism (KTV's header) is an
-    expanding spacer plus a horizontally-scrolling action cluster, and the
-    PAGE owns the page's own vertical scroll. (The owner's original
-    report, on a version that stacked it: "you went and made it so that it
-    will fall over.")
+    The mechanism, which three attempts missed (owner, 2026-10-20: "I am
+    still not able to scroll header horizontally... learn from the filter
+    part of discover cause it scrolls horizontally perfectly"): a
+    scrollable Row nested DIRECTLY inside another Row gets an unbounded
+    main axis from Flutter, sizes to its full content width, and
+    overflows instead of scrolling — every ScrollMode value looks
+    identical on it. Discover's filter bar works because its scrollable
+    Row sits inside a BOUNDED box. So the narrow header's cluster must be
+    that same shape: a bounded viewport (``Container(expand=True)``)
+    holding the scrollable Row, plus a trailing chevron that pans it.
 
-    Narrow: the owner's 2026-10-20 instruction — the filter bar pans
-    sideways with a visible scroller, and the header should do the same,
-    "I see the vertical scroller when I'm on a small screen" (they meant
-    the horizontal scroller, always visible). ``ScrollMode.AUTO`` draws
-    the thumb only while dragging, so a phone user watching the header
-    simply ends has no cue that the theme cycle exists off-screen. So the
-    cluster is ``ScrollMode.ALWAYS`` below the breakpoint — one line, pans
-    sideways, thumb always drawn — and ``AUTO`` above it, where the row
-    fits.
-
-    A stacked Column here is the BUG this pins, not a style choice.
+    Wide keeps the house's expanding spacer and the right-hugging
+    cluster; nothing overflows there, so no viewport is needed. A stacked
+    Column is the "falling over" bug this pins.
     """
     import flet as ft
 
@@ -586,6 +584,7 @@ def test_the_header_is_one_bar_and_its_scroller_is_visible_on_a_phone():
     def _root(control):
         return getattr(control, "content", None)
 
+    # --- both widths: ONE horizontal Row, never a stack ---
     for label, header in (("narrow", narrow), ("wide", wide)):
         root = _root(header)
         assert isinstance(root, ft.Row), (
@@ -595,36 +594,65 @@ def test_the_header_is_one_bar_and_its_scroller_is_visible_on_a_phone():
         assert root.scroll in (None, ft.ScrollMode.HIDDEN), (
             f"the {label} header must not scroll itself — its CLUSTER does"
         )
-        spacers = [
-            c for c in root.controls if isinstance(c, ft.Container) and c.expand
-        ]
-        assert spacers, (
-            "the house's expand spacer keeps the title from pushing the "
-            "action cluster off the bar"
-        )
 
-    def _cluster(root):
-        return [
-            c
-            for c in root.controls
-            if isinstance(c, ft.Row) and getattr(c, "scroll", None) is not None
-        ]
-
-    # The cluster pans sideways at every width — the house rule: scroll,
-    # never clip.
-    for label, header in (("narrow", narrow), ("wide", wide)):
-        assert _cluster(_root(header)), (
-            f"the {label} action cluster must scroll horizontally"
-        )
-
-    # ...and on a phone its thumb is ALWAYS drawn, so the overflow is
-    # visible without a drag. On a wide screen the row fits and the thumb
-    # stays quiet (AUTO).
-    assert _cluster(_root(narrow))[0].scroll == ft.ScrollMode.ALWAYS, (
-        "a phone's header must show its scrollbar at rest, or the theme "
-        "cycle looks like the end of the row"
+    # --- narrow: the filter bar's shape ---
+    #
+    # The cluster is an EXPANDED Row (it takes the width left over from
+    # the title) whose first child is a bounded Container wrapping the
+    # scrollable Row — a scrollable Row directly inside the cluster Row
+    # would be unbounded again and the bug would be back.
+    narrow_root = _root(narrow)
+    narrow_clusters = [
+        c
+        for c in narrow_root.controls
+        if isinstance(c, ft.Row) and c.expand
+    ]
+    assert narrow_clusters, (
+        "the narrow cluster must be an expanded Row — it IS the scroll "
+        "viewport, so a bare spacer beside it would leave the scrollable "
+        "Row unbounded (the exact bug that made the header unscrollable)"
     )
-    assert _cluster(_root(wide))[0].scroll == ft.ScrollMode.AUTO
+    cluster = narrow_clusters[0]
+    viewports = [
+        c.content
+        for c in cluster.controls
+        if isinstance(c, ft.Container)
+        and c.expand
+        and isinstance(c.content, ft.Row)
+        and getattr(c.content, "scroll", None) == ft.ScrollMode.AUTO
+    ]
+    assert viewports, (
+        "the narrow cluster must hold the scrollable Row inside a bounded "
+        "Container — the Discover filter bar's exact shape"
+    )
+    # ...and the chevron that shows (and drives) the pan, OUTSIDE the
+    # scrollable so it never scrolls away with the content.
+    pan_buttons = [
+        c
+        for c in cluster.controls
+        if isinstance(c, ft.IconButton)
+        and c.icon == ft.Icons.CHEVRON_RIGHT_ROUNDED
+    ]
+    assert pan_buttons, (
+        "the owner asked for an arrow that indicates the bar can be "
+        "scrolled — it must sit beside the viewport, not inside it"
+    )
+
+    # --- wide: the house's original shape ---
+    wide_root = _root(wide)
+    spacers = [
+        c for c in wide_root.controls if isinstance(c, ft.Container) and c.expand
+    ]
+    assert spacers, (
+        "the wide header keeps the house's expand spacer so the title "
+        "keeps its place and the cluster hugs the right edge"
+    )
+    wide_clusters = [
+        c
+        for c in wide_root.controls
+        if isinstance(c, ft.Row) and getattr(c, "scroll", None) == ft.ScrollMode.AUTO
+    ]
+    assert wide_clusters, "the wide action cluster scrolls horizontally"
 
 
 def test_the_quality_rows_are_flat():

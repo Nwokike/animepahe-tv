@@ -7,21 +7,23 @@ screen's own name as a quiet subtitle beneath it.
 Right: the version/update pill, the screen's own extra actions, then the
 theme cycle. **The header is ALWAYS one horizontal bar** — it never stacks
 into two lines on a narrow screen (the owner, on a version that did:
-"you went and made it so that it will fall over"). The house's own
-mechanism (KTV's header) is an expanding spacer between the title and the
-action cluster, so the title keeps its place and the cluster pans sideways
-as the last resort: the house rule (Sherlock/KTV) is **scroll, never
-clip**.
+"you went and made it so that it will fall over"). The house rule
+(Sherlock/KTV) is **scroll, never clip**.
 
-The scroll MODE is the part the owner asked to see (2026-10-20): a
-``Row(scroll=AUTO)`` draws its thumb only while the user is dragging, so
-on a phone the cluster looks like it simply ends and the theme cycle is
-invisible off-screen. KTV's filter bar is the model — one line that pans
-sideways with a scroller you can see. So the cluster uses
-``ScrollMode.ALWAYS`` below the tablet breakpoint (thumb always drawn,
-even at rest) and ``AUTO`` above it, where the row fits and a permanent
-thumb would be noise. That is flet's own scrollbar flag
-(``ScrollMode.ALWAYS`` = "scroll bar is always shown"), nothing custom.
+HOW the cluster pans took three attempts, and the working mechanism is
+Flutter's layout rule, not a scroll MODE: **a scrollable Row nested
+directly inside another Row gets an unbounded main axis, lays out at its
+full content width, and overflows instead of scrolling.** The header's
+cluster was exactly that shape, so no ``ScrollMode`` value ever changed
+anything. Discover's filter bar pans perfectly because its scrollable Row
+sits inside a BOUNDED box — so below the tablet breakpoint the cluster is
+that same shape: ``Container(expand=True)`` takes the width left over from
+the title, the filter bar's scrollable Row lives inside it, and a trailing
+chevron pans the bar forward so the overflow is visible and reachable
+(owner, 2026-10-20: "learn from the filter part of discover cause it
+scrolls horizontally perfectly / maybe we should add an arrow button").
+Wide screens keep the house's expanding spacer and the cluster hugging
+the right edge — nothing overflows there, so no viewport is needed.
 
 The backend badge (the second source readout) rides the same row on WIDE
 screens only: on a narrow phone it is dropped because the title pill
@@ -46,6 +48,8 @@ are phone-first, and this app is not. (The one Container in this file is
 the zero-size placeholder that stands in for the backend badge below the
 tablet breakpoint — it is a layout spacer, not an interactive control.)
 """
+
+import contextlib
 
 import flet as ft
 
@@ -311,22 +315,65 @@ def app_header(
         theme_action,
     ]
 
-    # One horizontal bar at every width. The cluster pans sideways — the
-    # house rule (Sherlock/KTV): scroll, never clip — and the MODE is
-    # chosen by width, because that is the part the owner could not see:
-    # AUTO draws the thumb only while dragging, so a phone user watching
-    # the header ends has no cue that more controls exist. Below the
-    # breakpoint the thumb is always drawn (ScrollMode.ALWAYS is flet's
-    # own "scroll bar is always shown"); above it the row fits, and a
-    # permanent thumb would be noise, so it stays AUTO.
+    # One horizontal bar at every width. HOW the cluster pans is the part
+    # that took three attempts to get right, and the reason is Flutter's
+    # own rule, not a scroll MODE: **a scrollable Row nested directly
+    # inside another Row gets an unbounded main axis, sizes to its full
+    # content width, and overflows instead of scrolling.** That is why
+    # every scroll mode looked identical here — while Discover's filter
+    # bar, whose scrollable Row sits inside a BOUNDED box, has always
+    # panned perfectly (owner, 2026-10-20: "learn from the filter part of
+    # discover cause it scrolls horizontally perfectly").
+    #
+    # So the two regimes differ in the BOX, not the mode:
+    # - Narrow: the cluster's scrollable Row goes into a bounded
+    #   viewport — `Container(expand=True)` takes exactly the width left
+    #   over from the title, and the filter bar's own shape lives inside
+    #   it — plus a trailing chevron that PANS the bar forward, so the
+    #   overflow is visible and reachable on a phone.
+    # - Wide: the house's original shape — an expanding spacer, the
+    #   cluster hugging the right edge. Nothing overflows there, so no
+    #   viewport is needed.
     narrow = (getattr(page, "width", 0) or 0) < BREAKPOINT_TABLET
-    right_cluster = ft.Row(
-        actions,
-        spacing=4,
-        tight=True,
-        scroll=ft.ScrollMode.ALWAYS if narrow else ft.ScrollMode.AUTO,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
+    if narrow:
+        from core.tasks import spawn
+
+        actions_row = ft.Row(
+            actions,
+            spacing=4,
+            tight=True,
+            scroll=ft.ScrollMode.AUTO,  # the filter bar's own mode.
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        async def _pan_forward():
+            # The chevron pans the bar one step toward the hidden end.
+            with contextlib.suppress(Exception):
+                await actions_row.scroll_to(delta=160, duration=250)
+
+        right_cluster = ft.Row(
+            [
+                ft.Container(expand=True, content=actions_row),
+                GuardedIconButton(
+                    icon=ft.Icons.CHEVRON_RIGHT_ROUNDED,
+                    icon_size=18,
+                    icon_color=ft.Colors.ON_SURFACE_VARIANT,
+                    tooltip="More actions",
+                    on_click=lambda e: spawn(_pan_forward(), name="pan-header"),
+                ),
+            ],
+            spacing=2,
+            expand=True,  # the leftover width after the title IS the viewport
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+    else:
+        right_cluster = ft.Row(
+            actions,
+            spacing=4,
+            tight=True,
+            scroll=ft.ScrollMode.AUTO,  # the house rule: scroll, never clip.
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
 
     # The round back button (sub-screens only): a soft-tinted disc that
@@ -399,17 +446,25 @@ def app_header(
     )
 
     # ONE horizontal bar, always, at every width — never a stack, never
-    # "falling over". The house's own mechanism (KTV's header): an expanding
-    # spacer between the title and the action cluster, so the title keeps
-    # its place and the cluster pans sideways as the last resort.
+    # "falling over".
+    # - Wide: the house's mechanism (KTV's header) — an expanding spacer
+    #   between the title and the action cluster, so the title keeps its
+    #   place and the cluster hugs the right edge.
+    # - Narrow: no spacer. The cluster itself takes the leftover width
+    #   (it is the scroll viewport — see above), so a spacer would just
+    #   compete with it for the same flex space.
     return ft.Container(
         padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
         content=ft.Row(
-            [
-                left,
-                ft.Container(expand=True),
-                right_cluster,
-            ],
+            (
+                [left, right_cluster]
+                if narrow
+                else [
+                    left,
+                    ft.Container(expand=True),
+                    right_cluster,
+                ]
+            ),
             alignment=ft.MainAxisAlignment.START,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),

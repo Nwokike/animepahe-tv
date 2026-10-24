@@ -635,6 +635,44 @@ class AppController:
         logger.info("kwik clearance solved and persisted")
         return True
 
+    async def _sources_with_kwik(self, anime_session: str, episode_session: str):
+        """Sources for one episode, with AniKato's kwik FILES earned when
+        they are missing.
+
+        AniKato's own download row IS AnimePahe's (the site's mapper hands
+        out pahe.win/kwik shortlinks — docs/testing-findings.md §6), and
+        the kwik FILE page is the ONE kwik route Cloudflare guards. The
+        provider therefore appends those files only when a kwik.cx
+        clearance is already stored — a provider never opens a
+        verification window on its own — which is why AniKato "was not
+        using the kwik resolver": nothing ever earned the clearance, so
+        the kwik sources were silently absent on every play and download.
+
+        Play and download ARE the user's deliberate acts, so this is where
+        the window may open — once per session (``_kwik_solve_tried``): a
+        cancelled or failed solve must not nag on every episode. The
+        ability check is the provider's own (``kwik_file_sources``), never
+        a hardcoded name.
+        """
+        sources = await self.router.sources(anime_session, episode_session)
+        provider = self.router.get(self._owner_of(anime_session))
+        if provider is None or not hasattr(provider, "kwik_file_sources"):
+            return sources
+        from services.store import get_store
+
+        if await get_store().get_clearance("kwik.cx"):
+            # The clearance is stored, so the fetch above already carries
+            # whatever kwik files the mapper had for this episode.
+            return sources
+        if getattr(self, "_kwik_solve_tried", False):
+            return sources
+        self._kwik_solve_tried = True
+        logger.info("kwik files: no kwik.cx clearance — opening verification")
+        if not await self.solve_kwik_clearance():
+            logger.info("kwik files: no clearance earned — streams only")
+            return sources
+        return await self.router.sources(anime_session, episode_session)
+
     async def retry_cloudflare(self):
         """Clear the Cloudflare session + caches, then reload the home feed."""
         state.cf_blocked = False
@@ -908,9 +946,12 @@ class AppController:
             await self._play_episode_external(anime_session, episode_session)
             return
 
-        # 1. Stream sources — sorted best-first, as the original did.
+        # 1. Stream sources — sorted best-first, as the original did. The
+        # kwik FILES (AniKato's AnimePahe download row) are earned here if
+        # the kwik.cx clearance is missing: play is the user's deliberate
+        # act, the one moment a verification window may open.
         try:
-            sources = await self.router.sources(anime_session, episode_session)
+            sources = await self._sources_with_kwik(anime_session, episode_session)
         except Exception as ex:
             logger.error("sources(%s/%s) failed: %s", anime_session, episode_session, ex)
             self._show_error_snackbar("Couldn't load the stream sources.")
@@ -1778,7 +1819,7 @@ class AppController:
         """The 1.0.9 external flow: quality dialog (all sources), resolve the
         chosen one, hand the m3u8 to KTV with a human title."""
         try:
-            sources = await self.router.sources(anime_session, episode_session)
+            sources = await self._sources_with_kwik(anime_session, episode_session)
         except Exception as ex:
             logger.error("external: sources failed: %s", ex)
             self._show_error_snackbar("Couldn't load the stream sources.")
@@ -1920,7 +1961,7 @@ class AppController:
             state.starting_downloads.add(episode_session)
             state.busy_version += 1
             try:
-                sources = await self.router.sources(anime_session, episode_session)
+                sources = await self._sources_with_kwik(anime_session, episode_session)
                 if not sources:
                     continue
                 series_provider = self.router.get(self._owner_of(anime_session))
@@ -1975,7 +2016,7 @@ class AppController:
         state.starting_downloads.add(episode_session)
         state.busy_version += 1
         try:
-            sources = await self.router.sources(anime_session, episode_session)
+            sources = await self._sources_with_kwik(anime_session, episode_session)
         except Exception as ex:
             logger.error("download: sources failed: %s", ex)
             self._show_error_snackbar("Couldn't start the download.")

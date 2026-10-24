@@ -18,6 +18,10 @@ dependencies = [
 org = "com.animepahe"
 product = "AnimePahe TV"
 build_number = 20
+# The full desktop flavor ships the complete runner (the same shape KTV
+# Player declares) rather than the slim one, so `flet run` / a built
+# desktop binary behave identically on Linux, Windows and macOS.
+desktop_flavor = "full"
 
 [tool.flet.app]
 path = "src"

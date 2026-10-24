@@ -890,3 +890,77 @@ The owner's correction is recorded in the 2026-10-20 entry, item 2 above
 width — never a stack — and below the breakpoint its action cluster uses
 `ScrollMode.ALWAYS` so the thumb is drawn at rest and a phone user can
 see the overflow instead of assuming the row simply ends.
+
+## 2026-10-23 — the kwik gap, the desktop flavor, and the header pan that finally worked
+
+The owner's Linux run (`flet run`, log pasted) plus three follow-ups.
+
+### 1. AniKato "is not using kwik resolver" — the caller that never existed
+
+The owner was right, and the gap was exact: `AppController.solve_kwik_clearance`
+was written and then never called by anything. The provider appends its
+kwik FILE sources (AnimePahe's own download row, via the site's mapper —
+§6 of the 2026-10-19 entry) only when a kwik.cx clearance is already
+stored, because a provider never opens a verification window on its own.
+With no caller, no clearance was ever earned, so on every play and every
+download the kwik sources were silently absent.
+
+Fixed with `_sources_with_kwik` — the ONE source-fetch helper now used by
+the in-app play, the external-player flow, `download_episode` and
+`download_series`. It earns the clearance at exactly those deliberate
+user acts (the doctrine's "a verification window is the user's explicit
+act"), once per session so a cancelled solve never nags on every episode,
+then re-fetches so the kwik files reach the quality dialog. The ability
+check is the provider's own `kwik_file_sources` — never a hardcoded name
+— and a provider without the ability is served in one fetch with the
+clearance never even read (`tests/test_kwik_wiring.py`).
+
+A live re-probe of the mapper (2026-10-23) reconfirms the payload shape:
+Black Clover ep1 = 360/720/1080 sub; Naruto ep1 = 360/800 sub; One Piece
+ep1 = 720/1080 sub; FMA:B ep1 = 360/720/1080 in BOTH sub and dub — the
+sub/dub separation the owner asked about is real and already flows
+through (`episode_files` iterates every source and every audio group).
+
+### 2. `desktop_flavor = "full"` was missing from pyproject.toml
+
+The owner: "did you remove desktop flavour full I added to
+pyproject.toml. research it and add it." The repository's pyproject
+carried no `desktop_flavor` at all — the full desktop runner KTV Player
+declares (`desktop_flavor = "full"` under `[tool.flet]`) was never in
+this project's file. Restored in the same table position KTV uses, with
+the reason written down: the full runner ships the complete desktop
+shell, so `flet run` and a built desktop binary behave identically across
+Linux, Windows and macOS.
+
+Adjacent, from the same log and NOT fixed here: the desktop client
+prepared was "Flet v1.0.5" while the Python side pins 1.0.4
+(`flet-desktop==1.0.5 → 1.0.4` in the run output), and the player died
+with `Timeout waiting for invoke method listener for Video(10291).play`
+after the embedder printed `FlutterEngineRemoveView ... implicit view
+cannot be removed`. That is a desktop-runner/client version mismatch on
+the dev machine, not an app-code path — it needs a `flet run` with a
+matching client before it can be judged.
+
+### 3. The header pan: the mechanism, not the mode
+
+The owner: "I am still not able to scroll header horizontally... learn
+from the filter part of discover cause it scrolls horizontally perfectly /
+maybe we should add an arrow button."
+
+Three attempts had failed because each tuned the scroll MODE on a layout
+that can never scroll. Flutter's rule: **a scrollable Row nested directly
+inside another Row gets an unbounded main axis, sizes to its full content
+width, and overflows instead of scrolling.** The header's cluster was
+exactly that — `Row(scroll=…)` as a direct child of the outer header Row —
+so AUTO, ALWAYS and ADAPTIVE were indistinguishable. Discover's filter bar
+pans because its scrollable Row sits in a BOUNDED box.
+
+The fix is the filter bar's shape, transplanted: below the tablet
+breakpoint the cluster is an expanded Row whose first child is a bounded
+`Container(expand=True)` holding the scrollable Row, and a trailing
+chevron — outside the scroller, so it never pans away — both indicates
+the overflow and pans the bar forward (`scroll_to(delta=…)`) on tap, as
+the owner suggested. Wide screens keep the expanding spacer and the
+right-hugging cluster; nothing overflows there. The test now pins the
+bounded-viewport shape and the chevron by walking the built controls, so
+a regression to the unbounded nesting fails in CI instead of on the phone.
