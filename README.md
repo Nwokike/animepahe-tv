@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows11&logoColor=white" alt="Windows" />
   <img src="https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android" />
   <br>
-  <img src="https://img.shields.io/badge/Built%20with-Flet%201.0.4-00B0FF?style=flat-square" alt="Built with Flet 1.0.4" />
+  <img src="https://img.shields.io/badge/Built%20with-Flet%200.85.3-00B0FF?style=flat-square" alt="Built with Flet 0.85.3" />
   <img src="https://img.shields.io/badge/Python-3.14-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.14" />
 </p>
 
@@ -80,8 +80,8 @@ Get the latest version of AnimePahe TV. Modern phones and TVs use the **ARM64** 
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Flet 1.0.4 (Python → Flutter), `@ft.component` screens |
-| Video Engine | `flet-video` 1.0.4 (mpv backend) |
+| Frontend | Flet 0.85.3 (Python → Flutter), `@ft.component` screens |
+| Video Engine | `flet-video` 0.85.3 (mpv backend) |
 | Network | `primp` 2.0.1 (async, Chrome impersonation for Cloudflare, `Range`-capable streaming) |
 | Sources | Provider protocol + `ProviderRouter` (breaker per provider, owner-scoped catalog ops, health in Settings) |
 | Cloudflare | `flet-webview-all` on Android/iOS/TV; pywebview subprocess for desktop dev (UA-pinned, renderer-guarded) |
