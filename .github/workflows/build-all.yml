@@ -173,25 +173,20 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
         run: |
+          (cd build/flutter/android && ./gradlew assembleRelease -Psplit-per-abi=true)
+          rm -rf build/apk
           mkdir -p build/apk
-          cd build/flutter
-          ./gradlew assembleRelease --no-daemon \
-            -Psplit-per-abi \
-            "-Pandroid.injected.signing.store.file=${{ github.workspace }}/tv_keystore.jks" \
-            "-Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }}" \
-            "-Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }}" \
-            "-Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}"
-          cd "${{ github.workspace }}"
-          find build/flutter/build/app/outputs/flutter-apk/ -name "*.apk" ! -name "*unsigned*" \
-            -exec cp {} build/apk/ \;
+          find build/flutter -name "*.apk" -not -path "*/intermediates/*" -exec cp {} build/apk/ \;
       - name: Size report
         if: always()
         run: |
-          ls -l build/apk/*.apk 2>/dev/null || echo "No APKs found"
+          ls -lh build/apk/
           for a in build/apk/*.apk; do
             [ -f "$a" ] && echo "== $a ($(du -h "$a" | cut -f1))"
           done
+          true
       - name: Upload to Private Release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v3
