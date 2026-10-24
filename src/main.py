@@ -831,11 +831,8 @@ class AppController:
             await self._heal_anime_poster(anime_session, gen)
 
     async def _heal_anime_poster(self, anime_session: str, gen: int):
-        """Replace a /snapshots/ placeholder poster with the real poster."""
+        """Replace a release snapshot with the real series poster."""
         anime = state.selected_anime or {}
-        poster = anime.get("poster") or ""
-        if "/snapshots/" not in poster:
-            return
         try:
             # Owner-scoped: the heal is this backend's own errand, never a
             # reason to query another one.
@@ -848,9 +845,12 @@ class AppController:
         if gen != self._episodes_gen:
             return
         matched = next((a for a in results if a.session == anime_session and a.poster), None)
-        if matched is None or "/snapshots/" in (matched.poster or ""):
+        if matched is None or not matched.poster or matched.poster == anime.get("poster"):
             return
         merged = dict(state.selected_anime or {})
+        # Save the episode snapshot as the landscape backdrop if missing
+        if not merged.get("backdrop") and merged.get("poster"):
+            merged["backdrop"] = merged.get("poster")
         merged["poster"] = matched.poster
         state.selected_anime = merged
         state.episodes_version += 1
@@ -2240,17 +2240,24 @@ class AppController:
         state.downloads_version += 1
 
     async def resume_download(self, episode_session: str):
-        """Resume (or retry) from the job's own manifest."""
+        """Resume from the job's own manifest, or retry from scratch if failed/missing."""
         rows = await self.store.get_downloads()
         row = rows.get(episode_session) or {}
         job_dir = self.downloads._job_dir(row.get("anime_session", "unknown"), episode_session)
-        manifest = self.downloads._read_manifest(os.path.join(job_dir, "manifest.json"))
+        manifest_path = os.path.join(job_dir, "manifest.json")
+        manifest = self.downloads._read_manifest(manifest_path)
+        url = manifest.get("url") or manifest.get("m3u8_url") or ""
+        # If manifest is missing or the job previously failed (expired signed URL),
+        # re-resolve with fresh tokens instead of looping 404s!
+        if not url or manifest.get("state") == "failed":
+            await self.retry_download(episode_session)
+            return
         state.download_progress = _with_job_state(
             state.download_progress, episode_session, "downloading"
         )
         await self.downloads.resume(
             episode_session,
-            manifest.get("url") or manifest.get("m3u8_url") or "",
+            url,
             manifest.get("headers") or {},
             manifest.get("metadata") or row,
         )
@@ -2603,6 +2610,15 @@ class AppController:
             if not merged.get(key) and filled.get(key):
                 merged[key] = filled[key]
                 changed = True
+        # If the provider details returned a real series poster, promote it to poster!
+        # The episode snapshot that came from the home release card becomes the backdrop
+        # (landscape cover), so the series gets its real portrait poster and the episode
+        # thumbnail isn't lost (owner, 2026-10-24).
+        if filled.get("poster") and filled.get("poster") != merged.get("poster"):
+            if not merged.get("backdrop") and merged.get("poster"):
+                merged["backdrop"] = merged.get("poster")
+            merged["poster"] = filled["poster"]
+            changed = True
         if changed:
             state.selected_anime = merged
             state.episodes_version += 1

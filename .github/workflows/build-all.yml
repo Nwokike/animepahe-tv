@@ -139,7 +139,7 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set +e
-          uv run --frozen flet build apk --python-version 3.14 --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
+          uv run --frozen flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
           status=$?
           set -e
           if [ "$status" -eq 0 ]; then
@@ -150,9 +150,15 @@ jobs:
             echo "::error::flet build apk failed before generating the Android project"
             exit 1
           fi
-      # Phase 2: patch desugaring flags + notification receivers.
-      - name: Patch the generated Android project (notifications)
-        run: uv run --frozen flet-notifications-patch --project-root build/flutter
+      # Phase 2: patch desugaring flags + notification receivers + package visibility for KTV player.
+      - name: Patch the generated Android project (notifications & KTV queries)
+        run: |
+          uv run --frozen flet-notifications-patch --project-root build/flutter
+          manifest="build/flutter/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$manifest" ] && ! grep -q 'scheme="ktv"' "$manifest"; then
+            sed -i '/<\/manifest>/i \    <queries>\n        <package android:name="ng.kiri.ktvplayer" \/>\n        <intent>\n            <action android:name="android.intent.action.VIEW" \/>\n            <data android:scheme="ktv" \/>\n        <\/intent>\n    <\/queries>' "$manifest"
+            echo "Injected KTV player queries into AndroidManifest.xml"
+          fi
       # Phase 3: build the split APKs cleanly — reuses the patched Flutter project.
       - name: Build APK (split per ABI)
         env:
@@ -160,7 +166,7 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: uv run --frozen flet build apk --python-version 3.14 --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
+        run: uv run --frozen flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
       - name: Size report
         if: always()
         run: |

@@ -11,6 +11,7 @@ import flet as ft
 
 from components.banner_ad import build_banner_ad
 from components.empty_state import EmptyState
+from components.guarded_controls import GuardedIconButton
 from core.theme import AppColors
 from services.hls_proxy import image_url
 from services.providers.base import owner_of
@@ -97,7 +98,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
     if running:
         # Pause keeps the partials (a Range resume continues from them).
         trailing.append(
-            ft.IconButton(
+            GuardedIconButton(
                 icon=ft.Icons.PAUSE_ROUNDED,
                 icon_size=20,
                 tooltip="Pause",
@@ -105,7 +106,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
             )
         )
         trailing.append(
-            ft.IconButton(
+            GuardedIconButton(
                 icon=ft.Icons.CLOSE_ROUNDED,
                 icon_size=20,
                 tooltip="Cancel",
@@ -113,15 +114,21 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
             )
         )
     else:
-        if job_state in (STATE_STOPPED, STATE_FAILED):
+        # An incomplete download can always be resumed or retried!
+        # If stopped/paused -> Resume (Play icon)
+        # If failed or partial -> Retry (Refresh icon), which re-resolves fresh URLs
+        if not complete:
+            is_paused = job_state == STATE_STOPPED
             trailing.append(
-                ft.IconButton(
-                    icon=ft.Icons.PLAY_ARROW_ROUNDED
-                    if job_state == STATE_STOPPED
-                    else ft.Icons.REFRESH_ROUNDED,
+                GuardedIconButton(
+                    icon=ft.Icons.PLAY_ARROW_ROUNDED if is_paused else ft.Icons.REFRESH_ROUNDED,
                     icon_size=20,
-                    tooltip="Resume" if job_state == STATE_STOPPED else "Retry",
-                    on_click=lambda e: controller.resume_download(session),
+                    tooltip="Resume" if is_paused else "Retry",
+                    on_click=(
+                        (lambda e: controller.resume_download(session))
+                        if is_paused
+                        else (lambda e: controller.retry_download(session))
+                    ),
                 )
             )
         # Play is a real focusable button: on TV the row itself can't take
@@ -129,7 +136,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
         # family does — same reason the card builders are buttons.
         if complete:
             trailing.append(
-                ft.IconButton(
+                GuardedIconButton(
                     icon=ft.Icons.PLAY_CIRCLE_FILL_ROUNDED,
                     icon_size=20,
                     tooltip="Play",
@@ -137,7 +144,7 @@ def _episode_row(row: dict, session: str, controller, progress) -> ft.Control:
                 )
             )
         trailing.append(
-            ft.IconButton(
+            GuardedIconButton(
                 icon=ft.Icons.DELETE_OUTLINE_ROUNDED,
                 icon_size=20,
                 tooltip="Delete",

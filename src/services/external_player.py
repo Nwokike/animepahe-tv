@@ -127,16 +127,28 @@ async def launch_external(
     # Ask the OS FIRST: a custom scheme with no handler does not raise on
     # Android — the void-returning launch_url "succeeds" and the install
     # dialog never showed.
+    can_handle = False
     try:
-        if not await shared.launcher.can_launch_url(deep_link):
-            logger.warning("no app handles %s — offering install dialog", deep_link)
-            show_ktv_install_dialog(page)
-            return False
+        can_handle = bool(await shared.launcher.can_launch_url(deep_link))
     except Exception as ex:
         # can_launch_url itself is best-effort: fall through and try.
         logger.info("can_launch_url failed: %s", ex)
-    if await shared.launch_url(deep_link):
-        return True
+
+    if not can_handle and page is None:
+        logger.warning("no app handles %s — offering install dialog", deep_link)
+        show_ktv_install_dialog(page)
+        return False
+
+    # On Android 11+ (API 30+), can_launch_url returns False for custom schemes
+    # unless declared in <queries> due to package visibility restrictions, even
+    # when KTV Player is installed. So on a live page, we attempt launch_url
+    # before offering the install dialog (owner, 2026-10-24).
+    try:
+        if await shared.launch_url(deep_link):
+            return True
+    except Exception as ex:
+        logger.info("launch_url failed: %s", ex)
+
     logger.warning("external player launch failed — offering install dialog")
     show_ktv_install_dialog(page)
     return False
