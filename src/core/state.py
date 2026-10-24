@@ -179,6 +179,10 @@ class AppState:
     player_error: str | None = None
     quality_dialog_open: bool = False
     quality_choices: list | None = None
+    # Bumped when the dialog's "More qualities" button earns the kwik
+    # clearance and the rows change underneath an open dialog — the
+    # shell's portal watches this to repaint in place.
+    quality_version: int = 0
     pending_playback: dict | None = None
 
     # Offline downloads (durable rows + throttled live progress)

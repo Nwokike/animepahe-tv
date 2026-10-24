@@ -18,12 +18,20 @@ cluster was exactly that shape, so no ``ScrollMode`` value ever changed
 anything. Discover's filter bar pans perfectly because its scrollable Row
 sits inside a BOUNDED box — so below the tablet breakpoint the cluster is
 that same shape: ``Container(expand=True)`` takes the width left over from
-the title, the filter bar's scrollable Row lives inside it, and a trailing
-chevron pans the bar forward so the overflow is visible and reachable
-(owner, 2026-10-20: "learn from the filter part of discover cause it
-scrolls horizontally perfectly / maybe we should add an arrow button").
-Wide screens keep the house's expanding spacer and the cluster hugging
-the right edge — nothing overflows there, so no viewport is needed.
+the title, and the filter bar's scrollable Row lives inside it (owner,
+2026-10-20: "learn from the filter part of discover cause it scrolls
+horizontally perfectly"). Wide screens keep the house's expanding spacer
+and the cluster hugging the right edge — nothing overflows there, so no
+viewport is needed.
+
+Two things the owner explicitly rejected in this header, kept out (the
+tests below pin both): a stacked layout, and a chevron indicator —
+"the arrow is supposed to only show when there is more things to show...
+That's why I told you not to do it" (2026-10-23). An overflow-aware
+indicator is exactly the complexity the header must not carry; the
+filter bar's own scroll affordance is what the owner approved. The gaps
+between the icons are gone too (``spacing=0``): the controls' own touch
+targets supply the separation.
 
 The backend badge (the second source readout) rides the same row on WIDE
 screens only: on a narrow phone it is dropped because the title pill
@@ -48,8 +56,6 @@ are phone-first, and this app is not. (The one Container in this file is
 the zero-size placeholder that stands in for the backend badge below the
 tablet breakpoint — it is a layout spacer, not an interactive control.)
 """
-
-import contextlib
 
 import flet as ft
 
@@ -85,23 +91,16 @@ def _chip_style(
     radius: int = 10,
     bgcolor=None,
     color=None,
-    padding: ft.PaddingValue | None = None,
     default_border: ft.BorderSide | None = None,
 ) -> ft.ButtonStyle:
     """The house chip look (Sherlock's version chip / DDGS's version chip):
     a soft tinted plate with a rounded radius — on a Button-family control
     so it can take D-pad focus, with a PRIMARY ring when focused.
 
-    The COMPACT visual density matters: Flutter's M3 button defaults keep
-    a 40px minimum height, which would make our chip twice as tall as
-    the house's Container chip (11px text + 4px padding ≈ 21px) beside
-    a 32px app icon. COMPACT pulls the minimum to ~32px, and the chip
-    keeps the house's proportions.
     """
     return ft.ButtonStyle(
         bgcolor=bgcolor or ft.Colors.TRANSPARENT,
         color=color or ft.Colors.ON_SURFACE,
-        padding=padding or ft.Padding.symmetric(horizontal=10, vertical=4),
         shape=ft.RoundedRectangleBorder(radius=radius),
         side=_focus_sides(default_border),
         overlay_color={
@@ -199,7 +198,6 @@ def _version_pill(state, page) -> ft.Control:
                 radius=10,
                 bgcolor=ft.Colors.with_opacity(0.15, AppColors.PRIMARY),
                 color=AppColors.PRIMARY,
-                padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                 default_border=ft.BorderSide(1.5, AppColors.PRIMARY),
             ),
             tooltip="New update available — tap to view",
@@ -217,7 +215,6 @@ def _version_pill(state, page) -> ft.Control:
             radius=10,
             bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE_VARIANT),
             color=ft.Colors.ON_SURFACE_VARIANT,
-            padding=ft.Padding.symmetric(horizontal=10, vertical=4),
         ),
         tooltip="What's New — version & changelog",
         on_click=lambda e: show_update_dialog(page, None) if page else None,
@@ -253,7 +250,6 @@ def _backend_badge(state, controller) -> ft.Control:
             radius=14,
             bgcolor=ft.Colors.with_opacity(0.1, colour),
             color=label or ft.Colors.ON_SURFACE_VARIANT,
-            padding=ft.Padding.symmetric(horizontal=10, vertical=6),
             default_border=ft.BorderSide(1, ft.Colors.with_opacity(0.35, colour)),
         ),
         tooltip=f"Served by {label} — tap to switch" if label else "Choosing a source…",
@@ -297,7 +293,7 @@ def app_header(
         icon=theme_icon_for(page, state),
         icon_size=20,
         icon_color=ft.Colors.ON_SURFACE,
-        style=_chip_style(radius=10, padding=ft.Padding.all(10)),
+        style=_chip_style(radius=10),
         tooltip="Switch theme",
         on_click=_default_theme,
     )
@@ -326,50 +322,35 @@ def app_header(
     # discover cause it scrolls horizontally perfectly").
     #
     # So the two regimes differ in the BOX, not the mode:
-    # - Narrow: the cluster's scrollable Row goes into a bounded
-    #   viewport — `Container(expand=True)` takes exactly the width left
-    #   over from the title, and the filter bar's own shape lives inside
-    #   it — plus a trailing chevron that PANS the bar forward, so the
-    #   overflow is visible and reachable on a phone.
+    # - Narrow: the cluster IS a bounded viewport — `Container(expand=True)`
+    #   takes exactly the width left over from the title, and the filter
+    #   bar's own shape lives inside it. No arrow: the owner tried the
+    #   chevron indicator and rejected it (2026-10-23 — it showed even
+    #   when nothing overflowed, and a correct overflow-aware one is the
+    #   complexity they refused; "just remove the arrow").
     # - Wide: the house's original shape — an expanding spacer, the
     #   cluster hugging the right edge. Nothing overflows there, so no
     #   viewport is needed.
+    #
+    # `spacing=0` between the icons is the owner's explicit order (the
+    # gaps between the chips read as dead space; the controls' own touch
+    # targets supply all the separation a tap needs).
     narrow = (getattr(page, "width", 0) or 0) < BREAKPOINT_TABLET
     if narrow:
-        from core.tasks import spawn
-
-        actions_row = ft.Row(
-            actions,
-            spacing=4,
-            tight=True,
-            scroll=ft.ScrollMode.AUTO,  # the filter bar's own mode.
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-
-        async def _pan_forward():
-            # The chevron pans the bar one step toward the hidden end.
-            with contextlib.suppress(Exception):
-                await actions_row.scroll_to(delta=160, duration=250)
-
-        right_cluster = ft.Row(
-            [
-                ft.Container(expand=True, content=actions_row),
-                GuardedIconButton(
-                    icon=ft.Icons.CHEVRON_RIGHT_ROUNDED,
-                    icon_size=18,
-                    icon_color=ft.Colors.ON_SURFACE_VARIANT,
-                    tooltip="More actions",
-                    on_click=lambda e: spawn(_pan_forward(), name="pan-header"),
-                ),
-            ],
-            spacing=2,
+        right_cluster = ft.Container(
             expand=True,  # the leftover width after the title IS the viewport
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            content=ft.Row(
+                actions,
+                spacing=0,
+                tight=True,
+                scroll=ft.ScrollMode.AUTO,  # the filter bar's own mode.
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
         )
     else:
         right_cluster = ft.Row(
             actions,
-            spacing=4,
+            spacing=0,
             tight=True,
             scroll=ft.ScrollMode.AUTO,  # the house rule: scroll, never clip.
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -390,7 +371,6 @@ def app_header(
                 style=_chip_style(
                     radius=17,
                     bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
-                    padding=ft.Padding.all(8),
                 ),
                 tooltip="Back",
                 on_click=lambda e: on_back(),
@@ -435,7 +415,6 @@ def app_header(
                 ),
                 style=_chip_style(
                     radius=10,
-                    padding=ft.Padding.symmetric(horizontal=6, vertical=2),
                 ),
                 tooltip="Change content source",
                 on_click=lambda e: controller.open_backend_picker(),
@@ -454,7 +433,6 @@ def app_header(
     #   (it is the scroll viewport — see above), so a spacer would just
     #   compete with it for the same flex space.
     return ft.Container(
-        padding=ft.Padding.only(left=16, right=16, top=12, bottom=8),
         content=ft.Row(
             (
                 [left, right_cluster]

@@ -52,91 +52,41 @@ def test_no_source_file_calls_an_ft_control_that_does_not_exist():
     assert not problems, "referenced missing ft attributes:\n" + "\n".join(problems)
 
 
-def test_no_deprecated_flat_textfield_border_kwargs():
-    """flet 1.0.4 deprecates the flat TextField border kwargs (removed in
-    1.3.0) — they emit DeprecationWarnings on every render (the flet run
-    log). Every TextField must use the OutlineInputBorder/ControlState
-    map shape instead."""
-    import ast
-
-    deprecated = {
-        "border_radius",
-        "border_width",
-        "border_color",
-        "border_style",
-        "focused_border_width",
-        "focused_border_color",
-    }
-    problems: list[str] = []
-    for path in _python_files():
-        with open(path, encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            name = (
-                func.attr
-                if isinstance(func, ast.Attribute)
-                else func.id
-                if isinstance(func, ast.Name)
-                else ""
-            )
-            if name != "TextField":
-                continue
-            for kw in node.keywords:
-                if kw.arg in deprecated:
-                    problems.append(
-                        f"{os.path.basename(path)}:{node.lineno} "
-                        f"TextField({kw.arg}=...) is deprecated in 1.0.4"
-                    )
-    assert not problems, "deprecated TextField kwargs:\n" + "\n".join(problems)
-
-
-def test_the_outline_border_map_shape_is_warning_free():
-    """The replacement shape every TextField must use constructs without
-    a DeprecationWarning."""
+def test_the_search_field_border_shape_constructs_warning_free():
+    """The shape the search field uses constructs cleanly on the INSTALLED
+    flet — whichever version the owner pinned (pyproject pins the family
+    exactly; 0.85.3 today, where the per-state OutlineInputBorder CLASS
+    does not exist and the flat kwargs are the version's own API)."""
     import warnings
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
         field = ft.TextField(
-            border={
-                ft.ControlState.DEFAULT: ft.OutlineInputBorder(
-                    side=ft.BorderSide(width=1, color=ft.Colors.TRANSPARENT),
-                    border_radius=16,
-                ),
-                ft.ControlState.FOCUSED: ft.OutlineInputBorder(
-                    side=ft.BorderSide(width=1.5, color="#F43F5E"),
-                    border_radius=16,
-                ),
-            }
+            border=ft.InputBorder.OUTLINE,
+            border_radius=16,
+            border_width=1,
+            border_color=ft.Colors.TRANSPARENT,
+            focused_border_width=1.5,
+            focused_border_color="#F43F5E",
         )
-    assert isinstance(field.border, dict)
+    assert field.border == ft.InputBorder.OUTLINE
 
 
-def test_the_two_known_phantoms_stay_gone():
-    """Verify that the API shapes used by search and settings screens are valid.
-    In flet 1.0.4, OutlineInputBorder is now a real control class, while
-    Dropdown uses on_select rather than on_change."""
+def test_the_dropdown_callback_is_the_installed_ones():
+    """The Dropdown callback kwarg src uses must exist on the installed
+    flet — the rename (0.x ``on_change`` → ``on_select``) crashed the
+    settings screen once already (2026-10-17). Pin the CONTRACT src
+    relies on against the installed package, never a version number."""
     import inspect
 
-    assert "on_change" not in inspect.signature(ft.Dropdown.__init__).parameters
-    # and the shape that replaced them constructs
-    border = ft.OutlineInputBorder(
-        border_radius=16,
-        side=ft.BorderSide(width=1, color=ft.Colors.TRANSPARENT),
-    )
-    field = ft.TextField(
-        border=border,
-        focused_border_width=1.5,
-        focused_border_color="#F43F5E",
-    )
-    assert isinstance(field.border, ft.OutlineInputBorder)
-    dropdown = ft.Dropdown(
-        options=[ft.dropdown.Option("auto", "Automatic")], on_select=lambda e: None
-    )
-    assert dropdown.on_select is not None
+    from screens import settings_screen
+
+    params = inspect.signature(ft.Dropdown.__init__).parameters
+    assert "on_select" in params or "on_change" in params
+    # ...and src's own usage is written against one that exists.
+    source = inspect.getsource(settings_screen)
+    assert "on_select=_on_backend_change" in source
+    assert "on_select" in params, "src uses on_select; the installed flet must have it"
 
 
 def test_no_ft_icon_or_color_constant_is_a_phantom():

@@ -68,6 +68,9 @@ class ControllerMethods:
 
     # Long-running actions
     choose_quality: Callable[[int], Any] = lambda index: None
+    earn_kwik_qualities: Callable[[str, str], Any] = (
+        lambda anime_session, episode_session: None
+    )
     cancel_resolve: Callable[[], Any] = lambda: None
 
     # Favorites (whole anime)

@@ -127,28 +127,44 @@ def _home_header(state, page, controller) -> ft.Control:
         )
 
     blocked = getattr(state, "cf_blocked", False)
+    source = (getattr(state, "current_source_name", "") or "").strip().lower()
+
+    # Source-specific header actions: Airing schedule and Surprise me
+    # belong ONLY to AniKato (the site's own schedule and /random
+    # endpoints). When switching away from AniKato, they disappear — the
+    # doctrine's rule: once you switch source, everything that is not for
+    # that source disappears (owner, 2026-10-23). Search is the only
+    # universal action on Home.
+    actions: list[ft.Control] = []
+    if source == "anikato":
+        actions.extend(
+            [
+                _action(
+                    ft.Icons.CALENDAR_MONTH_ROUNDED,
+                    "Airing schedule",
+                    lambda e: controller.open_schedule(),
+                ),
+                _action(
+                    ft.Icons.SHUFFLE_ROUNDED,
+                    "Surprise me",
+                    lambda e: controller.open_random(),
+                ),
+            ]
+        )
+    actions.append(
+        _action(
+            ft.Icons.SEARCH_ROUNDED,
+            "Search",
+            lambda e: controller.open_search(),
+            colour=ft.Colors.OUTLINE if blocked else None,
+        )
+    )
+
     return app_header(
         state,
         page,
         controller,
-        extra_actions=[
-            _action(
-                ft.Icons.CALENDAR_MONTH_ROUNDED,
-                "Airing schedule",
-                lambda e: controller.open_schedule(),
-            ),
-            _action(
-                ft.Icons.SHUFFLE_ROUNDED,
-                "Surprise me",
-                lambda e: controller.open_random(),
-            ),
-            _action(
-                ft.Icons.SEARCH_ROUNDED,
-                "Search",
-                lambda e: controller.open_search(),
-                colour=ft.Colors.OUTLINE if blocked else None,
-            ),
-        ],
+        extra_actions=actions,
     )
 
 

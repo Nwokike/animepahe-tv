@@ -1,25 +1,30 @@
-"""AniKato's kwik FILES are earned at the user's deliberate act.
+"""Kwik FIRST, the source's own stream as the fallback — the owner's order.
 
-The owner (2026-10-20): "something is not done right because my anikato
-is not using kwik resolver."
+"I expected you to do the kwik way and fall back to I think the mega way
+that I think we are already doing." (owner, 2026-10-23)
 
-They were right, and the gap was precise: the provider appends its kwik
-FILE sources (AnimePahe's own download row, reached through the site's
-mapper) ONLY when a kwik.cx clearance is already stored — a provider
-never opens a verification window on its own — and NOTHING ever earned
-that clearance. ``AppController.solve_kwik_clearance`` existed but had no
-caller, so on every play and every download the kwik sources were
-silently absent and AniKato streamed the megaplay HLS only.
+The first attempt failed the owner twice, and both failures are pinned
+here so they cannot return:
 
-The wiring under test: ``_sources_with_kwik`` is the ONE source-fetch
-helper for play, external play and download, and it earns the clearance
-at exactly those deliberate user acts — once per session, so a cancelled
-solve never nags on every episode — then re-fetches so the kwik files
-actually appear in the quality dialog. The ability check is the
-provider's own (``kwik_file_sources``), never a hardcoded name.
+1. The verification window was aimed at ``kwik.cx/``'s HOMEPAGE — a plain
+   200 with NO challenge, so no clearance could ever be earned there. The
+   owner sat on a homepage with nothing to solve. The window must open at
+   the ACTUAL ``/f/`` FILE page, the one route Cloudflare walls (live
+   2026-10-23: Naruto episodes 1-3 all answer 403 ``cf-mitigated:
+   challenge`` there) and the only page where the clearance is issued.
+2. There was no kwik-first ordering: the window popped, failed, and the
+   sources came back exactly as before. Now a successful solve PREPENDS
+   the per-quality kwik sources (the dialog sorts them ahead of the HLS
+   master by resolution); any failure returns the stream path untouched —
+   the mega fallback.
+
+The live facts the wiring rests on (2026-10-23): the mapper resolves
+per-quality shortlinks for every episode; the hop chain
+mapper → pahe.nekostream → testpahe → kwik.cx/f/ is unchallenged up to
+the final page; the /f/ page is challenged. So the provider can always
+reach the page the window must open at, without any clearance.
 """
 
-import asyncio
 import os
 import sys
 
@@ -35,9 +40,9 @@ def _src(url: str, resolution: int = 0, audio: str = "jpn") -> Source:
     return Source(url=url, resolution=resolution, audio=audio, fansub="AniKato")
 
 
-def _kwik_src(url: str, resolution: int) -> Source:
+def _kwik_src(resolution: int) -> Source:
     return Source(
-        url=url,
+        url=f"https://kwik.media/{resolution}.mp4",
         resolution=resolution,
         audio="jpn",
         fansub="AnimePahe",
@@ -46,11 +51,9 @@ def _kwik_src(url: str, resolution: int) -> Source:
 
 
 class _FakeRouter:
-    """Answers sources() with a scripted list and counts the calls."""
-
-    def __init__(self, provider, pages):
+    def __init__(self, provider, sources):
         self._provider = provider
-        self._pages = list(pages)
+        self._sources = sources
         self.calls = 0
 
     def get(self, _name):
@@ -58,152 +61,133 @@ class _FakeRouter:
 
     async def sources(self, _anime, _episode):
         self.calls += 1
-        return list(self._pages[min(self.calls, len(self._pages)) - 1])
-
-
-class _ProviderWithKwik:
-    """AniKato's shape: it OWNS the kwik-file ability."""
-
-    name = "anikato"
-
-    async def kwik_file_sources(self, _a, _e):
-        return []
+        return list(self._sources)
 
 
 class _ProviderWithoutKwik:
     name = "kayoanime"
 
 
-class _Store:
-    def __init__(self, clearance):
-        self._clearance = clearance
-        self.reads = 0
+class _ProviderWithKwik:
+    """AniKato's shape: the kwik-file ability, driven through a scriptable
+    chain so the test controls what the solve sees and what comes back."""
 
-    async def get_clearance(self, host):
-        self.reads += 1
-        assert host == "kwik.cx"
-        return self._clearance
+    name = "anikato"
+    capabilities = {"direct_download_url": False}
+
+    def __init__(self, f_url="https://kwik.cx/f/token123", kwik=None):
+        self._f_url = f_url
+        self._kwik = kwik or []
+        self.solve_calls: list[str] = []
+
+    async def ensure_kwik_sources(self, _anime, _episode, solve):
+        # The provider's real chain reaches the /f/ URL and hands it to
+        # the solve callback; a True return means the clearance landed.
+        if await solve(self._f_url):
+            self.solve_calls.append(self._f_url)
+            return list(self._kwik)
+        return []
+
+
+def _controller(router, solved: bool):
+    """The minimum AppController surface _sources_with_kwik and
+    earn_kwik_qualities touch, with the REAL methods bound."""
+    solves: list[str] = []
+
+    class _C:
+        _kwik_solve_tried = False
+        _play_gen = 0
+        _play_sources = []
+        page = object()
+
+        _sources_with_kwik = app_main.AppController._sources_with_kwik
+        earn_kwik_qualities = app_main.AppController.earn_kwik_qualities
+
+        def _begin_resolve(self, stage):
+            self._play_gen += 1
+            return self._play_gen
+
+        def _resolve_stage(self, gen, stage):
+            pass
+
+        def _end_resolve(self):
+            pass
+
+        async def _solve_kwik_file(self, f_url):
+            solves.append(f_url)
+            return solved
+
+    controller = _C()
+    controller.router = router
+    controller._owner_of = lambda _session: router._provider.name
+    return controller, solves
 
 
 @pytest.mark.asyncio
-async def test_no_kwik_ability_fetches_sources_once_and_never_solves(monkeypatch):
+async def test_no_kwik_ability_fetches_sources_once_and_never_solves():
     """A provider without the kwik-file ability (kayoanime, animeout) is
-    served in one fetch — no verification window, no second fetch."""
+    served in one fetch — no window, no second fetch."""
     provider = _ProviderWithoutKwik()
-    router = _FakeRouter(provider, [[_src("https://stream/master.m3u8")]])
-    store = _Store(None)
-
-    import services.store as store_mod
-
-    monkeypatch.setattr(store_mod, "get_store", lambda: store)
-    controller = app_main.AppController.__new__(app_main.AppController)
-    controller.router = router
-    controller._owner_of = lambda _s: provider.name
-    controller._kwik_solve_tried = False
-    controller.page = None
-    solves = []
-    controller.solve_kwik_clearance = lambda: solves.append(1) or asyncio.sleep(0, result=False)
+    router = _FakeRouter(provider, [_src("https://stream/master.m3u8")])
+    controller, solves = _controller(router, solved=True)
 
     sources = await controller._sources_with_kwik("kayoanime:x", "x|1")
 
     assert len(sources) == 1
-    assert router.calls == 1, "no ability -> one fetch"
-    assert store.reads == 0, "the clearance is never even read"
+    assert router.calls == 1
     assert solves == []
 
 
 @pytest.mark.asyncio
-async def test_clearance_already_stored_fetches_once_and_never_solves(monkeypatch):
-    """With the clearance stored, the provider's own sources() already
-    appended the kwik files — one fetch, no window."""
-    provider = _ProviderWithKwik()
-    kwik_pages = [
-        [
-            _kwik_src("https://kwik.media/1080.mp4", 1080),
-            _src("https://stream/master.m3u8"),
-        ]
-    ]
-    router = _FakeRouter(provider, kwik_pages)
-    store = _Store({"cookies": "cf_clearance=abc", "user_agent": "ua"})
-
-    import services.store as store_mod
-
-    monkeypatch.setattr(store_mod, "get_store", lambda: store)
-    controller = app_main.AppController.__new__(app_main.AppController)
-    controller.router = router
-    controller._owner_of = lambda _s: provider.name
-    controller._kwik_solve_tried = False
-    controller.page = None
-    solves = []
-    controller.solve_kwik_clearance = lambda: solves.append(1) or asyncio.sleep(0, result=True)
+async def test_initial_playback_is_cloudflare_free_megaplay_by_default():
+    """The owner's order (2026-10-23): Cloudflare-free experience first.
+    Initial play NEVER opens a verification window — megaplay streams
+    answer with no challenge, so that is what plays by default."""
+    provider = _ProviderWithKwik(f_url="https://kwik.cx/f/bOetfymashCV")
+    router = _FakeRouter(provider, [_src("https://stream/master.m3u8")])
+    controller, solves = _controller(router, solved=True)
 
     sources = await controller._sources_with_kwik("anikato:x", "x|1")
 
-    assert [s.resolution for s in sources] == [1080, 0]
-    assert router.calls == 1
-    assert store.reads == 1
-    assert solves == []
+    assert len(sources) == 1
+    assert sources[0].fansub == "AniKato"
+    assert solves == [], "initial playback must never open a verification window"
 
 
 @pytest.mark.asyncio
-async def test_missing_clearance_is_earned_then_sources_are_refetched(monkeypatch):
-    """THE FIX: no clearance + a successful solve -> the sources are
-    fetched AGAIN, and this time they carry the kwik files."""
-    provider = _ProviderWithKwik()
+async def test_earn_kwik_qualities_opens_at_challenged_f_page():
+    """The 'More qualities' button in the quality dialog: opens the solve
+    at the REAL challenged /f/ page, not the homepage."""
+    provider = _ProviderWithKwik(f_url="https://kwik.cx/f/bOetfymashCV", kwik=[_kwik_src(1080)])
+    router = _FakeRouter(provider, [_src("https://stream/master.m3u8")])
+    controller, solves = _controller(router, solved=True)
+    controller._play_sources = [_src("https://stream/master.m3u8")]
+
+    success = await controller.earn_kwik_qualities("anikato:x", "x|1")
+
+    assert success is True
+    assert solves == ["https://kwik.cx/f/bOetfymashCV"], (
+        "the window must open at the challenged FILE page, never the homepage"
+    )
+
+
+@pytest.mark.asyncio
+async def test_earn_kwik_qualities_prepends_kwik_sources():
+    """A successful solve prepends the per-quality kwik sources ahead
+    of the stream sources."""
+    provider = _ProviderWithKwik(kwik=[_kwik_src(1080), _kwik_src(800)])
     router = _FakeRouter(
         provider,
-        [
-            [_src("https://stream/master.m3u8")],  # before the clearance
-            [
-                _kwik_src("https://kwik.media/1080.mp4", 1080),
-                _src("https://stream/master.m3u8"),
-            ],  # after
-        ],
+        [_src("https://stream/master.m3u8")],
     )
-    store = _Store(None)
+    controller, solves = _controller(router, solved=True)
+    controller._play_sources = [_src("https://stream/master.m3u8")]
 
-    import services.store as store_mod
+    await controller.earn_kwik_qualities("anikato:x", "x|1")
 
-    monkeypatch.setattr(store_mod, "get_store", lambda: store)
-    controller = app_main.AppController.__new__(app_main.AppController)
-    controller.router = router
-    controller._owner_of = lambda _s: provider.name
-    controller._kwik_solve_tried = False
-    controller.page = None
-    solves = []
-    controller.solve_kwik_clearance = lambda: solves.append(1) or asyncio.sleep(0, result=True)
+    from state.app_state import state
 
-    sources = await controller._sources_with_kwik("anikato:x", "x|1")
+    labels = [c["label"] for c in state.quality_choices or []]
+    assert any("1080p" in l for l in labels)
+    assert any("800p" in l for l in labels)
 
-    assert solves == [1], "the window opened exactly once"
-    assert router.calls == 2, "the refetch carries the kwik files"
-    assert any(s.fansub == "AnimePahe" for s in sources), (
-        "the kwik FILE sources must reach the quality dialog"
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_failed_or_cancelled_solve_nags_never_again(monkeypatch):
-    """One failed solve per session: the second play must not open the
-    window again — a user who cancels the challenge is not asked on
-    every episode."""
-    provider = _ProviderWithKwik()
-    router = _FakeRouter(provider, [[_src("https://stream/master.m3u8")]])
-    store = _Store(None)
-
-    import services.store as store_mod
-
-    monkeypatch.setattr(store_mod, "get_store", lambda: store)
-    controller = app_main.AppController.__new__(app_main.AppController)
-    controller.router = router
-    controller._owner_of = lambda _s: provider.name
-    controller._kwik_solve_tried = False
-    controller.page = None
-    solves = []
-    controller.solve_kwik_clearance = lambda: solves.append(1) or asyncio.sleep(0, result=False)
-
-    await controller._sources_with_kwik("anikato:x", "x|1")
-    await controller._sources_with_kwik("anikato:x", "x|2")
-
-    assert solves == [1], "the failed solve is never retried this session"
-    assert router.calls == 2

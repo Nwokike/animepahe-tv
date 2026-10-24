@@ -540,7 +540,7 @@ def test_the_kayoanime_category_filter_accepts_a_bare_string():
 def test_the_header_is_one_bar_and_the_narrow_cluster_pans_like_the_filter_bar():
     """The header NEVER stacks into two lines, and on a small screen its
     action cluster pans sideways EXACTLY the way Discover's filter bar
-    does — with a chevron that shows (and drives) the pan.
+    does — no arrow, no dead space between the icons.
 
     The mechanism, which three attempts missed (owner, 2026-10-20: "I am
     still not able to scroll header horizontally... learn from the filter
@@ -551,7 +551,15 @@ def test_the_header_is_one_bar_and_the_narrow_cluster_pans_like_the_filter_bar()
     identical on it. Discover's filter bar works because its scrollable
     Row sits inside a BOUNDED box. So the narrow header's cluster must be
     that same shape: a bounded viewport (``Container(expand=True)``)
-    holding the scrollable Row, plus a trailing chevron that pans it.
+    holding the scrollable Row. Nothing else.
+
+    Two things the owner explicitly rejected here, and this test pins
+    their absence (2026-10-23): the chevron indicator — "the arrow is
+    supposed to only show when there is more things to show... That's why
+    I told you not to do it", because a correct overflow-aware one is the
+    complexity the header must not carry — and the gaps between the
+    icons ("remove those distances between them"): ``spacing=0``, the
+    controls' own touch targets supply the separation.
 
     Wide keeps the house's expanding spacer and the right-hugging
     cluster; nothing overflows there, so no viewport is needed. A stacked
@@ -584,6 +592,14 @@ def test_the_header_is_one_bar_and_the_narrow_cluster_pans_like_the_filter_bar()
     def _root(control):
         return getattr(control, "content", None)
 
+    def _walk(control):
+        yield control
+        for child in getattr(control, "controls", None) or []:
+            yield from _walk(child)
+        content = getattr(control, "content", None)
+        if content is not None and not isinstance(content, list):
+            yield from _walk(content)
+
     # --- both widths: ONE horizontal Row, never a stack ---
     for label, header in (("narrow", narrow), ("wide", wide)):
         root = _root(header)
@@ -597,45 +613,25 @@ def test_the_header_is_one_bar_and_the_narrow_cluster_pans_like_the_filter_bar()
 
     # --- narrow: the filter bar's shape ---
     #
-    # The cluster is an EXPANDED Row (it takes the width left over from
-    # the title) whose first child is a bounded Container wrapping the
-    # scrollable Row — a scrollable Row directly inside the cluster Row
-    # would be unbounded again and the bug would be back.
+    # The cluster IS the bounded viewport: an expanded Container wrapping
+    # the scrollable Row — a scrollable Row directly inside the outer
+    # header Row would be unbounded again and the bug would be back.
     narrow_root = _root(narrow)
     narrow_clusters = [
         c
         for c in narrow_root.controls
-        if isinstance(c, ft.Row) and c.expand
-    ]
-    assert narrow_clusters, (
-        "the narrow cluster must be an expanded Row — it IS the scroll "
-        "viewport, so a bare spacer beside it would leave the scrollable "
-        "Row unbounded (the exact bug that made the header unscrollable)"
-    )
-    cluster = narrow_clusters[0]
-    viewports = [
-        c.content
-        for c in cluster.controls
         if isinstance(c, ft.Container)
         and c.expand
         and isinstance(c.content, ft.Row)
         and getattr(c.content, "scroll", None) == ft.ScrollMode.AUTO
     ]
-    assert viewports, (
-        "the narrow cluster must hold the scrollable Row inside a bounded "
-        "Container — the Discover filter bar's exact shape"
+    assert narrow_clusters, (
+        "the narrow cluster must be an expanded Container holding the "
+        "scrollable Row — the Discover filter bar's exact shape; a "
+        "scrollable Row beside a spacer is unbounded and never scrolls"
     )
-    # ...and the chevron that shows (and drives) the pan, OUTSIDE the
-    # scrollable so it never scrolls away with the content.
-    pan_buttons = [
-        c
-        for c in cluster.controls
-        if isinstance(c, ft.IconButton)
-        and c.icon == ft.Icons.CHEVRON_RIGHT_ROUNDED
-    ]
-    assert pan_buttons, (
-        "the owner asked for an arrow that indicates the bar can be "
-        "scrolled — it must sit beside the viewport, not inside it"
+    assert narrow_clusters[0].content.spacing == 0, (
+        "the owner ordered the dead space between the header icons gone"
     )
 
     # --- wide: the house's original shape ---
@@ -653,6 +649,23 @@ def test_the_header_is_one_bar_and_the_narrow_cluster_pans_like_the_filter_bar()
         if isinstance(c, ft.Row) and getattr(c, "scroll", None) == ft.ScrollMode.AUTO
     ]
     assert wide_clusters, "the wide action cluster scrolls horizontally"
+    assert wide_clusters[0].spacing == 0, "no dead space between the icons"
+
+    # --- the arrow stays out, at EVERY width ---
+    chevrons = [
+        c
+        for c in _walk(narrow)
+        if getattr(c, "icon", None) == ft.Icons.CHEVRON_RIGHT_ROUNDED
+    ] + [
+        c
+        for c in _walk(wide)
+        if getattr(c, "icon", None) == ft.Icons.CHEVRON_RIGHT_ROUNDED
+    ]
+    assert chevrons == [], (
+        "the owner removed the pan chevron — it showed even when nothing "
+        "overflowed; an overflow-aware one is complexity the header must "
+        "not carry again"
+    )
 
 
 def test_the_quality_rows_are_flat():

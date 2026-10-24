@@ -207,3 +207,35 @@ def test_the_icon_names_the_mode_the_tap_lands_on():
     ):
         state.theme_mode = mode
         assert theme_icon_for(_Page(), state) == expected
+
+
+def test_home_header_source_specific_actions_disappear_on_other_sources():
+    """AniKato owns schedule and surprise-me. On any other source, they
+    must disappear from the header (the owner's rule: once you switch
+    source, everything that is not for that source disappears)."""
+    from screens.home_screen import _home_header
+
+    state = _State()
+    controller = _Controller()
+    page = _Page()
+
+    # AniKato: schedule, surprise-me, search all present
+    state.current_source_name = "anikato"
+    header_anikato = _home_header(state, page, controller)
+    tooltips_anikato = [
+        getattr(n, "tooltip", "") for n in _walk(header_anikato) if getattr(n, "tooltip", None)
+    ]
+    assert "Airing schedule" in tooltips_anikato
+    assert "Surprise me" in tooltips_anikato
+    assert "Search" in tooltips_anikato
+
+    # KayoAnime, AnimeOut, AnimePahe: schedule and surprise-me MUST NOT appear
+    for non_anikato in ("kayoanime", "animeout", "animepahe"):
+        state.current_source_name = non_anikato
+        hdr = _home_header(state, page, controller)
+        tooltips = [
+            getattr(n, "tooltip", "") for n in _walk(hdr) if getattr(n, "tooltip", None)
+        ]
+        assert "Airing schedule" not in tooltips, f"schedule leaked into {non_anikato}"
+        assert "Surprise me" not in tooltips, f"surprise-me leaked into {non_anikato}"
+        assert "Search" in tooltips

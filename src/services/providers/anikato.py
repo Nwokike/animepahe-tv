@@ -890,6 +890,65 @@ class AniKatoProvider:
         except (primp.PrimpError, OSError, ValueError, KeyError):
             return False
 
+    async def ensure_kwik_sources(
+        self, anime_session: str, episode_session: str, solve
+    ) -> list[Source]:
+        """The kwik FILE sources for this episode, EARNING the clearance
+        when it is missing — kwik first, the stream path as the fallback.
+
+        The chain up to the challenged page is unchallenged itself
+        (mapper → pahe.nekostream shortlink → testpahe 302 → kwik.cx/f/,
+        live 2026-10-23), so this method can always reach the ONE page
+        Cloudflare walls. It then hands that URL to ``solve`` — the
+        controller's verification-window callback, the user's deliberate
+        act; a provider never opens a window on its own. A clearance
+        earned on any /f/ URL is a kwik.cx-host clearance and serves
+        every later file page, so one solve per host is all the session
+        ever needs.
+
+        Returns [] when the mapper has nothing, the hops fail, the user
+        cancels, or the solve does not earn a clearance — the caller
+        falls back to the stream path untouched.
+        """
+        from services.kwik_files import KwikFileResolver
+        from services.store import get_store
+
+        stored = await get_store().get_clearance("kwik.cx")
+        if stored:
+            return await self.kwik_file_sources(anime_session, episode_session)
+
+        _, slug = split_session(anime_session)
+        _, _, num_s = episode_session.rpartition("|")
+        if not slug or not num_s.isdigit() or not callable(solve):
+            return []
+        resolver = KwikFileResolver()
+        try:
+            watch = await self._watch_page(slug)
+            entries = await self._episode_entries(watch["anime_id"])
+            mal_id = await self._episode_mal_id(watch["anime_id"])
+            if not mal_id:
+                return []
+            episode = int(num_s)
+            timestamp = next(
+                (ts for n, _ids, _s, _d, ts in entries if n == episode), 0
+            )
+            if not timestamp:
+                return []
+            files = await resolver.episode_files(mal_id, episode, timestamp)
+            if not files:
+                return []
+            # The FIRST shortlink's /f/ URL is the page the verification
+            # window must open: it is where Cloudflare actually presents
+            # its challenge and issues the kwik.cx clearance.
+            f_url = await resolver.kwik_file_url(files[0].url)
+            if not f_url or "/f/" not in f_url:
+                return []
+            if not await solve(f_url):
+                return []
+            return await self.kwik_file_sources(anime_session, episode_session)
+        finally:
+            await resolver.close()
+
     async def kwik_file_sources(
         self, anime_session: str, episode_session: str
     ) -> list[Source]:

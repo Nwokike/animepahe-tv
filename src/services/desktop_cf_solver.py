@@ -231,11 +231,14 @@ def _hard_blocked(window) -> bool:
 
 
 def check_cookies(window):
-    # The backend must be a real Chromium: on MSHTML (or with no runtime
-    # installed) get_cookies() is not implemented and the old code sat the
-    # full two minutes for it (dep-pywebview.md, §C).
+    # The backend must be a real Chromium. WebView2 (edgechromium) is the
+    # Windows default; CEF the opt-in; qtwebengine is pywebview's Qt
+    # backend — the owner's Linux lands there (PyQt6 is in the dev group)
+    # and its cookie store DOES surface HttpOnly cookies through
+    # get_cookies (cookieAdded → SimpleCookie, dep-pyqt6-stack.md §2.3),
+    # so rejecting it made every solve die in one second on that machine.
     renderer = getattr(webview, "renderer", None)
-    if renderer not in ("edgechromium", "cef"):
+    if renderer not in ("edgechromium", "cef", "qtwebengine"):
         print(f"[DEBUG] Unsupported renderer: {renderer!r}", file=sys.stderr)
         with contextlib.suppress(Exception):
             window.destroy()

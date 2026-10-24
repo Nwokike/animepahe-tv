@@ -99,6 +99,10 @@ def _source_choices(sources, *, direct_download: bool = False) -> list[dict]:
                     (getattr(src, "download_url", "") or "") if direct_download else ""
                 ),
                 "direct": direct_download and bool(getattr(src, "download_url", "")),
+                # The mapper's kwik MP4s — the "More qualities" button
+                # hides once these rows are in the list.
+                "kwik": "pahe.nekostream.site"
+                in str(getattr(src, "download_url", "") or ""),
             }
         )
     return choices
@@ -188,6 +192,10 @@ class AppController:
         self._episodes_gen = 0
         self._play_lock = asyncio.Lock()
         self._play_gen = 0
+        # The stream sources behind the OPEN quality dialog — the
+        # "More qualities" button merges the kwik MP4s into this list
+        # without refetching the stream (see earn_kwik_qualities).
+        self._play_sources: list = []
         # How many user-driven loads are currently allowed to open the
         # verification window (see _user_action). Zero means background
         # work only — a fetch may not pop a Cloudflare window.
@@ -342,6 +350,13 @@ class AppController:
                 self._open_from_notification(session)
 
         async def _setup():
+            if (
+                not getattr(self.page, "web", False)
+                and hasattr(self.page, "platform")
+                and not self.page.platform.is_mobile()
+            ):
+                logger.info("notifications skipped on desktop: mobile-only service")
+                return
             notifications.on_tap(_on_tap)
             if not await notifications.request_permissions():
                 logger.info("notifications unavailable on this platform")
@@ -604,17 +619,22 @@ class AppController:
                             state.cf_blocked = True
                         state.latest_version += 1
 
-    async def solve_kwik_clearance(self) -> bool:
-        """Earn a Cloudflare clearance for kwik.cx — the ONE kwik route
-        that is guarded: the FILE page (``/f/``). The kwik STREAM route
-        (``/e/``) is not challenged, and that is what AnimePahe streams
-        through; AniKato's own download row is AnimePahe's FILES, so
-        AniKato's kwik files need this clearance.
+    async def _solve_kwik_file(self, f_url: str) -> bool:
+        """Earn a kwik.cx clearance at the REAL challenged page.
+
+        The kwik FILE page (``/f/``) is the one kwik route Cloudflare
+        walls (live 2026-10-23: every AniKato shortlink lands on a /f/
+        URL that answers 403 ``cf-mitigated: challenge``). The window
+        MUST open THERE: the landing page kwik.cx/ is a plain 200 with
+        no challenge, so aiming a solver at it — the first attempt's
+        bug — can never produce a clearance; the owner sat on a homepage
+        with nothing to solve. A clearance earned on ANY /f/ URL is a
+        kwik.cx-host clearance and serves every later file page.
 
         The clearance is stored PER HOST (the store keeps one per walled
         host), so it never interferes with the animepahe one. The
-        verification window is the user's explicit act — the Verify
-        button — exactly like the animepahe solve.
+        verification window is the user's explicit act — exactly like
+        the animepahe solve.
         """
         from services.store import get_store
         from services.webview_solver import WebViewSolver
@@ -623,9 +643,7 @@ class AppController:
         if page is None:
             return False
         try:
-            cookies, ua = await WebViewSolver.solve_challenge(
-                page, "https://kwik.cx/", None
-            )
+            cookies, ua = await WebViewSolver.solve_challenge(page, f_url, None)
         except Exception as ex:
             logger.info("kwik clearance solve failed: %s", ex)
             return False
@@ -636,23 +654,17 @@ class AppController:
         return True
 
     async def _sources_with_kwik(self, anime_session: str, episode_session: str):
-        """Sources for one episode, with AniKato's kwik FILES earned when
-        they are missing.
+        """Sources for one episode — a CLOUDFLARE-FREE experience.
 
-        AniKato's own download row IS AnimePahe's (the site's mapper hands
-        out pahe.win/kwik shortlinks — docs/testing-findings.md §6), and
-        the kwik FILE page is the ONE kwik route Cloudflare guards. The
-        provider therefore appends those files only when a kwik.cx
-        clearance is already stored — a provider never opens a
-        verification window on its own — which is why AniKato "was not
-        using the kwik resolver": nothing ever earned the clearance, so
-        the kwik sources were silently absent on every play and download.
-
-        Play and download ARE the user's deliberate acts, so this is where
-        the window may open — once per session (``_kwik_solve_tried``): a
-        cancelled or failed solve must not nag on every episode. The
-        ability check is the provider's own (``kwik_file_sources``), never
-        a hardcoded name.
+        The owner's order (2026-10-23): "we first give them a Cloudflare
+        free experience." Play NEVER opens a verification window here:
+        the source's own stream (megaplay for AniKato) answers with no
+        challenge, so that is what plays by default. AniKato's kwik FILE
+        sources — the per-quality MP4s — join ONLY when a kwik.cx
+        clearance is already stored; earning one is the quality dialog's
+        explicit "More qualities" button (``earn_kwik_qualities``), never
+        this path. The ability check is the provider's own
+        (``kwik_file_sources``), never a hardcoded name.
         """
         sources = await self.router.sources(anime_session, episode_session)
         provider = self.router.get(self._owner_of(anime_session))
@@ -660,18 +672,63 @@ class AppController:
             return sources
         from services.store import get_store
 
-        if await get_store().get_clearance("kwik.cx"):
-            # The clearance is stored, so the fetch above already carries
-            # whatever kwik files the mapper had for this episode.
+        if not await get_store().get_clearance("kwik.cx"):
             return sources
-        if getattr(self, "_kwik_solve_tried", False):
+        try:
+            kwik = await provider.kwik_file_sources(anime_session, episode_session)
+        except Exception as ex:
+            logger.info("kwik files failed: %s", ex)
             return sources
-        self._kwik_solve_tried = True
-        logger.info("kwik files: no kwik.cx clearance — opening verification")
-        if not await self.solve_kwik_clearance():
-            logger.info("kwik files: no clearance earned — streams only")
+        if not kwik:
             return sources
-        return await self.router.sources(anime_session, episode_session)
+        logger.info("kwik files: %d direct renditions ahead of the stream", len(kwik))
+        return kwik + sources
+
+    async def earn_kwik_qualities(
+        self, anime_session: str, episode_session: str
+    ) -> bool:
+        """The quality dialog's "More qualities" button: earn the kwik.cx
+        clearance NOW, at the user's explicit press.
+
+        Goes back to the loading spinner overlay ("Checking Cloudflare…",
+        "Loading qualities…") exactly like animepahe does when resolving
+        an episode, opens the Cloudflare window at the real /f/ page,
+        merges the kwik MP4s into the choices, and returns to the quality
+        dialog with all the options displayed (owner, 2026-10-23).
+        """
+        provider = self.router.get(self._owner_of(anime_session))
+        if provider is None or not hasattr(provider, "ensure_kwik_sources"):
+            return False
+        state.quality_dialog_open = False
+        gen = self._begin_resolve("Checking Cloudflare…")
+        try:
+            kwik = await provider.ensure_kwik_sources(
+                anime_session, episode_session, solve=self._solve_kwik_file
+            )
+            if gen != self._play_gen:
+                return False
+            if kwik:
+                self._resolve_stage(gen, "Loading qualities…")
+                play_provider = self.router.get(self._owner_of(anime_session))
+                merged = kwik + list(self._play_sources or [])
+                state.quality_choices = _source_choices(
+                    merged,
+                    direct_download=bool(
+                        play_provider and play_provider.capabilities.get("direct_download_url")
+                    ),
+                )
+                state.quality_version += 1
+                return True
+            return False
+        except Exception as ex:
+            logger.info("kwik earn failed: %s", ex)
+            return False
+        finally:
+            if gen == self._play_gen:
+                self._end_resolve()
+                state.quality_dialog_open = True
+                state.episodes_version += 1
+
 
     async def retry_cloudflare(self):
         """Clear the Cloudflare session + caches, then reload the home feed."""
@@ -1006,6 +1063,11 @@ class AppController:
         #    options instead (house-player parity), so they don't belong in
         #    this list.
         play_provider = self.router.get(self._owner_of(anime_session))
+        # The dialog's "More qualities" button merges kwik MP4s into THIS
+        # list when the user asks for them — keep the stream sources the
+        # list was built from (the Cloudflare-free experience, never
+        # refetched).
+        self._play_sources = sources
         choices = _source_choices(
             sources,
             direct_download=bool(
@@ -1039,6 +1101,11 @@ class AppController:
             # owner-derived one would unpack a direct m3u8 through kwik,
             # or hand the player a kwik page URL raw).
             "provider": serving_provider,
+            # Whether the serving provider OWNS the kwik-file ability —
+            # the dialog's "More qualities" press exists only then.
+            "has_kwik_files": bool(
+                play_provider and hasattr(play_provider, "ensure_kwik_sources")
+            ),
         }
         state.episodes_version += 1
 
@@ -2718,6 +2785,9 @@ async def main(page: ft.Page):
     methods.clear_cache = lambda: spawn(controller.clear_cache(), name="clear-cache")
     methods.choose_quality = lambda index: spawn(
         controller.choose_quality(index), name="choose-quality"
+    )
+    methods.earn_kwik_qualities = lambda a, e: spawn(
+        controller.earn_kwik_qualities(a, e), name="earn-kwik-qualities"
     )
     methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
     # Sync action: no spawn() — create_task(None) would raise.

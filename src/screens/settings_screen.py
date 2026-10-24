@@ -88,40 +88,64 @@ def _settings_card(controls: list) -> ft.Control:
     )
 
 
-def _setting_row(icon, title, subtitle, trailing=None) -> ft.Control:
-    return ft.Container(
-        content=ft.Row(
-            [
-                ft.Container(
-                    content=ft.Icon(icon, size=ICON_MD, color=ft.Colors.ON_SURFACE_VARIANT),
-                    width=36,
-                    height=36,
-                    border_radius=BORDER_RADIUS_MD,
-                    alignment=ft.Alignment.CENTER,
-                    bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
-                ),
-                ft.Column(
-                    [
-                        ft.Text(
-                            title,
-                            size=FONT_MD + 2,
-                            weight=ft.FontWeight.W_500,
-                            color=ft.Colors.ON_SURFACE,
-                        ),
-                        ft.Text(
-                            subtitle,
-                            size=FONT_SM,
-                            color=ft.Colors.with_opacity(0.6, ft.Colors.ON_SURFACE),
-                        ),
-                    ],
-                    spacing=2,
-                    expand=True,
-                ),
-                trailing or ft.Container(width=0, height=0),
+def _setting_row(icon, title, subtitle, trailing=None, stacked: bool = False) -> ft.Control:
+    icon_box = ft.Container(
+        content=ft.Icon(icon, size=ICON_MD, color=ft.Colors.ON_SURFACE_VARIANT),
+        width=36,
+        height=36,
+        border_radius=BORDER_RADIUS_MD,
+        alignment=ft.Alignment.CENTER,
+        bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+    )
+    text_col = ft.Column(
+        [
+            ft.Text(
+                title,
+                size=FONT_MD + 2,
+                weight=ft.FontWeight.W_500,
+                color=ft.Colors.ON_SURFACE,
+            ),
+            ft.Text(
+                subtitle,
+                size=FONT_SM,
+                color=ft.Colors.with_opacity(0.6, ft.Colors.ON_SURFACE),
+            ),
+        ],
+        spacing=2,
+        expand=True,
+    )
+    if stacked and trailing is not None:
+        # Sherlock's stacked-narrow layout: on small screens, the trailing
+        # control (Dropdown, button) moves below the description instead
+        # of being squeezed horizontally beside it.
+        stretches = isinstance(trailing, ft.Dropdown)
+        trailing_line = ft.Row(
+            controls=[
+                ft.Container(width=36 + SPACING_MD),  # indent to align with text
+                (ft.Row(controls=[trailing], expand=True) if stretches else trailing),
             ],
+            spacing=0,
+        )
+        content = ft.Column(
+            controls=[
+                ft.Row(
+                    controls=[icon_box, text_col],
+                    spacing=SPACING_MD,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                trailing_line,
+            ],
+            spacing=SPACING_XS,
+            tight=True,
+        )
+    else:
+        content = ft.Row(
+            controls=[icon_box, text_col, trailing or ft.Container(width=0, height=0)],
             spacing=SPACING_MD,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
+        )
+    return ft.Container(
+        content=content,
         padding=ft.Padding.symmetric(horizontal=SPACING_MD, vertical=SPACING_SM),
     )
 
@@ -141,6 +165,11 @@ def SettingsScreen() -> ft.Control:
         page = flet_context.page
     except Exception:
         page = None
+
+    # Sherlock's responsive stacked rows: on small screens (<600dp),
+    # trailing controls (dropdown, buttons) stack under descriptions
+    # instead of being squeezed horizontally beside them.
+    narrow = bool(page and getattr(page, "width", None) and page.width < 600)
 
     def _open_terminal(e):
         log_text = ft.Text(
@@ -243,6 +272,7 @@ def SettingsScreen() -> ft.Control:
             icon=ft.Icons.TERMINAL_ROUNDED,
             on_click=_open_terminal,
         ),
+        stacked=narrow,
     )
 
     # Playback target: the in-app player, or KTV Player via ktv:// (the
@@ -314,32 +344,53 @@ def SettingsScreen() -> ft.Control:
 
         spawn(controller_ref.save_theme_mode(mode), name="save-theme")
 
-    theme_picker = ft.Row(
-        [
-            ft.OutlinedButton(
-                content=ft.Row(
-                    [ft.Icon(icon, size=16), ft.Text(label, size=13)],
-                    spacing=6,
-                    tight=True,
-                ),
-                style=ft.ButtonStyle(
-                    bgcolor=ft.Colors.with_opacity(0.15, AppColors.PRIMARY)
-                    if _current_theme == token
-                    else ft.Colors.TRANSPARENT,
-                    side={
-                        ft.ControlState.DEFAULT: ft.BorderSide(
-                            1.5,
-                            AppColors.PRIMARY
-                            if _current_theme == token
-                            else ft.Colors.with_opacity(0.3, AppColors.PRIMARY),
-                        )
-                    },
-                ),
-                on_click=lambda e, tk=token: _pick_theme(tk, mode_for_token(tk)),
-            )
-            for token, label, icon in _THEME_OPTIONS
-        ],
-        spacing=8,
+    def _create_theme_card(token: str, label: str, icon: ft.IconData) -> ft.Container:
+        is_sel = _current_theme == token
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(
+                        icon,
+                        color=AppColors.PRIMARY if is_sel else ft.Colors.ON_SURFACE_VARIANT,
+                        size=ICON_MD - 4,
+                    ),
+                    ft.Text(
+                        label,
+                        size=FONT_SM,
+                        weight=ft.FontWeight.W_600 if is_sel else ft.FontWeight.NORMAL,
+                        color=AppColors.PRIMARY if is_sel else ft.Colors.ON_SURFACE,
+                    ),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+                spacing=6,
+            ),
+            padding=ft.Padding.symmetric(horizontal=8, vertical=10),
+            border_radius=BORDER_RADIUS_MD,
+            border=ft.Border.all(
+                1.5 if is_sel else 1,
+                AppColors.PRIMARY
+                if is_sel
+                else ft.Colors.with_opacity(0.12, ft.Colors.ON_SURFACE),
+            ),
+            bgcolor=(
+                ft.Colors.with_opacity(0.10, AppColors.PRIMARY)
+                if is_sel
+                else ft.Colors.TRANSPARENT
+            ),
+            expand=True,
+            ink=True,
+            on_click=lambda e, tk=token: _pick_theme(tk, mode_for_token(tk)),
+        )
+
+    theme_picker = ft.Container(
+        content=ft.Row(
+            controls=[
+                _create_theme_card(token, label, icon)
+                for token, label, icon in _THEME_OPTIONS
+            ],
+            spacing=SPACING_SM,
+        ),
+        padding=ft.Padding.symmetric(horizontal=SPACING_MD, vertical=SPACING_SM),
     )
 
     # ------------------------------------------------------------------
@@ -398,6 +449,7 @@ def SettingsScreen() -> ft.Control:
         "Content source",
         "The app tries them in this order at launch. What you choose is the app.",
         trailing=backend_dropdown,
+        stacked=narrow,
     )
 
     _STATE_COLORS = {
@@ -450,6 +502,7 @@ def SettingsScreen() -> ft.Control:
             content="Clear",
             on_click=lambda e: (controller.clear_cache(), controller.measure_cache()),
         ),
+        stacked=narrow,
     )
     test_button = ft.TextButton(
         content="Test all sources",

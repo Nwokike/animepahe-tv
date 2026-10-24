@@ -189,10 +189,19 @@ def AppShell() -> ft.Control:
     # The quality dialog also rebuilds when its resolving flag flips, so the
     # spinner/disabled state lands without remounting the whole shell.
     dialog_resolving, set_dialog_resolving = ft.use_state(False)
+    # The quality dialog's rows can change UNDERNEATH an open dialog: the
+    # "More qualities" button earns the kwik clearance and the MP4 rows
+    # join the list. The portal watches this version to repaint in place.
+    dialog_quality_version, set_dialog_quality_version = ft.use_state(0)
     if state.quality_dialog_open:
-        if portal_owner != "quality" or dialog_resolving != state.quality_resolving:
+        if (
+            portal_owner != "quality"
+            or dialog_resolving != state.quality_resolving
+            or dialog_quality_version != state.quality_version
+        ):
             set_portal_owner("quality")
             set_dialog_resolving(state.quality_resolving)
+            set_dialog_quality_version(state.quality_version)
             set_active_dialog(_build_quality_dialog(state, controller))
     elif state.download_choice_open:
         if portal_owner != "download":
@@ -862,6 +871,27 @@ def _build_quality_dialog(state, controller) -> ft.Control:
                 on_click=lambda e, i=i: controller.choose_quality(i),
             )
         )
+
+    # "More qualities" — the owner's Cloudflare-free experience (2026-10-23):
+    # the usual stream plays with NO verification window; the per-quality
+    # MP4s sit behind this one deliberate press, which is the only thing
+    # in playback that may ever open Cloudflare. Shown only when the
+    # serving provider owns the ability and the MP4 rows are not already
+    # in the list.
+    pending = state.pending_playback or {}
+    more = None
+    if pending.get("has_kwik_files") and not any(
+        c.get("kwik") for c in choices
+    ):
+        more = ft.Button(
+            content="More qualities — Cloudflare check",
+            style=_flat_row_style(),
+            disabled=resolving,
+            on_click=lambda e: controller.earn_kwik_qualities(
+                pending.get("anime_session", ""),
+                pending.get("episode_session", ""),
+            ),
+        )
     return ft.AlertDialog(
         modal=True,
         title=ft.Row(
@@ -890,6 +920,9 @@ def _build_quality_dialog(state, controller) -> ft.Control:
                     color=ft.Colors.ON_SURFACE_VARIANT,
                 ),
                 *buttons,
+                # The deliberate Cloudflare press — the ONLY one playback
+                # ever offers (the owner's Cloudflare-free experience).
+                *([more] if more is not None else []),
             ],
             tight=True,
             spacing=10,
