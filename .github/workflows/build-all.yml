@@ -86,6 +86,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Free disk
+        run: sudo rm -rf /usr/share/dotnet /opt/hostedtoolcache 2>/dev/null || true; df -h /
       - uses: astral-sh/setup-uv@v10.0.1
       - uses: actions/setup-python@v7
         with:
@@ -137,7 +139,7 @@ jobs:
           FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set +e
-          uv run flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
+          uv run --no-dev flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
           status=$?
           set -e
           if [ "$status" -eq 0 ]; then
@@ -151,7 +153,7 @@ jobs:
       # ── Phase 2: patch desugaring + notifications + KTV queries ───────────
       - name: Patch the generated Android project (notifications & KTV queries)
         run: |
-          uv run flet-notifications-patch --project-root build/flutter
+          uv run --no-dev flet-notifications-patch --project-root build/flutter
           manifest="build/flutter/android/app/src/main/AndroidManifest.xml"
           if [ -f "$manifest" ] && ! grep -q 'scheme="ktv"' "$manifest"; then
             sed -i '/<\/manifest>/i \    <queries>\n        <package android:name="ng.kiri.ktvplayer" \/>\n        <intent>\n            <action android:name="android.intent.action.VIEW" \/>\n            <data android:scheme="ktv" \/>\n        <\/intent>\n    <\/queries>' "$manifest"
