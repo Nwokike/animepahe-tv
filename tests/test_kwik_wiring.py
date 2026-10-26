@@ -23,6 +23,10 @@ per-quality shortlinks for every episode; the hop chain
 mapper → pahe.nekostream → testpahe → kwik.cx/f/ is unchallenged up to
 the final page; the /f/ page is challenged. So the provider can always
 reach the page the window must open at, without any clearance.
+
+Note: Anikato no longer uses kwik for downloads — variant expansion from
+the master playlist covers all qualities (1080p/720p/480p). Kwik is only
+used by AnimePahe for streaming (kwik /e/ → m3u8).
 """
 
 import os
@@ -69,10 +73,10 @@ class _ProviderWithoutKwik:
 
 
 class _ProviderWithKwik:
-    """AniKato's shape: the kwik-file ability, driven through a scriptable
+    """AnimePahe's shape: the kwik-file ability, driven through a scriptable
     chain so the test controls what the solve sees and what comes back."""
 
-    name = "anikato"
+    name = "animepahe"
     capabilities = {"direct_download_url": False}
 
     def __init__(self, f_url="https://kwik.cx/f/token123", kwik=None):
@@ -125,13 +129,13 @@ def _controller(router, solved: bool):
 
 @pytest.mark.asyncio
 async def test_no_kwik_ability_fetches_sources_once_and_never_solves():
-    """A provider without the kwik-file ability (kayoanime, animeout) is
+    """A provider without the kwik-file ability (anikato) is
     served in one fetch — no window, no second fetch."""
     provider = _ProviderWithoutKwik()
     router = _FakeRouter(provider, [_src("https://stream/master.m3u8")])
     controller, solves = _controller(router, solved=True)
 
-    sources = await controller._sources_with_kwik("kayoanime:x", "x|1")
+    sources = await controller._sources_with_kwik("anikato:x", "x|1")
 
     assert len(sources) == 1
     assert router.calls == 1
@@ -143,7 +147,7 @@ async def test_initial_playback_is_cloudflare_free_megaplay_by_default():
     """The owner's order (2026-10-23): Cloudflare-free experience first.
     Initial play NEVER opens a verification window — megaplay streams
     answer with no challenge, so that is what plays by default."""
-    provider = _ProviderWithKwik(f_url="https://kwik.cx/f/bOetfymashCV")
+    provider = _ProviderWithoutKwik()
     router = _FakeRouter(provider, [_src("https://stream/master.m3u8")])
     controller, solves = _controller(router, solved=True)
 
@@ -163,7 +167,7 @@ async def test_earn_kwik_qualities_opens_at_challenged_f_page():
     controller, solves = _controller(router, solved=True)
     controller._play_sources = [_src("https://stream/master.m3u8")]
 
-    success = await controller.earn_kwik_qualities("anikato:x", "x|1")
+    success = await controller.earn_kwik_qualities("animepahe:x", "x|1")
 
     assert success is True
     assert solves == ["https://kwik.cx/f/bOetfymashCV"], (
@@ -183,7 +187,7 @@ async def test_earn_kwik_qualities_prepends_kwik_sources():
     controller, solves = _controller(router, solved=True)
     controller._play_sources = [_src("https://stream/master.m3u8")]
 
-    await controller.earn_kwik_qualities("anikato:x", "x|1")
+    await controller.earn_kwik_qualities("animepahe:x", "x|1")
 
     from state.app_state import state
 

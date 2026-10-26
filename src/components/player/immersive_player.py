@@ -165,7 +165,6 @@ class ImmersivePlayer(ft.Stack):
         proxied: bool = False,
         subtitles: list | None = None,
         skip: dict | None = None,
-        variant_index: int | None = None,
     ):
         super().__init__(expand=True)
         self.resource = resource
@@ -194,8 +193,6 @@ class ImmersivePlayer(ft.Stack):
         # One Stream Settings sheet at a time (the chips re-spawn it).
         self._settings_open = False
         self.hls_proxy = None  # set by the shell mount; see _use_player_overlay
-        # Pre-selected variant index (from quality picker)
-        self._current_variant = variant_index
 
         # Skip-intro/outro chip and toast chip - created here so they exist
         # when _build_controls() is called (which happens during _build()).

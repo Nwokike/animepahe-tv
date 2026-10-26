@@ -193,8 +193,7 @@ class AppController:
         self._play_lock = asyncio.Lock()
         self._play_gen = 0
         # The stream sources behind the OPEN quality dialog — the
-        # "More qualities" button merges the kwik MP4s into this list
-        # without refetching the stream (see earn_kwik_qualities).
+        # dialog renders them directly (see _build_quality_dialog).
         self._play_sources: list = []
         # How many user-driven loads are currently allowed to open the
         # verification window (see _user_action). Zero means background
@@ -619,6 +618,19 @@ class AppController:
                             state.cf_blocked = True
                         state.latest_version += 1
 
+
+
+    async def _sources_with_kwik(self, anime_session: str, episode_session: str):
+        """Sources for one episode — a CLOUDFLARE-FREE experience.
+
+        The owner's order (2026-10-23): "we first give them a Cloudflare
+        free experience." Play NEVER opens a verification window here:
+        the source's own stream (megaplay for AniKato) answers with no
+        challenge, so that is what plays by default.
+        """
+        sources = await self.router.sources(anime_session, episode_session)
+        return sources
+
     async def _solve_kwik_file(self, f_url: str) -> bool:
         """Earn a kwik.cx clearance at the REAL challenged page.
 
@@ -652,37 +664,6 @@ class AppController:
         await get_store().save_clearance(cookies, ua, "kwik.cx")
         logger.info("kwik clearance solved and persisted")
         return True
-
-    async def _sources_with_kwik(self, anime_session: str, episode_session: str):
-        """Sources for one episode — a CLOUDFLARE-FREE experience.
-
-        The owner's order (2026-10-23): "we first give them a Cloudflare
-        free experience." Play NEVER opens a verification window here:
-        the source's own stream (megaplay for AniKato) answers with no
-        challenge, so that is what plays by default. AniKato's kwik FILE
-        sources — the per-quality MP4s — join ONLY when a kwik.cx
-        clearance is already stored; earning one is the quality dialog's
-        explicit "More qualities" button (``earn_kwik_qualities``), never
-        this path. The ability check is the provider's own
-        (``kwik_file_sources``), never a hardcoded name.
-        """
-        sources = await self.router.sources(anime_session, episode_session)
-        provider = self.router.get(self._owner_of(anime_session))
-        if provider is None or not hasattr(provider, "kwik_file_sources"):
-            return sources
-        from services.store import get_store
-
-        if not await get_store().get_clearance("kwik.cx"):
-            return sources
-        try:
-            kwik = await provider.kwik_file_sources(anime_session, episode_session)
-        except Exception as ex:
-            logger.info("kwik files failed: %s", ex)
-            return sources
-        if not kwik:
-            return sources
-        logger.info("kwik files: %d direct renditions ahead of the stream", len(kwik))
-        return kwik + sources
 
     async def earn_kwik_qualities(
         self, anime_session: str, episode_session: str
@@ -728,7 +709,6 @@ class AppController:
                 self._end_resolve()
                 state.quality_dialog_open = True
                 state.episodes_version += 1
-
 
     async def retry_cloudflare(self):
         """Clear the Cloudflare session + caches, then reload the home feed."""
@@ -1133,11 +1113,6 @@ class AppController:
             # owner-derived one would unpack a direct m3u8 through kwik,
             # or hand the player a kwik page URL raw).
             "provider": serving_provider,
-            # Whether the serving provider OWNS the kwik-file ability —
-            # the dialog's "More qualities" press exists only then.
-            "has_kwik_files": bool(
-                play_provider and hasattr(play_provider, "ensure_kwik_sources")
-            ),
         }
         state.episodes_version += 1
 
@@ -2851,10 +2826,10 @@ async def main(page: ft.Page):
     methods.choose_quality = lambda index: spawn(
         controller.choose_quality(index), name="choose-quality"
     )
+    methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
     methods.earn_kwik_qualities = lambda a, e: spawn(
         controller.earn_kwik_qualities(a, e), name="earn-kwik-qualities"
     )
-    methods.close_player = lambda: spawn(controller.close_player(), name="close-player")
     # Sync action: no spawn() — create_task(None) would raise.
     methods.cancel_resolve = lambda: controller.cancel_resolve()
     methods.toggle_follow = lambda row: spawn(controller.toggle_follow(row), name="toggle-follow")
