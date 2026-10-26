@@ -165,6 +165,7 @@ class ImmersivePlayer(ft.Stack):
         proxied: bool = False,
         subtitles: list | None = None,
         skip: dict | None = None,
+        variant_index: int | None = None,
     ):
         super().__init__(expand=True)
         self.resource = resource
@@ -193,6 +194,38 @@ class ImmersivePlayer(ft.Stack):
         # One Stream Settings sheet at a time (the chips re-spawn it).
         self._settings_open = False
         self.hls_proxy = None  # set by the shell mount; see _use_player_overlay
+        # Pre-selected variant index (from quality picker)
+        self._current_variant = variant_index
+
+        # Skip-intro/outro chip and toast chip - created here so they exist
+        # when _build_controls() is called (which happens during _build()).
+        # They live INSIDE video.controls (in the top_button_bar Stack with
+        # the title), like ktv-player, to avoid the "positioned absolutely
+        # inside Stack only" error.
+        self.skip_chip = GuardedContainer(
+            content=ft.Text(
+                "Skip Intro",
+                size=13,
+                weight=ft.FontWeight.W_700,
+                color=ft.Colors.WHITE,
+            ),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.BLACK),
+            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.WHITE)),
+            visible=False,
+            on_click=self._on_skip_chip,
+        )
+        # Fullscreen toast: native fullscreen swallows the snackbar, so
+        # confirmations (resume/speed/skip) also land here and dispatch
+        # through core.notify's registry.
+        self.toast_chip = ft.Container(
+            content=ft.Text("", size=13, weight=ft.FontWeight.W_600),
+            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.BLACK),
+            visible=False,
+        )
 
         self._is_closing = False
         self._is_final_error = False
@@ -296,49 +329,10 @@ class ImmersivePlayer(ft.Stack):
             on_complete=self._on_complete,
         )
 
-        # Skip-intro/outro chip: KTV-styled toast, hidden until the
-        # position enters a declared window.
-        #
-        # It lives DIRECTLY in this Stack (with right/bottom) — NOT in the
-        # Video control's own `controls` list, where absolute positioning
-        # is an error ("controls can be positioned absolutely with left,
-        # top, right, and bottom properties inside Stack control only and
-        # page.overlay" — the owner's live run, 2026-10-16). A Video's
-        # controls are laid out as its overlay, not a Stack.
-        self.skip_chip = GuardedContainer(
-            content=ft.Text(
-                "Skip Intro",
-                size=13,
-                weight=ft.FontWeight.W_700,
-                color=ft.Colors.WHITE,
-            ),
-            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-            border_radius=8,
-            bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.BLACK),
-            border=ft.Border.all(1, ft.Colors.with_opacity(0.4, ft.Colors.WHITE)),
-            right=24,
-            bottom=88,
-            visible=False,
-            on_click=self._on_skip_chip,
-        )
-        # Fullscreen toast: native fullscreen swallows the snackbar, so
-        # confirmations (resume/speed/skip) also land here and dispatch
-        # through core.notify's registry.
-        self.toast_chip = ft.Container(
-            content=ft.Text("", size=13, weight=ft.FontWeight.W_600),
-            padding=ft.Padding.symmetric(horizontal=14, vertical=8),
-            border_radius=8,
-            bgcolor=ft.Colors.with_opacity(0.75, ft.Colors.BLACK),
-            top=56,
-            left=24,
-            visible=False,
-        )
         self.controls = [
             ft.Container(expand=True, bgcolor=ft.Colors.BLACK),
             self.video,
             self.overlay,
-            self.skip_chip,
-            self.toast_chip,
         ]
 
     def _build_controls(self) -> fv.AdaptiveVideoControls:
@@ -455,13 +449,20 @@ class ImmersivePlayer(ft.Stack):
 
         # Shared across both control branches, so it must be guarded ONCE:
         # a Back press unmounts the control that was pressed.
+        # Include skip_chip and toast_chip in a Stack with the title (like ktv-player)
+        # so they're in a proper Stack context for absolute positioning.
+        title_text = ft.Text(self.title, size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        title_slot = ft.Stack(
+            controls=[title_text, self.skip_chip, self.toast_chip],
+            alignment=ft.Alignment.CENTER,
+        )
         top_bar = [
             GuardedIconButton(
                 icon=ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
                 on_click=lambda e: self._on_back(),
                 tooltip="Back",
             ),
-            ft.Text(self.title, size=14, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
+            title_slot,
         ]
 
         return fv.AdaptiveVideoControls(
@@ -1675,17 +1676,18 @@ class ImmersivePlayer(ft.Stack):
         if self.on_next is not None:
             self.on_next()
 
-    def _on_back(self, e=None):
-        from core.tasks import spawn
-
-        async def _close():
-            await self.handle_close()
-            if self.on_close:
+    async def _on_back(self, e=None):
+        """Handle back button press - route through on_close callback.
+        
+        Matches ktv-player pattern: await on_close callback if it returns a coroutine.
+        """
+        if self.on_close:
+            try:
                 result = self.on_close()
                 if asyncio.iscoroutine(result):
                     await result
-
-        spawn(_close(), name="player-close")
+            except Exception as ex:
+                logger.error("Error executing on_close callback: %s", ex)
 
     async def handle_close(self):
         if self._is_closing:

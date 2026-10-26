@@ -11,7 +11,6 @@ between content and navigation — an ad sandwiched against nav is the pattern
 both AdMob policy and TV focus design call out as wrong.
 """
 
-import asyncio
 import contextlib
 
 import flet as ft
@@ -633,10 +632,11 @@ def _build_player_error(state, controller, message: str) -> ft.Control:
 async def _player_back():
     # Back from the remote/keyboard: let the player save its position
     # (bounded, 3s) before the shell tears it down.
+    # Matches ktv-player: call player's _on_back which routes through on_close
     player = _active_player
     if player is not None:
         with contextlib.suppress(Exception):
-            await player.handle_close()
+            await player._on_back(None)
     await _async_close_player()
 
 
@@ -647,14 +647,8 @@ async def _async_close_player():
 
     from state.app_state import state
 
-    # Save + stop the native player FIRST: this runs for programmatic closes
-    # (Next/Previous, controller.close_player) as well as Back, and skipping
-    # it loses the resume position and lets audio bleed into the next episode.
-    player = _active_player
-    if player is not None:
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(player.handle_close(), timeout=3.0)
-
+    # The player's _on_back already called handle_close and on_close.
+    # Just unmount the overlay node the shell mounted imperatively.
     mount = _active_mount
     _active_mount = None
     _active_player = None

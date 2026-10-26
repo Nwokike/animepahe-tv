@@ -1075,7 +1075,39 @@ class AppController:
             ),
         )
 
-        if len(choices) <= 1:
+        # For master playlist sources (resolution=0), expand variants into
+        # separate quality choices so the user can pick 1080p/720p/480p etc.
+        # This is the "Other formats" feature — variants live inside the
+        # master playlist and are only discoverable by fetching it.
+        expanded_choices = []
+        for choice in choices:
+            src_url = choice["url"]
+            src_headers = choice.get("headers", {})
+            # Only expand master playlists (.m3u8 with resolution=0)
+            if ".m3u8" in src_url and self.hls_proxy is not None:
+                try:
+                    src_variants = await self.hls_proxy.fetch_variants(src_url, headers=src_headers)
+                except Exception as ex:
+                    logger.warning("variant fetch for %s failed: %s", src_url, ex)
+                    src_variants = []
+                if src_variants:
+                    # Create a choice for each variant
+                    for v in src_variants:
+                        v_label = v.get("label") or f"{v.get('height', '?')}p"
+                        expanded_choices.append({
+                            "label": f"{v_label} - {choice['label']}",
+                            "kind": "variant",
+                            "url": src_url,
+                            "headers": src_headers,
+                            "subtitles": choice.get("subtitles"),
+                            "skip": choice.get("skip"),
+                            "variant_index": v.get("index"),
+                            "parent_choice": choice,
+                        })
+                    continue
+            expanded_choices.append(choice)
+
+        if len(expanded_choices) <= 1:
             await self._open_player(
                 m3u8,
                 variants,
@@ -1086,7 +1118,7 @@ class AppController:
                 sources[0].skip,
             )
             return
-        state.quality_choices = choices
+        state.quality_choices = expanded_choices
         state.quality_dialog_open = True
         state.pending_playback = {
             "m3u8": m3u8,
@@ -1201,6 +1233,21 @@ class AppController:
                 source, pending["anime_session"], pending["episode_session"]
             )
             return
+        # Handle variant choices (expanded from master playlist)
+        if choice.get("kind") == "variant":
+            parent = choice.get("parent_choice", {})
+            variant_index = choice.get("variant_index")
+            await self._open_player(
+                parent.get("url") or choice["url"],
+                pending.get("variants") or [],
+                pending["anime_session"],
+                pending["episode_session"],
+                choice.get("headers"),
+                choice.get("subtitles"),
+                choice.get("skip"),
+                variant_index=variant_index,
+            )
+            return
         # Every entry is a site source (kwik url): re-resolve it, fetch its
         # own variants, and play. The dialog buttons spin while it happens
         # (see _build_quality_dialog).
@@ -1249,6 +1296,7 @@ class AppController:
         source_headers: dict | None = None,
         subtitles: list | None = None,
         skip: dict | None = None,
+        variant_index: int | None = None,
     ):
         """Open the in-app player on a resolved stream.
 
@@ -1335,6 +1383,7 @@ class AppController:
             "title": " - ".join(title_parts),
             "episode_session": episode_session,
             "anime_session": anime_session,
+            "variant_index": variant_index,
         }
         state.player_open = True
         state.episodes_version += 1
