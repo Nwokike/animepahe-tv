@@ -241,6 +241,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # The AAB build pulls the Android NDK side-by-side (several GB); the
+      # runner's preinstalled toolchains filled the disk and sdkmanager died
+      # with "No space left on device" mid-unzip (2026-11-03).
+      - name: Free disk
+        run: sudo rm -rf /opt/hostedtoolcache/* /usr/share/dotnet /usr/local/lib/android/sdk/ndk/26* /usr/local/lib/android/sdk/ndk/27* 2>/dev/null || true; df -h
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
