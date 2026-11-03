@@ -234,3 +234,59 @@ jobs:
           files: build/apk/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── 3. Android AAB (RuStore / Play) — proot-distro's side-by-side pattern ─
+  build-aab:
+    needs: [prepare-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: ${{ runner.os }}-uv-
+      - name: Cache Flutter SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter
+          key: flutter-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flutter-${{ runner.os }}-
+      - name: Cache flet templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.flet/cache
+          key: flet-tpl-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flet-tpl-${{ runner.os }}-
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 --decode > tv_keystore.jks
+      - name: Build AAB
+        env:
+          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: uv run --frozen flet build aab --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v
+      - name: Size report
+        if: always()
+        run: |
+          ls -l build/aab/*.aab
+          for a in build/aab/*.aab; do
+            echo "== $a ($(du -h "$a" | cut -f1))"
+          done
+      - name: Upload AAB to Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
+          files: build/aab/*.aab
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
