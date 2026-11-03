@@ -8,10 +8,10 @@ dependencies = [
     "flet-yandex-ads>=0.1.0",
         "primp>=1.3.1",
     "anyio>=4.14.1",
-    "flet>=1.1.0.dev4",
-    "flet-webview>=1.1.0.dev4",
-    "flet-notifications>=1.1.0.dev4",
-    "flet-video>=1.1.0.dev4",
+    "flet==1.1.0.dev4",
+    "flet-webview==1.1.0.dev4",
+    "flet-notifications==1.1.0.dev4",
+    "flet-video==1.1.0.dev4",
 ]
 
 [tool.flet]
@@ -34,6 +34,12 @@ dependencies = ["pyjnius"]
 # size while AAB stayed the same. proot-distro ships 30 MB with this exact
 # key; without it the 1.0.4 arm64 APK was 83 MB.
 legacy_packaging = true
+
+# Package visibility (Android 11+): the external-player deep link needs
+# the OS to admit KTV Player exists — native in flet 1.1.0, replacing the
+# old manifest sed patch.
+[tool.flet.android.queries]
+packages = ["ng.kiri.ktvplayer"]
 
 [tool.flet.android.permission]
 "android.permission.INTERNET" = true

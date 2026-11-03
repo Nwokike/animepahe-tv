@@ -977,9 +977,46 @@ class DownloadManager:
             # 1. Resolve to a media playlist — the CHOSEN variant for a
             # master (owner, 2026-11-02: the top variant meant a 360p pick
             # downloaded 1080p, ~10x the bytes).
-            media_url, media_text = await self._resolve_playlist(m3u8_url, headers, variant)
+            #
+            # The kwik CDN hotlink-protects the resolved master: by the time
+            # this fetch runs, the resolver's GET+HEAD and detect_kind have
+            # already hit the URL, and batch downloads 403 the tail (owner's
+            # phone run: every episode failed "could not load the media
+            # playlist" right after a 200 from the resolver). On failure,
+            # ask the controller for a FRESH resolve (a new kwik session →
+            # a new owocdn URL) and retry — a fresh URL always answers.
+            media_url = m3u8_url
+            media_text = ""
+            for attempt in range(3):
+                media_url, media_text = await self._resolve_playlist(
+                    m3u8_url, headers, variant
+                )
+                if media_text or self._is_closing:
+                    break
+                if cancel is not None and cancel.is_set():
+                    break
+                fresh_url = None
+                blocked = getattr(self, "on_fetch_blocked", None)
+                if blocked is not None:
+                    try:
+                        fresh_url = await blocked(episode_session, m3u8_url)
+                    except Exception as ex:
+                        logger.warning(
+                            "fresh-resolve callback failed: %s", ex
+                        )
+                if fresh_url:
+                    m3u8_url = fresh_url
+                    logger.info(
+                        "retrying playlist with a fresh resolve (attempt %d)",
+                        attempt + 1,
+                    )
+                else:
+                    await asyncio.sleep(2.0)
             if not media_text:
-                raise RuntimeError("could not load the media playlist")
+                raise RuntimeError(
+                    "could not load the media playlist (the CDN refused the "
+                    "resolved URL; a fresh resolve was attempted)"
+                )
 
             segs_dir = os.path.join(job_dir, "segs")
             os.makedirs(segs_dir, exist_ok=True)
@@ -1101,6 +1138,14 @@ class DownloadManager:
             raise
         except Exception as ex:
             logger.warning("download failed for %s: %s", episode_session, ex)
+            # The row must SAY failed — it used to stay "Queued" while the
+            # manifest quietly flipped to FAILED, so Retry never appeared
+            # and the job looked immortal (owner's phone run, 2026-11-03).
+            progress = self._progress.get(episode_session)
+            if progress is not None:
+                progress["state"] = STATE_FAILED
+                progress["error"] = str(ex)[:200]
+                self._emit_progress(episode_session)
             if self._store is not None:
                 await self._store.save_download_error(episode_session, str(ex))
         finally:
@@ -1273,6 +1318,12 @@ class DownloadManager:
             resp = await client.get(url, headers=headers, timeout=PLAYLIST_TIMEOUT)
             if resp.status_code == 200:
                 return resp.text
+            # The kwik CDN (owocdn) hotlink-protects the resolved master:
+            # the resolver's own GET+HEAD, detect_kind and this fetch all
+            # hit the same URL within seconds, and the batch pattern 403s
+            # the tail. Report it so the caller can re-resolve fresh.
+            logger.warning("GET %s -> %s", url, resp.status_code)
+            return None
         except Exception as ex:
             logger.warning("GET %s failed: %s", url, ex)
         return None

@@ -320,6 +320,11 @@ class AppController:
         # (owner, 2026-11-03: AnimeOut downloads died on the 403 with no
         # solver). The callback returns fresh file headers or None.
         self.downloads.on_cloudflare = self._solve_download_cloudflare
+        # The kwik CDN hotlink-protects the resolved master: the resolver's
+        # verify GET+HEAD plus the download's own fetch trip its rate
+        # protection on batch downloads. The callback re-resolves FRESH (a
+        # new kwik session → a new owocdn URL) so the download can retry.
+        self.downloads.on_fetch_blocked = self._reresolve_download_source
         self.downloads.on_finished = self._on_download_finished
 
         await self.cache.start_sweep(interval=300)
@@ -2487,6 +2492,32 @@ class AppController:
                 "Referer": referer,
             }
 
+    async def _reresolve_download_source(
+        self, episode_session: str, failed_url: str
+    ) -> str | None:
+        """The download engine's fetch of the resolved master was refused
+        (the kwik CDN rate-protects the URL after the resolver's own
+        GET+HEAD + detect_kind). Re-resolve FRESH — a new kwik session
+        yields a new owocdn URL that answers 200 (owner's phone run:
+        batch downloads all 403'd "could not load the media playlist")."""
+        try:
+            rows = await self.store.get_downloads()
+            row = rows.get(episode_session) or {}
+            anime_session = row.get("anime_session") or ""
+            if not anime_session:
+                return None
+            logger.info(
+                "download master refused; re-resolving fresh for %s", episode_session
+            )
+            sources = await self._sources_with_kwik(anime_session, episode_session)
+            if not sources:
+                return None
+            resolved = await self._resolve_source(sources[0].url, anime_session)
+            return resolved or None
+        except Exception as ex:
+            logger.warning("fresh re-resolve failed: %s", ex)
+            return None
+
     async def cancel_download(self, episode_session: str):
         self.downloads.cancel(episode_session)
         # Remove from progress so the throttled flusher stops resurrecting
@@ -3094,7 +3125,15 @@ async def main(page: ft.Page):
                 name="notify-open-anime",
             )
         elif payload.startswith("download:"):
-            controller.open_downloads()
+            # `controller` is the AppController — the tab closures live on
+            # the shell methods instance (the shell sets open_downloads
+            # there when it mounts).
+            methods_obj = getattr(controller, "_controller_methods", None) or methods
+            open_dl = getattr(methods_obj, "open_downloads", None)
+            if callable(open_dl):
+                open_dl()
+            else:
+                logger.warning("notification tap: shell not mounted yet")
         elif payload == "update:open":
             state.update_available = True
             state.busy_version += 1
