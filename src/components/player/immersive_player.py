@@ -543,15 +543,32 @@ class ImmersivePlayer(ft.Stack):
         """One-shot, per attached media: apply the default subtitle track.
 
         External tracks set before the media attaches are dropped when mpv
-        loads the media — so this runs on the first duration/position tick
-        and again after every quality/audio swap (_media_attached reset).
+        loads the media — and on Android mpv ALSO drops one added while the
+        demuxer is still opening (the phone showed subtitles only after a
+        manual reselect). So this schedules the apply with retries: 0s, 3s
+        and 8s after the first tick, stopping early once the user picks a
+        track themselves.
         """
         if self._media_attached or self._is_closing:
             return
         self._media_attached = True
+
+        async def _with_retries():
+            for delay in (0.0, 3.0, 8.0):
+                if self._is_closing:
+                    return
+                if delay:
+                    await asyncio.sleep(delay)
+                    if self._is_closing:
+                        return
+                # The user picked something themselves — stop overriding.
+                if self._subtitle_selection != "auto":
+                    return
+                await self._apply_default_subtitle(force=True)
+
         try:
             loop = asyncio.get_running_loop()
-            _keep(loop.create_task(self._apply_default_subtitle()))
+            _keep(loop.create_task(_with_retries()))
         except RuntimeError:
             pass
 
@@ -705,7 +722,10 @@ class ImmersivePlayer(ft.Stack):
         )
 
     async def list_variants(self) -> list[dict]:
-        """HLS master variants (cached). Empty for media playlists/non-HLS."""
+        """HLS master variants (cached, but only SUCCESS is cached — an
+        empty result used to be cached forever, which kept the quality chip
+        hidden on phones where the first probe raced the proxy). Empty for
+        media playlists/non-HLS."""
         if self._variants_cache is not None:
             return self._variants_cache
         if not self.can_switch_quality:
@@ -721,12 +741,13 @@ class ImmersivePlayer(ft.Stack):
             )
         except Exception:
             variants = []
-        self._variants_cache = variants or []
-        return self._variants_cache
+        if variants:
+            self._variants_cache = variants
+        return variants
 
     async def list_audio_tracks(self) -> list[dict]:
-        """External HLS audio renditions (cached). Muxed audio is not
-        switchable via manifest rewriting."""
+        """External HLS audio renditions (cached on success only). Muxed
+        audio is not switchable via manifest rewriting."""
         if self._audio_tracks_cache is not None:
             return self._audio_tracks_cache
         if not self.can_switch_quality:
@@ -742,8 +763,9 @@ class ImmersivePlayer(ft.Stack):
             )
         except Exception:
             tracks = []
-        self._audio_tracks_cache = tracks or []
-        return self._audio_tracks_cache
+        if tracks:
+            self._audio_tracks_cache = tracks
+        return tracks
 
     async def _swap_media(self, message: str) -> None:
         """Restart playback on the currently pinned resource, restoring the
@@ -861,13 +883,24 @@ class ImmersivePlayer(ft.Stack):
         """Fetch variants/audio once playback is running; reveal the quality
         and audio buttons. The quality button reveals for ANY master (the
         chip always names a concrete quality — no "Auto"); audio needs two
-        selectable renditions."""
+        selectable renditions.
+
+        Retried: on the phone the first probe raced the proxy (it was busy
+        feeding mpv) and an empty result used to be cached forever — the
+        chip then never appeared without opening Settings."""
         if not self.can_switch_quality or self._is_closing:
             return
-        variants = await self.list_variants()
-        tracks = await self.list_audio_tracks() if variants else []
+        variants: list[dict] = []
+        tracks: list[dict] = []
+        for _ in range(3):
+            variants = await self.list_variants()
+            if variants or self._is_closing:
+                break
+            await asyncio.sleep(4.0)
         if self._is_closing:
             return
+        if variants:
+            tracks = await self.list_audio_tracks()
 
         q_btn = getattr(self, "quality_btn", None)
         q_row = getattr(self, "quality_row", None)
@@ -1358,18 +1391,23 @@ class ImmersivePlayer(ft.Stack):
         except Exception as ex:
             logger.warning("subtitle switch failed: %s", ex)
 
-    async def _apply_default_subtitle(self) -> None:
+    async def _apply_default_subtitle(self, force: bool = False) -> None:
         """The source's own default track (anikato marks English) applies
-        automatically once, on first media attach."""
-        if self._subtitle_applied or not self.subtitles:
+        automatically once the media is attached. `force=True` lets the
+        retry schedule re-run it (a fresh fetch through a then-idle proxy)
+        without counting as a user selection."""
+        if not force and self._subtitle_applied:
             return
-        if self._subtitle_selection == "off":
+        if not self.subtitles or self._is_closing:
+            return
+        if self._subtitle_selection not in ("auto", None):
             return
         self._subtitle_applied = True
-        for i, track in enumerate(self.subtitles):
+        for track in self.subtitles:
             if track.get("default"):
-                self._subtitle_selection = i
                 src = await self._subtitle_src(track)
+                if self._is_closing:
+                    return
                 self._apply_track(src, track.get("label"))
                 return
 
