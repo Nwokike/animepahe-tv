@@ -70,6 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Free disk
+        run: sudo rm -rf /opt/hostedtoolcache/* /usr/share/dotnet /usr/share/swift /usr/local/lib/android/sdk/ndk/* /usr/local/lib/android/sdk/system-images/* 2>/dev/null || true; df -h | tail -1
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -156,6 +158,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Free disk
+        run: sudo rm -rf /opt/hostedtoolcache/* /usr/share/dotnet /usr/share/swift /usr/local/lib/android/sdk/ndk/* /usr/local/lib/android/sdk/system-images/* 2>/dev/null || true; df -h | tail -1
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -241,6 +245,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Free disk
+        run: sudo rm -rf /opt/hostedtoolcache/* /usr/share/dotnet /usr/share/swift /usr/local/lib/android/sdk/ndk/* /usr/local/lib/android/sdk/system-images/* 2>/dev/null || true; df -h | tail -1
       # The AAB build pulls the Android NDK side-by-side (several GB); the
       # runner's preinstalled toolchains filled the disk and sdkmanager died
       # with "No space left on device" mid-unzip (2026-11-03).
