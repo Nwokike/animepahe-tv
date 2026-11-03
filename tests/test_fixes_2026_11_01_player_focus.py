@@ -21,8 +21,8 @@ from components.focus_styles import (
     card_button_style,
     card_focus_scale,
 )
-from components.player.immersive_player import _stream_variants
 from core.focus_manager import FieldFocusTracker, FocusManager
+from services.hls_proxy import HLSProxy, _b64_decode
 
 
 class _FakePage:
@@ -50,8 +50,23 @@ def _key(key, control=None):
 
 
 # ---------------------------------------------------------------------------
-# B-06: _stream_variants relative URI resolution
+# B-06: relative variant URI resolution (now in the proxy's rewrite)
 # ---------------------------------------------------------------------------
+
+
+def _rewritten_uris(content, master_url):
+    proxy = HLSProxy()
+    proxy.host = "127.0.0.1"
+    proxy.port = 12345
+    out = proxy._rewrite_m3u8(content, master_url, None, {}, None, None)
+    uris = []
+    for line in out.splitlines():
+        line = line.strip()
+        if "url=" not in line:
+            continue
+        token = line.split("url=", 1)[1].split("&", 1)[0]
+        uris.append(_b64_decode(token))
+    return uris
 
 
 def test_stream_variants_relative_uris_resolve_correctly():
@@ -70,8 +85,7 @@ def test_stream_variants_relative_uris_resolve_correctly():
         "#EXT-X-STREAM-INF:BANDWIDTH=4800000,RESOLUTION=1920x1080\n"
         "1080/index.m3u8\n"
     )
-    variants = _stream_variants(master, "https://cdn.example/v/master.m3u8")
-    uris = [v["uri"] for v in variants]
+    uris = _rewritten_uris(master, "https://cdn.example/v/master.m3u8")
     assert uris == [
         "https://cdn.example/v/360/index.m3u8",
         "https://cdn.example/v/720/index.m3u8",
@@ -88,8 +102,8 @@ def test_stream_variants_absolute_uris_pass_through():
         "#EXT-X-STREAM-INF:BANDWIDTH=2000\n"
         "https://other.example/b.m3u8\n"
     )
-    variants = _stream_variants(master, "https://cdn.example/master.m3u8")
-    assert [v["uri"] for v in variants] == [
+    uris = _rewritten_uris(master, "https://cdn.example/master.m3u8")
+    assert uris == [
         "https://other.example/a.m3u8",
         "https://other.example/b.m3u8",
     ]
@@ -98,16 +112,19 @@ def test_stream_variants_absolute_uris_pass_through():
 def test_stream_variants_relative_with_parent_dir():
     """Relative URIs with parent directory references must resolve correctly."""
     master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\n../other/stream.m3u8\n"
-    variants = _stream_variants(master, "https://cdn.example/v/master.m3u8")
-    assert [v["uri"] for v in variants] == [
+    uris = _rewritten_uris(master, "https://cdn.example/v/master.m3u8")
+    assert uris == [
         "https://cdn.example/other/stream.m3u8",
     ]
 
 
-def test_stream_variants_empty_master_returns_empty():
-    """Media playlists (no EXT-X-STREAM-INF) return empty list."""
+def test_media_playlist_segments_resolve_relative():
+    """The proxy rewrite resolves a MEDIA playlist's segment URIs too (the
+    player no longer parses playlists — the proxy owns all of it)."""
     media = "#EXTM3U\n#EXTINF:10,\nsegment1.ts\n"
-    assert _stream_variants(media, "https://example.com/master.m3u8") == []
+    assert _rewritten_uris(media, "https://example.com/master.m3u8") == [
+        "https://example.com/segment1.ts"
+    ]
 
 
 # ---------------------------------------------------------------------------

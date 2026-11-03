@@ -93,7 +93,7 @@ def _build_player():
         source_url="https://example.test/master.m3u8",
         source_referer="https://kwik.cx/",
         source_headers={},
-        proxied=False,
+        source_proxied=False,
         subtitles=[],
         skip={},
     )

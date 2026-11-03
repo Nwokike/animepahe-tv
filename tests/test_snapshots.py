@@ -77,7 +77,16 @@ class _FakeVideo:
 
 
 class _BarePlayer:
-    """`_take_snapshot` only needs these three seams."""
+    """`_take_screenshot` only needs these seams."""
+
+
+class _Chip:
+    def __init__(self):
+        self.content = type("T", (), {"value": ""})()
+        self.visible = False
+
+    def update(self):
+        pass
 
 
 def _player(shot, directory):
@@ -85,6 +94,8 @@ def _player(shot, directory):
 
     player = ip.ImmersivePlayer.__new__(ip.ImmersivePlayer)
     player.video = _FakeVideo(shot)
+    player.toast_chip = _Chip()
+    player.toast_text = player.toast_chip.content
 
     async def _dir():
         return directory
@@ -100,52 +111,33 @@ def test_take_snapshot_writes_and_names_the_file(monkeypatch, tmp_path):
     snacks = []
     monkeypatch.setattr(core.notify, "show_snack", lambda page, msg, **kw: snacks.append(msg))
     player = _player(b"png-bytes", str(tmp_path))
-    asyncio.run(player._take_snapshot())
+    asyncio.run(player._take_screenshot())
     files = [n for n in os.listdir(tmp_path) if n.endswith(".png")]
     assert len(files) == 1
     assert snacks == [f"Saved {files[0]}"], "the toast names the real file"
 
 
-def test_take_snapshot_without_bytes_says_unavailable(monkeypatch, tmp_path):
+def test_take_screenshot_without_bytes_says_unavailable(monkeypatch, tmp_path):
     import core.notify
 
     snacks = []
     monkeypatch.setattr(core.notify, "show_snack", lambda page, msg, **kw: snacks.append(msg))
     player = _player(None, str(tmp_path))
-    asyncio.run(player._take_snapshot())
+    asyncio.run(player._take_screenshot())
     assert snacks == ["Screenshot unavailable"]
     assert [n for n in os.listdir(tmp_path) if n.endswith(".png")] == []
 
 
-def test_snapshot_directory_falls_back_off_web_and_on_error(monkeypatch):
+def test_snapshot_directory_defaults_to_none_and_is_overridable():
+    """The default routes the save into the app's data tier (None);
+    the shell/tests may override the seam."""
     import components.player.immersive_player as ip
 
     player = ip.ImmersivePlayer.__new__(ip.ImmersivePlayer)
-
-    class _Page:
-        web = True
-
-    player._page = lambda: _Page()
     assert asyncio.run(player._snapshot_directory()) is None
 
-    class _PageNative:
-        web = False
+    async def _dir():
+        return "/storage/emulated/0/Download"
 
-    player._page = lambda: _PageNative()
-
-    class _Boom:
-        def __init__(self):
-            pass
-
-        async def get_downloads_directory(self):
-            raise TimeoutError("no service in dev")
-
-    monkeypatch.setattr(ip.ft, "StoragePaths", _Boom)
-    assert asyncio.run(player._snapshot_directory()) is None
-
-    class _OK:
-        async def get_downloads_directory(self):
-            return "/storage/emulated/0/Download"
-
-    monkeypatch.setattr(ip.ft, "StoragePaths", _OK)
+    player._snapshot_directory = _dir
     assert asyncio.run(player._snapshot_directory()) == "/storage/emulated/0/Download"

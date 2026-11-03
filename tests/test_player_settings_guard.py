@@ -1,10 +1,10 @@
-"""Player Stream Settings double-open guard — Phase 4 Step 3.
+"""Player Settings double-open guard (KTV structure).
 
-The quality/audio chips re-spawn `open_stream_settings` on every tap with
-no latch, so two quick taps (or one tap while the options were still being
-fetched) stacked two modal sheets. Tests pin: one sheet per open, the latch
-held while it is up, released by Close, released on early returns (no page,
-empty options), and released when showing raises.
+The settings dialog goes through `page.show_dialog` — the platform owns the
+single-dialog surface (a second show while one is open raises, and the
+handler swallows it). Tests pin: one sheet per open, a second open while
+one is up shows nothing, Close releases the surface, and a failed show is
+swallowed (never a crash).
 """
 
 import asyncio
@@ -16,127 +16,136 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from flet.controls.context import _context_page
 
 import components.player.immersive_player as ip
-from core import dialogs
 
 
 class _Page:
     web = False
 
-    def __init__(self):
+    def __init__(self, allow=10**9):
         self.dialogs = []
+        self._allow = allow
 
     def show_dialog(self, dialog):
+        if len(self.dialogs) >= self._allow:
+            raise RuntimeError("Dialog is already opened")
         self.dialogs.append(dialog)
 
     def pop_dialog(self):
         return self.dialogs.pop() if self.dialogs else None
 
+    def run_task(self, handler, *args):
+        async def _run():
+            result = handler(*args)
+            if hasattr(result, "__await__"):
+                await result
+
+        return asyncio.ensure_future(_run())
+
     def update(self):
         pass
 
 
-def _player(variants, tracks, subtitles=None):
+class _Video:
+    fit = type("Fit", (), {"name": "CONTAIN"})()
+
+
+def _player(variants, tracks):
     player = ip.ImmersivePlayer.__new__(ip.ImmersivePlayer)
-    player._settings_open = False
     player._is_closing = False
-    player.subtitles = subtitles or []
+    player._current_variant = None
+    player._current_audio = None
+    player._variants_cache = list(variants)
+    player._audio_tracks_cache = list(tracks)
+    player.subtitles = []
     player._local_subtitle = None
+    player.store = None
+    player.video = _Video()
 
     async def _variants():
-        return variants
+        return list(variants)
 
     async def _tracks():
-        return tracks
+        return list(tracks)
 
     player.list_variants = _variants
     player.list_audio_tracks = _tracks
     return player
 
 
-def _shows(monkeypatch):
-    shown = []
-    monkeypatch.setattr(dialogs, "show_app_dialog", lambda page, dialog: shown.append(dialog))
-    return shown
-
-
 def test_two_concurrent_opens_show_one_sheet(monkeypatch):
-    page = _Page()
-    shown = _shows(monkeypatch)
+    page = _Page(allow=1)  # the platform rejects a second while one is up
     player = _player(
-        variants=[{"index": 0, "label": "A"}],
+        variants=[
+            {"index": 0, "label": "A"},
+            {"index": 1, "label": "B"},
+        ],
         tracks=[{"name": "Japanese", "language": ""}, {"name": "English", "language": ""}],
     )
     token = _context_page.set(page)
     try:
 
         async def scenario():
-            await asyncio.gather(player.open_stream_settings(), player.open_stream_settings())
+            await asyncio.gather(
+                player.open_player_settings(), player.open_player_settings()
+            )
 
         asyncio.run(scenario())
     finally:
         _context_page.reset(token)
-    assert len(shown) == 1
-    assert player._settings_open is True, "the latch holds while the sheet is up"
+    assert len(page.dialogs) == 1, "the platform surface admits one sheet"
 
 
-def test_close_releases_the_latch(monkeypatch):
+def test_close_releases_the_surface(monkeypatch):
     page = _Page()
-    shown = _shows(monkeypatch)
     player = _player(
-        variants=[{"index": 0, "label": "A"}],
+        variants=[
+            {"index": 0, "label": "A"},
+            {"index": 1, "label": "B"},
+        ],
         tracks=[{"name": "Japanese", "language": ""}, {"name": "English", "language": ""}],
     )
     token = _context_page.set(page)
     try:
-        asyncio.run(player.open_stream_settings())
-        assert len(shown) == 1
-        # The dialog's own Close action flips the latch back.
-        close_action = shown[0].actions[0]
-        close_action.on_click(None)
-        assert player._settings_open is False
-        asyncio.run(player.open_stream_settings())
+        asyncio.run(player.open_player_settings())
+        assert len(page.dialogs) == 1
+        # The dialog's own Done action closes it.
+        done_action = page.dialogs[0].actions[0]
+        done_action.on_click(None)
+        asyncio.run(player.open_player_settings())
     finally:
         _context_page.reset(token)
-    assert len(shown) == 2, "after Close the sheet can open again"
+    assert len(page.dialogs) == 2, "after Done the sheet can open again"
 
 
-def test_early_returns_release_the_latch(monkeypatch):
-    _shows(monkeypatch)
-    # No page in context: nothing opens, nothing stays locked.
+def test_no_page_is_a_silent_noop():
+    # No page in context: nothing opens, nothing crashes.
     player = _player(
-        variants=[{"index": 0, "label": "A"}],
+        variants=[
+            {"index": 0, "label": "A"},
+            {"index": 1, "label": "B"},
+        ],
         tracks=[{"name": "Japanese", "language": ""}, {"name": "English", "language": ""}],
     )
-    asyncio.run(player.open_stream_settings())
-    assert player._settings_open is False
+    asyncio.run(player.open_player_settings())
 
-    # One variant, one track, no subtitles: the honest empty-options return.
+
+def test_a_failed_show_is_swallowed(monkeypatch):
     page = _Page()
     player = _player(
-        variants=[{"index": 0, "label": "A"}], tracks=[{"name": "Japanese", "language": ""}]
-    )
-    token = _context_page.set(page)
-    try:
-        asyncio.run(player.open_stream_settings())
-    finally:
-        _context_page.reset(token)
-    assert player._settings_open is False
-
-
-def test_a_failed_show_releases_the_latch(monkeypatch):
-    page = _Page()
-    player = _player(
-        variants=[{"index": 0, "label": "A"}],
+        variants=[
+            {"index": 0, "label": "A"},
+            {"index": 1, "label": "B"},
+        ],
         tracks=[{"name": "Japanese", "language": ""}, {"name": "English", "language": ""}],
     )
 
     def _boom(page_, dialog):
         raise RuntimeError("portal down")
 
-    monkeypatch.setattr(dialogs, "show_app_dialog", _boom)
+    monkeypatch.setattr(_Page, "show_dialog", _boom)
     token = _context_page.set(page)
     try:
-        asyncio.run(player.open_stream_settings())
+        asyncio.run(player.open_player_settings())
     finally:
         _context_page.reset(token)
-    assert player._settings_open is False, "a sheet that never showed must not lock"
+    assert page.dialogs == []

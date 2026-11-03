@@ -35,6 +35,7 @@ import anyio
 import primp
 
 from core.storage import app_data_dir
+from services.ddos_solver import _looks_like_cf_challenge
 
 logger = logging.getLogger(__name__)
 
@@ -315,6 +316,17 @@ class DownloadManager:
             return
         job_dir = self._ensure_job_dir(episode_session, metadata)
         os.makedirs(job_dir, exist_ok=True)
+        # Subtitle sidecars ride with the download so offline playback has
+        # them (owner, 2026-11-03). Each track is fetched to a local file
+        # and the manifest metadata is rewritten to that path — mpv reads
+        # local files with no network and no CDN headers. A track that
+        # fails to fetch keeps its remote URL (still playable while online).
+        remote_subs = (metadata or {}).get("subtitles") or []
+        if remote_subs:
+            metadata = dict(metadata)
+            metadata["subtitles"] = await self._fetch_subtitle_sidecars(
+                remote_subs, headers, job_dir
+            )
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
         if self._manifest_is_complete(job_dir, manifest):
@@ -403,6 +415,17 @@ class DownloadManager:
             return  # paused until resume clears the stop reason
         job_dir = self._ensure_job_dir(episode_session, metadata)
         os.makedirs(job_dir, exist_ok=True)
+        # Subtitle sidecars ride with the download so offline playback has
+        # them (owner, 2026-11-03). Each track is fetched to a local file
+        # and the manifest metadata is rewritten to that path — mpv reads
+        # local files with no network and no CDN headers. A track that
+        # fails to fetch keeps its remote URL (still playable while online).
+        remote_subs = (metadata or {}).get("subtitles") or []
+        if remote_subs:
+            metadata = dict(metadata)
+            metadata["subtitles"] = await self._fetch_subtitle_sidecars(
+                remote_subs, headers, job_dir
+            )
         manifest_path = os.path.join(job_dir, "manifest.json")
         manifest = self._read_manifest(manifest_path)
         if self._manifest_is_complete(job_dir, manifest):
@@ -628,6 +651,67 @@ class DownloadManager:
         for session in sessions:
             self._progress.pop(session, None)
 
+    async def _solve_cloudflare(self, episode_session: str, url: str) -> dict | None:
+        """A Cloudflare wall answered the file fetch. One shot: ask the
+        controller to run the verification (the same window the play path
+        shows) and return FRESH headers, or None when unsolved. The new
+        headers are written into the job's manifest so resume/retry keep
+        them."""
+        resolver = getattr(self, "on_cloudflare", None)
+        new_headers = None
+        if resolver is not None:
+            try:
+                new_headers = await resolver(episode_session, url)
+            except Exception as ex:
+                logger.warning("download CF resolve failed: %s", ex)
+        if not new_headers:
+            return None
+        job = self._jobs.get(episode_session)
+        if job is not None:
+            manifest_path = job.get("manifest")
+            manifest = self._read_manifest(manifest_path)
+            if manifest:
+                manifest["headers"] = dict(new_headers)
+                self._write_manifest(manifest_path, manifest)
+        return dict(new_headers)
+
+    async def _fetch_subtitle_sidecars(
+        self, subs: list, headers: dict, job_dir: str
+    ) -> list:
+        """Download each remote subtitle track into <job_dir>/subs and
+        return the same entries with their url rewritten to the local file
+        path (a supported VideoSubtitleTrack.src form — mpv reads local
+        files with no network and no CDN headers). A track that fails to
+        fetch keeps its remote URL (still playable while online)."""
+        out: list = []
+        subs_dir = os.path.join(job_dir, "subs")
+        client = None
+        for i, entry_in in enumerate(subs):
+            if not isinstance(entry_in, dict):
+                continue
+            entry = dict(entry_in)
+            url = entry.get("url") or ""
+            if url.startswith(("http://", "https://")):
+                try:
+                    client = client or self._get_client()
+                    resp = await client.get(url, headers=headers, timeout=PLAYLIST_TIMEOUT)
+                    data = resp.content or b""
+                    await resp.aclose()
+                    if data:
+                        os.makedirs(subs_dir, exist_ok=True)
+                        ext = os.path.splitext(url.split("?")[0])[1] or ".vtt"
+                        if ext.lower() not in (".vtt", ".srt", ".ass", ".ssa"):
+                            ext = ".vtt"
+                        label = str(entry.get("label") or "sub")
+                        safe = _safe_filename(label) or "sub"
+                        path = os.path.join(subs_dir, f"{i + 1}-{safe}{ext}")
+                        await anyio.to_thread.run_sync(self._atomic_write, path, data)
+                        entry["url"] = path
+                except Exception as ex:
+                    logger.warning("subtitle fetch failed for %s: %s", url, ex)
+            out.append(entry)
+        return out
+
     def progress(self, episode_session: str) -> dict | None:
         """One progress row for the UI: bytes + the percent when the total
         is known, explicitly percent=None when it isn't (Media3's
@@ -742,6 +826,7 @@ class DownloadManager:
                 final_path,
                 on_progress=_chunk,
                 cancel=cancel,
+                episode_session=episode_session,
             )
         except asyncio.CancelledError:
             raise
@@ -1073,6 +1158,7 @@ class DownloadManager:
                     final_path,
                     on_progress=_segment_bytes,
                     cancel=cancel,
+                    episode_session=episode_session,
                 )
             except Exception as ex:
                 tries = attempts.get(uri, 0) + 1
@@ -1200,6 +1286,8 @@ class DownloadManager:
         on_progress=None,
         cancel=None,
         timeout=None,
+        _retried: bool = False,
+        episode_session: str | None = None,
     ):
         """Download (or resume) one file; atomically move it into place.
 
@@ -1222,9 +1310,37 @@ class DownloadManager:
             # body and crash later at os.replace (WinError 2). Raising
             # routes it into the worker's retry-with-cap path instead.
             try:
+                body = resp.text or ""
+            except Exception:
+                body = ""
+            try:
                 await resp.aclose()
             except Exception:
                 logger.debug("suppressed")
+            # A Cloudflare wall must trigger the solver — the same way the
+            # play path does — instead of failing silently (owner,
+            # 2026-11-03: AnimeOut downloads died on the file host's 403
+            # with no verification window).
+            if resp.status_code in (403, 503, 542) and _looks_like_cf_challenge(
+                body, resp.status_code
+            ):
+                new_headers = await self._solve_cloudflare(
+                    episode_session or "", url
+                )
+                if new_headers is not None:
+                    return await self._download_file(
+                        url,
+                        new_headers,
+                        part_path,
+                        final_path,
+                        on_progress=on_progress,
+                        cancel=cancel,
+                        timeout=timeout,
+                        _retried=True,
+                    )
+                raise RuntimeError(
+                    f"Cloudflare verification required for {url.split('/')[2]}"
+                )
             raise RuntimeError(f"HTTP {resp.status_code} for {url}")
         # Resume ALIGNMENT. A Range request is only valid when the answer
         # starts exactly at `have`:

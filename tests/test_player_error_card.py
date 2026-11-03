@@ -1,14 +1,14 @@
-"""The player mounts into page.overlay (imperatively), not the component tree.
+"""The player mounts as a /play VIEW on the views stack (KTV exact).
 
 Regression coverage for two crashes the user hit:
 1. `RuntimeError: Frozen controls cannot be updated` — controls built inside
    a @ft.component render are frozen after mount, and ImmersivePlayer
    rewrites itself constantly (`overlay.visible = False` in _hide_overlay).
-2. `Column.__init__() got an unexpected keyword argument 'padding'` on the
-   Browse screen, plus the same latent bug on Downloads.
+2. The Android system back used to EXIT the app: the overlay mount never
+   receives `view_pop`. The view stack is what makes back reach Python.
 
-The fix for (1) is the KTV structure: mount the player as a top-level
-overlay control (KTV uses a ft.View; page.views is gone in flet 1.0.4).
+The fix for both is the KTV structure: the player is a ft.View(route="/play")
+appended to page.views, with a /blank underlay beneath the shell.
 """
 
 import sys
@@ -32,10 +32,10 @@ class _FakeController:
 
 
 class _FakePage:
-    """Only what the overlay mount uses."""
+    """Only what the views mount uses."""
 
     def __init__(self):
-        self.overlay: list = []
+        self.views: list = []
         self.updates = 0
 
     def update(self):
@@ -69,23 +69,22 @@ def _find_buttons(control):
     ]
 
 
-def _reset_overlay():
+def _reset_mount():
     app_shell._active_player = None
-    app_shell._active_mount = None
     app_shell._active_key = None
 
 
 def _mount(state, controller, page, first: bool = False):
     if first:
-        _reset_overlay()
+        _reset_mount()
     token = _context_page.set(page)
     try:
-        app_shell._use_player_overlay(state, controller)
+        app_shell._use_player_view(state, controller)
     finally:
         _context_page.reset(token)
 
 
-def test_player_mounts_into_overlay_not_the_component_tree():
+def test_player_mounts_as_a_view_not_the_component_tree():
     state = app_state
     _reset_state()
     state.player_open = True
@@ -98,7 +97,9 @@ def test_player_mounts_into_overlay_not_the_component_tree():
 
     _mount(state, _FakeController(), page, first=True)
 
-    assert len(page.overlay) == 1
+    assert len(page.views) == 1
+    assert page.views[-1].route == "/play"
+    assert page.views[-1].padding == 0  # KTV exact — no SafeArea on the mount
     # FocusScope wraps the player so Back/Escape always reaches it.
     assert app_shell._active_player is not None
     assert page.updates == 1
@@ -117,7 +118,7 @@ def test_second_render_does_not_remount():
     _mount(state, controller, page)
 
     assert app_shell._active_player is first
-    assert len(page.overlay) == 1
+    assert len(page.views) == 1
 
 
 def test_episode_switch_remounts():
@@ -135,10 +136,10 @@ def test_episode_switch_remounts():
     _mount(state, controller, page)
 
     assert app_shell._active_player is not first
-    assert len(page.overlay) == 1
+    assert len(page.views) == 1  # old view replaced, not stacked
 
 
-def test_close_unmounts_the_overlay_node():
+def test_close_pops_the_view():
     import asyncio
 
     state = app_state
@@ -148,16 +149,18 @@ def test_close_unmounts_the_overlay_node():
     page = _FakePage()
 
     _mount(state, _FakeController(), page, first=True)
-    assert len(page.overlay) == 1
+    assert len(page.views) == 1
+    player = app_shell._active_player
 
     token = _context_page.set(page)
     try:
-        asyncio.run(app_shell._async_close_player())
+        asyncio.run(app_shell._close_player_with_save(player))
     finally:
         _context_page.reset(token)
 
-    assert page.overlay == []
+    assert page.views == []
     assert state.player_open is False
+    assert app_shell._active_player is None
 
 
 def test_player_error_renders_card():
@@ -170,8 +173,8 @@ def test_player_error_renders_card():
 
     _mount(state, _FakeController(), page, first=True)
 
-    mount = page.overlay[0]
-    texts = [c.value for c in _walk(mount) if isinstance(c, ft.Text)]
+    view = page.views[-1]
+    texts = [c.value for c in _walk(view) if isinstance(c, ft.Text)]
     assert "The downloaded file is missing." in texts
     assert "Playback unavailable" in texts
     assert app_shell._active_player is None  # the error card is not a player
@@ -191,7 +194,7 @@ def test_retry_clears_error_and_replays():
     _mount(state, controller, page, first=True)
     retry = next(
         b
-        for b in _find_buttons(page.overlay[0])
+        for b in _find_buttons(page.views[-1])
         if isinstance(b.content, str) and b.content == "Retry"
     )
 
@@ -215,16 +218,16 @@ def test_go_back_clears_error_and_unmounts():
     _mount(state, _FakeController(), page, first=True)
     back = next(
         b
-        for b in _find_buttons(page.overlay[0])
+        for b in _find_buttons(page.views[-1])
         if isinstance(b.content, str) and b.content == "Go Back"
     )
     back.on_click(None)
     assert state.player_error is None
     assert state.player_open is False
 
-    # The next render drops the mount from the overlay.
+    # The next render drops the view from the stack.
     _mount(state, _FakeController(), page)
-    assert page.overlay == []
+    assert page.views == []
 
 
 def test_column_padding_is_moved_to_a_wrapper():

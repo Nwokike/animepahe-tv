@@ -49,6 +49,12 @@ class AnimeOutSolver:
                 return stored
         return await self.solve()
 
+    def invalidate(self) -> None:
+        """Drop the in-memory clearance so the next `clearance()` re-probes
+        the stored cookie and, when it is dead, opens the solver again.
+        The persisted cookie stays: the probe is its judge."""
+        self._clearance = None
+
     async def solve(self) -> dict | None:
         """Run the challenge once. The window is the cost; the persisted
         cookie is what keeps it to once per expiry."""

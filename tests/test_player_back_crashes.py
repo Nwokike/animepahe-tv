@@ -26,12 +26,10 @@ import flet as ft
 import pytest
 
 from components.focus_styles import attach_focus_zoom
-from components.player.immersive_player import (
-    ImmersivePlayer,
-    _stream_variants,
-)
+from components.player.immersive_player import ImmersivePlayer
 from core.focus_manager import FocusManager
 from hooks.use_focus_scope import focus_scope
+from services.hls_proxy import HLSProxy, _b64_decode
 
 
 class _FakePage:
@@ -190,8 +188,7 @@ def test_relative_variants_resolve_against_the_master_url():
         "#EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720\n"
         "720/index.m3u8\n"
     )
-    variants = _stream_variants(master, "https://cdn.example/v/master.m3u8")
-    uris = [v["uri"] for v in variants]
+    uris = _rewritten_uris(master, "https://cdn.example/v/master.m3u8")
     assert uris == [
         "https://cdn.example/v/360/index.m3u8",
         "https://cdn.example/v/720/index.m3u8",
@@ -206,8 +203,8 @@ def test_absolute_variants_pass_through():
         "#EXT-X-STREAM-INF:BANDWIDTH=2000\n"
         "https://other.example/b.m3u8\n"
     )
-    variants = _stream_variants(master, "https://cdn.example/master.m3u8")
-    assert [v["uri"] for v in variants] == [
+    uris = _rewritten_uris(master, "https://cdn.example/master.m3u8")
+    assert uris == [
         "https://other.example/a.m3u8",
         "https://other.example/b.m3u8",
     ]
@@ -249,25 +246,56 @@ class _Video:
 def _player(video=None, **attrs):
     player = ImmersivePlayer.__new__(ImmersivePlayer)
     player.video = video or _Video()
+    player.title = ""
     player.toast_chip = _Chip()
+    player.toast_text = player.toast_chip.content
+    player.skip_chip = _Chip()
+    player.speed_text = type("T", (), {"value": "1.0x", "update": lambda self: None})()
     player.subtitles = []
     player.skip = {}
-    player.speed_texts = []
-    player._speed_index = 2
-    player._speed_rate = 1.0
+    player._speed_idx = 2
     player._is_closing = False
     player._is_final_error = False
     player._overlay_hidden = False
     player._toast_gen = 0
+    player._watchdog_task = None
+    player._checkpoint_task = None
+    player._playback_started = False
+    player._media_attached = False
+    player._position_saved = False
     player.store = None
     player.resume_key = None
     player._initial_resume_position = None
+    player._pending_seek = None
     player._last_duration = 0.0
     player._last_position = 0.0
     player._reconnect_count = 0
+    player.source_headers = {}
+    player.source_referer = None
+    player.hls_proxy = None
     for k, v in attrs.items():
         setattr(player, k, v)
     return player
+
+
+def _rewritten_uris(content, master_url):
+    """Run the proxy's playlist rewrite and decode the proxied URIs back.
+
+    Relative-URI resolution (the B-06 fix) lives HERE now: the player no
+    longer parses playlists — the proxy resolves every variant/segment URI
+    against the master's own address with urljoin."""
+    proxy = HLSProxy()
+    proxy.host = "127.0.0.1"
+    proxy.port = 12345
+    out = proxy._rewrite_m3u8(content, master_url, None, {}, None, None)
+    uris = []
+    for line in out.splitlines():
+        line = line.strip()
+        if "url=" not in line:
+            continue
+        token = line.split("url=", 1)[1].split("&", 1)[0]
+        uris.append(_b64_decode(token))
+    return uris
 
 
 @pytest.mark.asyncio
@@ -286,26 +314,29 @@ async def test_older_toast_hide_does_not_kill_the_newer_toast():
 
 
 @pytest.mark.asyncio
-async def test_first_ready_does_not_hide_a_just_raised_error_card():
+async def test_load_does_not_hide_a_just_raised_error_card():
     player = _player()
     player._is_final_error = True
     hidden = []
     player._hide_overlay = lambda: hidden.append(True)
-    player._check_and_trigger_seek = lambda: hidden.append("seek")
-    player._apply_default_subtitle = lambda: hidden.append("subs")
-    player._on_first_ready()
+    player._on_load()
     assert hidden == []
 
 
 @pytest.mark.asyncio
-async def test_first_ready_applies_the_saved_speed():
-    player = _player()
-    player._speed_rate = 1.25
-    player._hide_overlay = lambda: None
-    player._check_and_trigger_seek = lambda: None
-    player._apply_default_subtitle = lambda: None
-    player._on_first_ready()
+async def test_resume_read_applies_the_saved_speed():
+    """The saved playback rate rides the store's position record and is
+    applied to the video (and the chip) when the resume is read."""
+
+    class _Store:
+        async def get_position(self, key):
+            return {"position": 30.0, "duration": 100.0, "rate": 1.25}
+
+    player = _player(store=_Store(), resume_key="ep-1")
+    await player._read_resume_position()
     assert player.video.playback_rate == 1.25
+    assert player._speed_idx == 3  # SPEEDS[3] == 1.25
+    assert player.speed_text.value == "1.25x"
 
 
 @pytest.mark.asyncio
@@ -318,30 +349,14 @@ async def test_snapshot_confirmation_rides_the_result(tmp_path):
         return str(tmp_path)
 
     player._snapshot_directory = _dir
-    messages = []
-    from core import notify
-
-    original = notify.show_snack
-    notify.show_snack = lambda page, msg, **kw: messages.append(msg)
-    try:
-        await player._take_snapshot()
-    finally:
-        notify.show_snack = original
+    await player._take_screenshot()
     files = [n for n in os.listdir(tmp_path) if n.endswith(".png")]
     assert len(files) == 1, "the bytes reach the disk"
-    assert messages == [f"Saved {files[0]}"]
+    assert player.toast_chip.content.value == f"Saved {files[0]}"
 
 
 @pytest.mark.asyncio
 async def test_snapshot_failure_is_surfaced():
     player = _player(video=_Video(screenshot=None))  # backend can't capture
-    messages = []
-    from core import notify
-
-    original = notify.show_snack
-    notify.show_snack = lambda page, msg, **kw: messages.append(msg)
-    try:
-        await player._take_snapshot()
-    finally:
-        notify.show_snack = original
-    assert messages == ["Screenshot unavailable"]
+    await player._take_screenshot()
+    assert player.toast_chip.content.value == "Screenshot unavailable"

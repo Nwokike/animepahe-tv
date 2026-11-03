@@ -135,25 +135,35 @@ def test_episodes_from_downloads_orders_and_filters(tmp_path):
 # --- fullscreen back re-entrancy guard -------------------------------------
 
 
-def test_player_back_reentrant_call_is_noop():
+def test_player_close_latch_schedules_once():
+    """The close funnel's in-flight latch (KTV's _begin_player_close): a
+    second back press while a close is in flight schedules nothing; an
+    un-latched close schedules the awaited save exactly once."""
+    import flet.controls.context as _c
+
     import app_shell
 
-    calls = []
+    scheduled = []
 
-    class FakePlayer:
-        async def _on_back(self, e):
-            calls.append(e)
+    class _Page:
+        def run_task(self, handler, *args):
+            scheduled.append((handler, args))
 
-    app_shell._back_in_flight = True
-    app_shell._active_player = FakePlayer()
+    # Latched: _begin_player_close bails before touching a page.
+    latched = type("P", (), {"_is_closing": True})()
+    app_shell._begin_player_close(latched)
+    assert scheduled == [], "a close already in flight must not be re-scheduled"
+
+    # Un-latched: exactly one close-save is scheduled.
+    fresh = type("P2", (), {"_is_closing": False})()
+    page = _Page()
+    token = _c._context_page.set(page)
     try:
-        asyncio.run(app_shell._player_back())
-        assert calls == [], (
-            "nested _player_back during an in-flight close must not re-enter _on_back"
-        )
+        app_shell._begin_player_close(fresh)
     finally:
-        app_shell._back_in_flight = False
-        app_shell._active_player = None
+        _c._context_page.reset(token)
+    assert len(scheduled) == 1, "the close funnel schedules the save once"
+    assert fresh._is_closing is True, "the latch is set for the follow-up paths"
 
 
 # --- shared variant expansion used by download paths -----------------------

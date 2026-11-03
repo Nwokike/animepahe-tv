@@ -266,7 +266,7 @@ def AppShell() -> ft.Control:
     # visibility, retry buttons, playback rate, quality swap). KTV mounts
     # its player in a ft.View for the same reason; page.views is gone in
     # flet 1.0.4, so page.overlay is the equivalent top-level slot.
-    _use_player_overlay(state, controller)
+    _use_player_view(state, controller)
 
     # Stream resolution takes seconds — the overlay is how the tap is
     # acknowledged (KTV's rule: anything slower than a beat gets a spinner).
@@ -370,18 +370,14 @@ def AppShell() -> ft.Control:
     )
 
 
-# The live player (so Back can run its bounded position save), the overlay
-# node mounted for it, and the key currently mounted — without the first a
-# remote Back discards the resume position; without the rest, the overlay
-# leaks or shows a stale stage.
+# The live player (so Back can run its awaited position save) and the key
+# currently mounted — without the first, a remote Back discards the resume
+# position. The player itself lives in a /play VIEW on the views stack (KTV
+# exact): that is what makes the Android system back reach Python
+# (on_view_pop) instead of exiting the app. No SafeArea on the player mount
+# — the view carries padding=0, exactly like KTV's ft.View.
 _active_player = None
-_active_mount = None
 _active_key = None
-# Re-entrancy guard for the back chain: player._on_back -> on_close ->
-# _close_player -> run_task(_player_back) -> player._on_back loops forever
-# (fullscreen Back "hang", 2026-11-01). Set while a close is in flight so
-# the nested _player_back returns immediately and the outer one unmounts.
-_back_in_flight = False
 
 
 def _play_adjacent(delta: int, controller) -> None:
@@ -465,57 +461,109 @@ def _use_resolve_overlay(state, controller) -> None:
     page.update()
 
 
-def _unmount_player_overlay(page) -> None:
-    global _active_player, _active_mount, _active_key
-
-    mount, _active_mount, _active_player, _active_key = (
-        _active_mount,
-        None,
-        None,
-        None,
-    )
-    if mount is not None and page is not None and _in_overlay(page, mount):
-        page.overlay.remove(mount)
-        page.update()
-    # The player is gone: the screen may sleep again (unless downloads run).
+def _pop_play_view(page) -> bool:
+    """Pop the /play view if it is the top one. Returns True when popped."""
     try:
-        from flet import context as _fctx2
-
-        _page2 = _fctx2.page
+        if page.views and getattr(page.views[-1], "route", "") == "/play":
+            page.views.pop()
+            page.update()
+            return True
     except Exception:
-        _page2 = None
-    ctrl2 = getattr(_page2, "_app_controller", None) if _page2 else None
-    if ctrl2 is not None and hasattr(ctrl2, "update_wakelock"):
-        from core.tasks import spawn as _spawn2
+        logger.debug("suppressed")
+    return False
 
-        _spawn2(ctrl2.update_wakelock(), name="wakelock-off")
-    # The player is gone: the window-level stream must stop feeding it.
-    from flet import context as _fctx
 
-    try:
-        _page = _fctx.page
-    except Exception:
-        _page = None
-    ctrl = getattr(_page, "_app_controller", None) if _page else None
+def _release_player_page_state(page) -> None:
+    """The player is gone: the screen may sleep again (unless downloads run)
+    and the window-level key stream must stop feeding it."""
+    ctrl = getattr(page, "_app_controller", None)
+    if ctrl is not None and hasattr(ctrl, "update_wakelock"):
+        spawn(ctrl.update_wakelock(), name="wakelock-off")
     fm = getattr(ctrl, "focus_manager", None)
     if fm is not None:
         fm.set_key_consumer(None)
 
 
-def _use_player_overlay(state, controller) -> None:
-    """Mount/unmount the player in page.overlay as playback state changes.
+def _close_already_saved(player) -> bool:
+    """Single close-guard predicate for every back path (KTV): a close is
+    done when the player is closing AND its position is saved."""
+    return bool(
+        getattr(player, "_is_closing", False)
+        and getattr(player, "_position_saved", False)
+    )
 
-    Controls built inside a @ft.component render are frozen after mount,
-    and ImmersivePlayer rewrites itself constantly (overlay visibility,
-    retry buttons, playback rate, quality swap). KTV mounts its player in
-    a ft.View for exactly this reason; page.views is gone in flet 1.0.4, so
-    page.overlay is the equivalent top-level slot. The key comparison is
-    what makes retries and episode switches remount instead of reusing a
-    stale stage.
-    """
-    global _active_player, _active_mount, _active_key
 
-    from flet import context as flet_context
+def _begin_player_close(player) -> None:
+    """Run the awaited close-save once, no matter how many paths ask (KTV's
+    _begin_player_close): the player's Go Back, the FocusScope, the Android
+    system back (view_pop) and the shell all funnel here."""
+    if getattr(player, "_is_closing", False):
+        logger.info("close-path: close already in flight, skipping duplicate")
+        return
+    logger.info("close-path: scheduling close-save")
+    player._is_closing = True
+    page = None
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+    if page is None:
+        return
+    page.run_task(_close_player_with_save, player)
+
+
+def _close_player():
+    """The player's on_close target — funnels into _begin_player_close."""
+    player = _active_player
+    if player is None:
+        try:
+            page = flet_context.page
+            if page is not None:
+                _pop_play_view(page)
+        except Exception:
+            logger.debug("suppressed")
+        return
+    _begin_player_close(player)
+
+
+async def _close_player_with_save(player):
+    """Persist position (awaited), then stop playback and pop the view
+    (KTV's _close_player_with_save)."""
+    global _active_player
+    try:
+        await player.save_position_now()
+    except Exception:
+        logger.debug("close-path: position save failed", exc_info=True)
+    # Release native resources while the control tree is still attached.
+    try:
+        player.teardown()
+    except Exception:
+        logger.debug("suppressed")
+
+    from state.app_state import state
+
+    page = None
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+    _active_player = None
+    state.player_open = False
+    state.player_error = None
+    state.episodes_version += 1
+    if page is not None:
+        _pop_play_view(page)
+        _release_player_page_state(page)
+
+
+def _use_player_view(state, controller) -> None:
+    """Mount/unmount the player as a /play VIEW on the views stack (KTV
+    exact). The view — not an overlay — is what makes the Android system
+    back reach Python (on_view_pop) instead of exiting the app. No
+    SafeArea on the player mount: the view carries padding=0, exactly like
+    KTV's ft.View. The key comparison is what makes retries and episode
+    switches remount instead of reusing a stale stage."""
+    global _active_player, _active_key
 
     try:
         page = flet_context.page
@@ -525,73 +573,84 @@ def _use_player_overlay(state, controller) -> None:
         return
 
     if not state.player_open:
-        _unmount_player_overlay(page)
+        if _active_player is not None or _pop_play_view(page):
+            _active_player = None
+            _active_key = None
+            _release_player_page_state(page)
         return
 
     error = getattr(state, "player_error", None)
     spec = getattr(state, "player_spec", None) or {}
     key = ("error", error) if error else ("play", spec.get("episode_session"), spec.get("resource"))
 
-    if key == _active_key and _in_overlay(page, _active_mount):
+    top_is_play = bool(page.views) and getattr(page.views[-1], "route", "") == "/play"
+    if key == _active_key and top_is_play:
         return  # already showing exactly this stage
-    _unmount_player_overlay(page)
+    if top_is_play:
+        page.views.pop()  # episode switch: replace with a fresh view
+
+    from hooks.use_focus_scope import focus_scope
 
     if error:
-        mount = _build_player_error(state, controller, error)
-        player = None
-    else:
-        from components.player.immersive_player import ImmersivePlayer
-        from services.store import get_store
-
-        player = ImmersivePlayer(
-            resource=spec.get("resource", ""),
-            title=spec.get("title", ""),
-            http_headers=spec.get("source_headers"),
-            resume_key=spec.get("episode_session"),
-            store=get_store(),
-            variants=spec.get("variants") or [],
-            on_close=lambda: _close_player(),
-            on_next=lambda: _play_adjacent(1, controller),
-            on_previous=lambda: _play_adjacent(-1, controller),
-            source_url=spec.get("source_url"),
-            source_referer=spec.get("source_referer"),
-            source_headers=spec.get("source_headers"),
-            proxied=spec.get("proxied", False),
-            subtitles=spec.get("subtitles") or [],
-            skip=spec.get("skip") or {},
+        # Playback couldn't start (e.g. the downloaded file went missing):
+        # a black stage view with Retry / Go Back — the same background the
+        # player would show, so the transition never flashes the app.
+        view = ft.View(
+            route="/play",
+            controls=[_build_player_error(state, controller, error)],
+            padding=0,
         )
-        # The controller owns the proxy; the player needs it to rebuild a
-        # url when a quality or an audio track is pinned.
-        app_controller = getattr(controller, "_app_controller", None)
-        player.hls_proxy = getattr(app_controller, "hls_proxy", None)
-        # focus_scope is a plain FUNCTION (KTV's form): the old
-        # @ft.component FocusScope rendered a frozen subtree — the exact
-        # crash class this overlay mount exists to avoid.
-        from hooks.use_focus_scope import focus_scope
+        page.views.append(view)
+        page.update()
+        _active_player = None
+        _active_key = key
+        return
 
-        # The whole shell is already SafeArea-wrapped (above) — do NOT wrap
-        # the player mount again; a nested SafeArea breaks the player overlay
-        # (the player's top bar under the status bar was the old complaint,
-        # fixed at shell level instead). Keep just the focus scope.
-        mount = focus_scope(player, lambda: _player_back())
+    from components.player.immersive_player import ImmersivePlayer
+    from services.store import get_store
 
-    _active_player, _active_mount, _active_key = player, mount, key
+    player = ImmersivePlayer(
+        resource=spec.get("resource", ""),
+        title=spec.get("title", ""),
+        http_headers=spec.get("source_headers"),
+        resume_key=spec.get("episode_session"),
+        store=get_store(),
+        on_close=lambda: _close_player(),
+        on_next=lambda: _play_adjacent(1, controller),
+        on_previous=lambda: _play_adjacent(-1, controller),
+        hls_proxy=getattr(
+            getattr(controller, "_app_controller", None), "hls_proxy", None
+        ),
+        source_url=spec.get("source_url") or "",
+        source_referer=spec.get("source_referer"),
+        source_headers=spec.get("source_headers"),
+        source_proxied=bool(spec.get("proxied", False)),
+        subtitles=spec.get("subtitles") or [],
+        skip=spec.get("skip") or {},
+        variants=spec.get("variants") or [],
+        variant_index=spec.get("variant_index"),
+    )
+    # focus_scope is a plain FUNCTION (KTV's form): the old @ft.component
+    # FocusScope rendered a frozen subtree — the exact crash class this
+    # imperative mount exists to avoid.
+    view = ft.View(
+        route="/play",
+        controls=[focus_scope(player, lambda: _close_player())],
+        padding=0,
+    )
+    page.views.append(view)
+    page.update()
+    _active_player, _active_key = player, key
     # The screen must not sleep while the player is open (KTV's wakelock).
-    from core.tasks import spawn as _spawn
-
     app_controller = getattr(controller, "_app_controller", None)
     if app_controller is not None and hasattr(app_controller, "update_wakelock"):
-        _spawn(app_controller.update_wakelock(), name="wakelock-on")
+        spawn(app_controller.update_wakelock(), name="wakelock-on")
     # The window-level key stream is the one that receives ARROW keys
     # (Flutter's focus traversal eats them before any KeyboardListener):
-    # register the player's handler there for the life of the mount.
-    if player is not None and hasattr(player, "handle_key"):
-        app_controller = getattr(controller, "_app_controller", None)
-        focus_manager = getattr(app_controller, "focus_manager", None)
-        if focus_manager is not None:
-            focus_manager.set_key_consumer(player.handle_key)
-    page.overlay.append(mount)
-    page.update()
+    # register the player's handler there for the life of the view.
+    focus_manager = getattr(app_controller, "focus_manager", None)
+    if focus_manager is not None and hasattr(player, "handle_key"):
+        focus_manager.set_key_consumer(player.handle_key)
 
 
 def _build_player_error(state, controller, message: str) -> ft.Control:
@@ -657,65 +716,6 @@ def _build_player_error(state, controller, message: str) -> ft.Control:
     )
 
 
-async def _player_back():
-    global _back_in_flight
-    if _back_in_flight:
-        # Nested call from player._on_back -> on_close -> _close_player during
-        # an in-flight close: return immediately so the outer _player_back can
-        # finish and unmount. Without this the chain reschedules itself forever.
-        return
-    _back_in_flight = True
-    # Back from the remote/keyboard: let the player save its position
-    # (bounded, 3s) before the shell tears it down.
-    # Matches ktv-player: call player's _on_back which routes through on_close
-    player = _active_player
-    if player is not None:
-        try:
-            await player._on_back(None)
-        except Exception:
-            logger.debug("suppressed")
-    await _async_close_player()
-
-
-async def _async_close_player():
-    global _active_player, _active_mount, _active_key, _back_in_flight
-
-    from flet import context as flet_context
-
-    from state.app_state import state
-
-    # The player's _on_back already called handle_close and on_close.
-    # Just unmount the overlay node the shell mounted imperatively.
-    _back_in_flight = False
-    mount = _active_mount
-    _active_mount = None
-    _active_player = None
-    _active_key = None
-    state.player_open = False
-    state.episodes_version += 1
-    # Unmount the overlay node the shell mounted imperatively.
-    if mount is not None:
-        try:
-            page = flet_context.page
-        except Exception:
-            page = None
-        if page is not None and _in_overlay(page, mount):
-            try:
-                page.overlay.remove(mount)
-                page.update()
-            except Exception:
-                ...
-
-
-def _close_player():
-    from flet import context as flet_context
-
-    page = flet_context.page
-    if page is None:
-        return
-    page.run_task(_player_back)
-
-
 def _build_download_quality_dialog(state, controller) -> ft.Control:
     """Which rendition to save offline — the same list the play dialog
     shows, because a silent sources[0] downloads whatever the provider
@@ -773,13 +773,17 @@ def _build_backend_picker(state, controller) -> ft.Control:
     announcing one."""
     from services.providers.base import PROVIDER_ORDER
 
-    # One short line per provider: what it is and what it costs. Kept to a
-    # few words — a picker is for choosing, not reading.
+    # One short line per provider: its rank and its cost. AniKato is the
+    # default (multi-language subtitles, strong streaming, no verification);
+    # KayoAnime needs no verification and serves direct MKV/MP4 files;
+    # AnimePahe is the best all-around streamer but sits behind Cloudflare
+    # with English-only subs; AnimeOut shines for downloads, also behind
+    # Cloudflare (owner's ranking, 2026-11-03).
     hints = {
-        "anikato": "Fast · direct streams · subtitles & dubs",
-        "animeout": "Huge catalogue · download links",
-        "animepahe": "Needs a one-time human check",
-        "kayoanime": "English subs · powers Discover",
+        "anikato": "Best overall · multi-language subs · great streaming",
+        "kayoanime": "No verification · direct MKV/MP4 downloads",
+        "animepahe": "Best streaming & downloads · needs verification · English subs",
+        "animeout": "Great for downloads · needs verification",
     }
 
     health = controller.sources_status() if hasattr(controller, "sources_status") else {}

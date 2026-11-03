@@ -91,7 +91,14 @@ def _rc4(key: str, data: bytes) -> bytes:
 
 
 def _clean(text: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", text or "")).strip()
+    # html.unescape: the site serves titles HTML-escaped ("Welsh &amp;
+    # Shedar") — the entity leaked into every surface (detail header, the
+    # player title, search) until this (owner, 2026-11-03).
+    import html as _html
+
+    return re.sub(
+        r"\s+", " ", re.sub(r"<[^>]+>", "", _html.unescape(text or ""))
+    ).strip()
 
 
 def _parse_items(html: str) -> list[Anime]:

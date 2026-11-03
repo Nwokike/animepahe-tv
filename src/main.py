@@ -315,6 +315,11 @@ class AppController:
             max_parallel = DEFAULT_MAX_PARALLEL_DOWNLOADS
         self.downloads = DownloadManager(store=self.store, max_parallel=max_parallel)
         self.downloads.on_progress = self._on_download_progress
+        # A Cloudflare wall on a file host must open the verification — the
+        # same window the play path shows — instead of failing silently
+        # (owner, 2026-11-03: AnimeOut downloads died on the 403 with no
+        # solver). The callback returns fresh file headers or None.
+        self.downloads.on_cloudflare = self._solve_download_cloudflare
         self.downloads.on_finished = self._on_download_finished
 
         await self.cache.start_sweep(interval=300)
@@ -448,8 +453,15 @@ class AppController:
             self._shell_action("close_dialog")
             return
         if state.player_open:
-            # The player's FocusScope handles Back and saves the position
-            # before the shell tears the player down — do nothing here.
+            # System/keyboard back while the player is up: the same funnel
+            # the player's own buttons use — awaited position save, then
+            # teardown, then the view pop (KTV's _begin_player_close).
+            import app_shell
+
+            if app_shell._active_player is not None:
+                app_shell._begin_player_close(app_shell._active_player)
+            else:
+                app_shell._close_player()
             return
         if ui.get("view") == "anime":
             self._shell_action("back")
@@ -1138,7 +1150,7 @@ class AppController:
         """
         if ".m3u8" not in (m3u8 or "").split("?")[0].lower():
             return []
-        from components.player.immersive_player import KWIK_USER_AGENT
+        from core.constants import KWIK_USER_AGENT
 
         headers = headers or {
             "User-Agent": KWIK_USER_AGENT,
@@ -1146,17 +1158,21 @@ class AppController:
         }
         if self.hls_proxy is not None:
             return await self.hls_proxy.fetch_variants(m3u8, headers=headers)
-        from components.player.immersive_player import (
-            KWIK_USER_AGENT,
-            _stream_variants,
-        )
+        from urllib.parse import urljoin
+
+        from services.hls_proxy import parse_hls_variants
 
         try:
             client = self.kwik._get_client()
             resp = await client.get(m3u8, headers=headers)
             if resp.status_code == 200 and resp.text:
                 # The master's own URL resolves the relative variants.
-                return _stream_variants(resp.text, m3u8)
+                variants = parse_hls_variants(resp.text)
+                for v in variants:
+                    uri = v.get("uri") or ""
+                    if uri and not uri.startswith(("http://", "https://")):
+                        v["uri"] = urljoin(m3u8, uri)
+                return variants
         except Exception as ex:
             logger.warning("variant fetch failed: %s", ex)
         return []
@@ -1281,7 +1297,7 @@ class AppController:
         need the kwik pair) so the player and the proxy rebuilds send
         exactly what the CDN requires.
         """
-        from components.player.immersive_player import KWIK_USER_AGENT
+        from core.constants import KWIK_USER_AGENT
 
         anime = await self._resolve_anime(anime_session)
         # Clear any previous open-failure so it can't blink over the new one.
@@ -2306,7 +2322,7 @@ class AppController:
         if kind == "file":
             await self.downloads.start_direct(episode_session, resolved, source_headers, metadata)
         else:
-            from components.player.immersive_player import KWIK_USER_AGENT
+            from core.constants import KWIK_USER_AGENT
 
             if not source_headers:
                 source_headers = {
@@ -2436,6 +2452,40 @@ class AppController:
             # the job's own manifest, which may still be resumable.
             await self.downloads.retry(episode_session)
         state.downloads_version += 1
+
+    async def _solve_download_cloudflare(self, episode_session: str, url: str):
+        """The download engine hit a Cloudflare wall on the file host: run
+        the verification exactly like the play path does and return fresh
+        file headers, or None when unsolved (the row then says why)."""
+        try:
+            rows = await self.store.get_downloads()
+            row = rows.get(episode_session) or {}
+            anime_session = row.get("anime_session") or ""
+            provider = self.router.get(self._owner_of(anime_session))
+        except Exception as ex:
+            logger.warning("download CF resolve: provider lookup failed: %s", ex)
+            return None
+        ensure = getattr(provider, "ensure_file_clearance", None)
+        if ensure is None:
+            return None
+        logger.info("download CF wall on %s — opening verification", url.split("/")[2])
+        try:
+            clearance = await ensure()
+        except Exception as ex:
+            logger.warning("download CF verify failed: %s", ex)
+            return None
+        if not clearance:
+            return None
+        solver = getattr(provider, "_solver", None)
+        referer = "https://ddl.animeout.com/"
+        try:
+            return solver.file_headers(clearance, referer=referer)
+        except Exception:
+            return {
+                "Cookie": clearance.get("cookies") or "",
+                "User-Agent": clearance.get("user_agent") or "",
+                "Referer": referer,
+            }
 
     async def cancel_download(self, episode_session: str):
         self.downloads.cancel(episode_session)
@@ -3067,6 +3117,34 @@ async def main(page: ft.Page):
         logger.warning("wakelock setup skipped: %s", ex)
 
     page.render(lambda: ControllerMethodsCtx(methods, lambda: AppShell()))
+
+    # ── Android system back (KTV's views pattern) ────────────────────────
+    # A /blank underlay beneath the shell means the shell view is never the
+    # root, so the OS back key always reaches Python as on_view_pop instead
+    # of exiting the app. The funnel: open modal → player (awaited position
+    # save + view pop) → the shell's own back handling.
+    def _ensure_back_underlay():
+        try:
+            if "/blank" not in [getattr(v, "route", "") for v in page.views]:
+                page.views.insert(0, ft.View(route="/blank"))
+                page.update()
+        except Exception:
+            logger.debug("back underlay install failed", exc_info=True)
+
+    def _handle_view_pop(e):
+        import app_shell
+        from core.dialogs import close_app_dialog
+
+        if close_app_dialog(page):
+            page.update()
+            return
+        if state.player_open and app_shell._active_player is not None:
+            app_shell._begin_player_close(app_shell._active_player)
+            return
+        controller._handle_global_back()
+
+    _ensure_back_underlay()
+    page.on_view_pop = _handle_view_pop
 
 
 if __name__ == "__main__":

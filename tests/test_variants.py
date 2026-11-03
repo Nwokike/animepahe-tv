@@ -1,11 +1,17 @@
-"""Master-playlist variant parsing drives the quality chip."""
+"""Master-playlist variant parsing drives the quality chip.
+
+The player no longer parses playlists itself — `services.hls_proxy` owns
+parsing (`parse_hls_variants`) and URI resolution (the proxy rewrites
+variant URIs with urljoin against the master's own address, which fixed
+the old every-variant-collapses-onto-the-first bug).
+"""
 
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from components.player.immersive_player import _stream_variants
+from services.hls_proxy import parse_hls_variants
 
 MASTER = """#EXTM3U
 #EXT-X-STREAM-INF:BANDWIDTH=1280000,RESOLUTION=640x360
@@ -33,26 +39,28 @@ https://cdn.example.com/720/index.m3u8
 
 
 def test_master_playlist_variants():
-    variants = _stream_variants(MASTER)
+    variants = parse_hls_variants(MASTER)
     assert len(variants) == 4
-    assert variants[0]["label"] == "360p"
-    assert variants[0]["height"] == 360
+    assert variants[0]["label"].startswith("640x360")
+    assert variants[0]["resolution"] == "640x360"
     assert variants[0]["uri"].endswith("360/index.m3u8")
-    assert variants[-1]["label"] == "1080p"
+    assert variants[-1]["label"].startswith("1920x1080")
     assert variants[-1]["bandwidth"] == 15000000
+    # Proxy pinning is by playlist order.
+    assert [v["index"] for v in variants] == [0, 1, 2, 3]
 
 
 def test_media_playlist_has_no_variants():
-    assert _stream_variants(MEDIA) == []
+    assert parse_hls_variants(MEDIA) == []
 
 
 def test_absolute_variant_uris():
-    variants = _stream_variants(ABS_MASTER)
+    variants = parse_hls_variants(ABS_MASTER)
     assert len(variants) == 1
     assert variants[0]["uri"] == "https://cdn.example.com/720/index.m3u8"
 
 
 def test_empty_and_malformed():
-    assert _stream_variants("") == []
-    assert _stream_variants("not a playlist") == []
-    assert _stream_variants("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n") == []
+    assert parse_hls_variants("") == []
+    assert parse_hls_variants("not a playlist") == []
+    assert parse_hls_variants("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n") == []

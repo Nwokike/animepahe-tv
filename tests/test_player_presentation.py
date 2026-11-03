@@ -25,7 +25,6 @@ import pytest
 
 from components.player.immersive_player import (
     _BOX_FITS,
-    FIT_OPTIONS,
     ImmersivePlayer,
 )
 from core import (
@@ -71,13 +70,22 @@ def _player(video=None, **attrs) -> ImmersivePlayer:
     player.video = video or _Video()
     player.subtitles = []
     player.skip = {}
-    player.speed_texts = []
-    player._speed_index = 2
-    player._speed_rate = 1.0
+    player._speed_idx = 2
     player._last_position = 0.0
+    player._last_duration = 0.0
     player._position_saved = False
     player._is_closing = False
+    player._playback_started = False
+    player._media_attached = False
+    player._watchdog_task = None
+    player._checkpoint_task = None
+    player._toast_gen = 0
+    player.resume_key = None
+    player.source_headers = {}
+    player.source_referer = None
+    player.hls_proxy = None
     player.toast_chip = _Chip()
+    player.toast_text = player.toast_chip.content
     for key, value in attrs.items():
         setattr(player, key, value)
     return player
@@ -142,7 +150,7 @@ async def test_settings_survive_other_sections(tmp_path):
 @pytest.mark.asyncio
 async def test_box_fit_maps_every_option_and_rejects_junk(tmp_path):
     store = JsonStore(filename=str(tmp_path / "fits.json"))
-    for name, _label in FIT_OPTIONS:
+    for name in ("contain", "cover", "fill"):
         await store.save_setting("video_fit", name)
         assert _player(store=store)._box_fit() is _BOX_FITS[name]
 
@@ -165,10 +173,10 @@ async def test_set_fit_persists_and_unknown_names_are_ignored(tmp_path):
             await asyncio.sleep(0.02)
         return store.get_setting("video_fit") == value
 
-    player._set_fit("cover")
+    player.set_fit("cover")
     assert await _wait_for("cover")
 
-    player._set_fit("melt-the-screen")
+    player.set_fit("melt-the-screen")
     await asyncio.sleep(0.05)
     assert store.get_setting("video_fit") == "cover"  # unchanged
 
@@ -196,7 +204,7 @@ async def test_toast_registers_at_mount_and_unregisters_at_unmount():
     async def _noop():
         return None
 
-    player._start_playback = _noop
+    player.start_playback = _noop
 
     player.did_mount()
     # Identity-free check: bound methods are fresh objects per access, so
@@ -273,13 +281,12 @@ async def _done():
 @pytest.mark.asyncio
 async def test_speed_cycle_confirm(no_spawn):
     player = _player()
-    label = type("T", (), {"value": "1x"})()
-    player.speed_texts = [label]
+    player.speed_text = type("T", (), {"value": "1.0x", "update": lambda self: None})()
 
-    player._cycle_speed()  # 1.0 -> 1.25
+    await player._cycle_speed()  # 1.0 -> 1.25
     assert player.video.rates == []  # rate set on the control, not the fake
-    assert player._speed_rate == 1.25
-    assert label.value == "1.25x"
+    assert player._speed_idx == 3  # SPEEDS[3] == 1.25
+    assert player.speed_text.value == "1.25x"
     assert player.toast_chip.content.value == "Speed 1.25x"
     assert player.toast_chip.visible is True
 

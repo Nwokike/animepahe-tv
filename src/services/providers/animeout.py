@@ -75,7 +75,7 @@ def _clean_title(raw: str) -> tuple[str, int, str]:
     elif "ova" in lower or "special" in lower:
         media_type = "OVA"
     return (
-        title.strip(" -–—")[
+        title.strip(" -–—")[  # noqa: RUF001 — the dash set is intentional
 
             :200
         ],
@@ -482,6 +482,16 @@ class AnimeOutProvider:
             if _title_relevance(title, anime.title) >= 100:
                 return await all_episodes(self, anime.session)
         return []
+
+    async def ensure_file_clearance(self) -> dict | None:
+        """Re-verify (or re-solve) the file host's clearance. The download
+        engine calls this through its `on_cloudflare` hook when a fetch
+        comes back Cloudflare-challenged — the same window the play path
+        shows, instead of a silent failure (owner, 2026-11-03)."""
+        if self._solver is None:
+            return None
+        self._solver.invalidate()
+        return await self._solver.clearance()
 
     async def sources_for_title(self, title: str, episode: int) -> list[Source]:
         results, _ = await self.search(title, 1)

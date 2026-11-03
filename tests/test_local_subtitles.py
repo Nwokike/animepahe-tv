@@ -146,7 +146,17 @@ def test_apply_local_subtitle_without_a_file_is_a_noop():
 
 
 def test_the_settings_sheet_and_the_bar_carry_the_entry_points():
-    source = inspect.getsource(ip.ImmersivePlayer)
+    # The player is split KTV-style (player + controls + handlers); the
+    # wiring may live in any of the three files, but it must EXIST.
+    import components.player.controls as controls_mod
+    import components.player.handlers as handlers_mod
+
+    source = "\n".join(
+        inspect.getsource(m)
+        for m in (ip, controls_mod, handlers_mod)
+        if hasattr(m, "__file__")
+    )
     assert "Load from file…" in source, "the settings row vanished"
-    assert "CLOSED_CAPTION_OUTLINED" in source, "the bar button vanished"
+    assert "SUBTITLES_ROUNDED" in source, "the bar button vanished"
+    assert "_pick_subtitle_file" in source, "the picker wiring vanished"
     assert "pick-subtitle" in source
