@@ -1,0 +1,655 @@
+"""Solver crash/hang regressions — M1.5.
+
+Each test kills one defect from the swarm audit:
+- desktop_cf_solver: the user closing the window left the 2-minute poll
+  running (parent hung); timeouts exited 0, indistinguishable from success
+- webview_solver: ANDROID_TV (a real PagePlatform) fails every WebView
+  method (gated to Android/iOS/macOS) and the solver spun forever; the
+  unbounded waits could pin the app open
+- kwik_resolver: the verification HEAD request derived its Referer from
+  the CDN URL instead of the kwik page; unguarded fetches raised
+- ddos_solver: get() could call solve() twice; concurrent gets shared one
+  verification window; the re-solve reused the stale-cookie client pool
+"""
+
+import asyncio
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+import flet as ft
+import pytest
+
+from services.kwik_resolver import KwikResolver
+
+# ---------------------------------------------------------------------------
+# desktop_cf_solver
+# ---------------------------------------------------------------------------
+
+
+class _ClosedEvent:
+    def is_set(self):
+        return True
+
+
+class _NotClosedEvent:
+    def is_set(self):
+        return False
+
+
+class _Events:
+    def __init__(self, closed):
+        self.closed = closed
+
+
+class _FakeWebview:
+    """Stands in for the pywebview module: only `renderer` matters to the
+    Chromium guard (the real attribute is set once start() picks one)."""
+
+    def __init__(self, renderer="edgechromium"):
+        self.renderer = renderer
+
+
+class _SolverExited(Exception):
+    """Mirrors os._exit: the real _fail never returns."""
+
+
+def test_desktop_solver_exits_when_the_user_closes_the_window(monkeypatch):
+    """The hang: the 120x1s poll kept calling get_cookies() on a dead
+    window and the parent's communicate() never returned."""
+    import services.desktop_cf_solver as dcs
+
+    class _Window:
+        def __init__(self):
+            self.events = _Events(_ClosedEvent())
+
+        def get_cookies(self):
+            raise AssertionError("must not poll a closed window")
+
+    calls = []
+
+    def _fail(reason):
+        calls.append(reason)
+        raise _SolverExited(reason)
+
+    monkeypatch.setattr(dcs, "webview", _FakeWebview())
+    monkeypatch.setattr(dcs, "_fail", _fail)
+    with pytest.raises(_SolverExited):
+        dcs.check_cookies(_Window())
+    assert calls == ["closed"]
+
+
+def test_desktop_solver_timeout_reports_an_error(monkeypatch):
+    import services.desktop_cf_solver as dcs
+
+    class _Window:
+        def __init__(self):
+            self.events = _Events(_NotClosedEvent())
+
+        def get_cookies(self):
+            return []
+
+        def destroy(self):
+            pass
+
+    monkeypatch.setattr(dcs, "webview", _FakeWebview())
+    monkeypatch.setattr(dcs.time, "sleep", lambda _s: None)  # instant loop
+    calls = []
+
+    def _fail(reason):
+        calls.append(reason)
+        raise _SolverExited(reason)
+
+    monkeypatch.setattr(dcs, "_fail", _fail)
+    with pytest.raises(_SolverExited):
+        dcs.check_cookies(_Window())
+    assert calls == ["timeout"]
+
+
+def test_is_challenge_complete_matches_target_cookies_case_insensitively():
+    from services.desktop_cf_solver import is_challenge_complete
+
+    class _Window:
+        def evaluate_js(self, script):
+            return ""
+
+        def get_current_url(self):
+            return "https://animepahe.com/"
+
+    # Real Set-Cookie headers arrive with original casing.
+    assert is_challenge_complete(_Window(), {"cf_clearance", "XSRF-TOKEN", "animepahe_session"})
+
+
+def test_is_challenge_complete_succeeds_on_generic_hosts_once_cleared():
+    """For public.animeout.xyz, the landing after solving CF is an nginx root
+    with title '403 Forbidden' and no animepahe cookies. With cf_clearance
+    in the jar and challenge markers gone, it must be recognized as complete."""
+    from services.desktop_cf_solver import is_challenge_complete
+
+    class _Window:
+        def evaluate_js(self, script):
+            return "403 Forbidden"
+
+        def get_current_url(self):
+            return "https://public.animeout.xyz/"
+
+    assert is_challenge_complete(_Window(), {"cf_clearance"}) is True
+
+    # Still on challenge -> False
+    class _ChallengeWin:
+        def evaluate_js(self, script):
+            return "Just a moment..."
+
+        def get_current_url(self):
+            return "https://public.animeout.xyz/"
+
+    assert is_challenge_complete(_ChallengeWin(), {"cf_clearance"}) is False
+
+
+def test_an_empty_title_is_never_a_completed_challenge():
+    """The regression that shipped an unusable pahe clearance: a title read
+    racing a navigation returns "" rather than a challenge word, and the old
+    negative-only check declared success while the interstitial looped."""
+    from services.desktop_cf_solver import is_challenge_complete
+
+    class _Racing:
+        def evaluate_js(self, script):
+            return ""
+
+        def get_current_url(self):
+            return "https://animepahe.pw/"
+
+    assert is_challenge_complete(_Racing(), {"cf_clearance"}) is False
+
+
+def test_site_cookies_or_a_site_title_are_positive_completion_signals():
+    """The old 1.0.9 signals, restored: the site's own cookies, or a real
+    (non-empty, non-challenge) title naming the site."""
+    from services.desktop_cf_solver import is_challenge_complete
+
+    class _NoTitleWin:
+        def evaluate_js(self, script):
+            return ""
+
+        def get_current_url(self):
+            return "https://animepahe.pw/"
+
+    # The site's own cookie is enough, even with no title.
+    assert is_challenge_complete(_NoTitleWin(), {"cf_clearance", "animepahe_session"}) is True
+
+    class _SiteWin:
+        def evaluate_js(self, script):
+            return "AnimePahe - Watch Anime Online"
+
+        def get_current_url(self):
+            return "https://animepahe.pw/"
+
+    assert is_challenge_complete(_SiteWin(), {"cf_clearance"}) is True
+
+
+# ---------------------------------------------------------------------------
+# webview_solver — TV platform fallback
+# ---------------------------------------------------------------------------
+
+
+class _FakeWebViewModule:
+    """Stands in for flet_webview: the TV shape raises the platform gate."""
+
+    class _WebView:
+        def __init__(self, **kwargs):
+            self.page = None
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+        async def get_current_url(self):
+            raise ft.FletUnsupportedPlatformException("supported on Android, iOS and macOS only")
+
+        async def set_javascript_mode(self, mode):
+            raise AssertionError("must not run on an unsupported platform")
+
+        async def disable_zoom(self):
+            raise AssertionError("must not run on an unsupported platform")
+
+    WebView = _WebView
+    WebViewConsoleMessageEvent = dict
+    JavaScriptMode = type("JavaScriptMode", (), {"UNRESTRICTED": "unrestricted"})
+
+
+class _TvPage:
+    """A page that reports ANDROID_TV — the platform that gates WebView."""
+
+    platform = ft.PagePlatform.ANDROID_TV
+
+    def show_dialog(self, dialog):
+        pass
+
+    def update(self):
+        pass
+
+    def pop_dialog(self):
+        pass
+
+    on_keyboard_event = None
+
+
+def test_tv_platform_falls_back_to_the_desktop_solver(monkeypatch):
+    """flet_webview's allow-list excludes ANDROID_TV: every method raises
+    FletUnsupportedPlatformException, so the mobile path must fail over
+    to the desktop solver instead of spinning forever."""
+    import services.webview_solver as wvs
+
+    monkeypatch.setitem(sys.modules, "flet_webview", _FakeWebViewModule)
+    fell_back = []
+    monkeypatch.setattr(
+        wvs.WebViewSolver,
+        "_solve_desktop",
+        staticmethod(lambda page, url, user_agent=None: _recorder(fell_back, page, url)),
+    )
+
+    async def _recorder(fell_back, page, url):
+        fell_back.append(url)
+        return ("cookies", "ua")
+
+    cookies, ua = asyncio.run(
+        wvs.WebViewSolver.solve_challenge(_TvPage(), "https://animepahe.com/")
+    )
+    assert fell_back == ["https://animepahe.com/"]
+    assert (cookies, ua) == ("cookies", "ua")
+
+
+# ---------------------------------------------------------------------------
+# kwik_resolver
+# ---------------------------------------------------------------------------
+
+
+class _FakeResp:
+    def __init__(self, status_code=200, text="", headers=None):
+        self.status_code = status_code
+        self.text = text
+        self.headers = headers or {}
+
+
+class _RecordingClient:
+    """Records head()/get() calls; head answers like a CDN m3u8."""
+
+    def __init__(self, get_error=None, head_status=200, head_ct="application/vnd.apple.mpegurl"):
+        self.heads = []
+        self.gets = []
+        self._get_error = get_error
+        self._head_status = head_status
+        self._head_ct = head_ct
+
+    async def head(self, url, headers=None, timeout=None):
+        self.heads.append((url, headers or {}))
+        return _FakeResp(self._head_status, headers={"content-type": self._head_ct})
+
+    async def get(self, url, headers=None, **kwargs):
+        self.gets.append((url, headers or {}))
+        if self._get_error is not None:
+            raise self._get_error
+        return _FakeResp(200, text="#EXTM3U")
+
+
+def test_verify_uses_the_kwik_page_as_referer():
+    """The HEAD request derived its Referer from the CDN's own URL, which
+    always fell back to the wrong host."""
+    client = _RecordingClient()
+    resolver = KwikResolver()
+    resolver._client = client  # type: ignore[assignment]
+    ok = asyncio.run(
+        resolver._verify("https://cdn-six.example/stream.m3u8", "https://kwik.si/e/ABC")
+    )
+    assert ok is True
+    _url, headers = client.heads[0]
+    assert headers["Referer"] == "https://kwik.si/"
+
+
+def test_fetch_failures_return_none_not_an_exception():
+    """The documented None contract used to leak transport errors."""
+    client = _RecordingClient(get_error=ConnectionError("dns"))
+    resolver = KwikResolver()
+    resolver._client = client  # type: ignore[assignment]
+    assert asyncio.run(resolver._resolve_dean("https://kwik.si/e/ABC")) is None
+    assert asyncio.run(resolver._resolve_direct_scan("https://kwik.si/e/ABC")) is None
+
+
+def test_verify_is_case_insensitive_about_the_content_type():
+    client = _RecordingClient(head_ct="application/X-MpegURL")
+    resolver = KwikResolver()
+    resolver._client = client  # type: ignore[assignment]
+    assert asyncio.run(resolver._verify("https://x/y.m3u8", "https://kwik.cx/")) is True
+
+
+# ---------------------------------------------------------------------------
+# ddos_solver — one solve gate
+# ---------------------------------------------------------------------------
+
+
+class _FakeStore:
+    async def get_clearance(self):
+        return {}
+
+    async def clear_clearance(self):
+        pass
+
+    async def save_clearance(self, cookies, ua, host=None):
+        pass
+
+
+def test_get_solves_at_most_once_per_call(monkeypatch):
+    """The rewrite branch and the plain branch each called solve() — an
+    unsolved state opened the verification window twice."""
+    from services.ddos_solver import DDoSSolver
+
+    solver = DDoSSolver()
+    solver.solve_allowed = False  # solve() stays a cheap no-op failure
+    solver._store = _FakeStore()
+    calls = []
+    original = solver.solve
+
+    async def counting_solve():
+        calls.append(1)
+        return await original()
+
+    solver.solve = counting_solve
+
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        @property
+        def url(self):
+            return "https://animepahe.com/api"
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            return _Resp()
+
+        async def __aexit__(self, *exc):
+            return None
+
+    solver._client = _Client()
+    asyncio.run(solver.get("https://animepahe.com/api"))
+    assert len(calls) == 1
+
+
+def test_re_solve_rebuilds_the_stale_cookie_client(monkeypatch):
+    """The re-solve reused the same primp client whose cookie_store held
+    the dead cf_clearance and resent it."""
+    from services.ddos_solver import DDoSSolver
+
+    solver = DDoSSolver()
+    solver.solve_allowed = False
+    solver._store = _FakeStore()
+    solver._solved = True
+    solver._cookies_str = "cf_clearance=dead"
+
+    closed = []
+    original_close = solver.close
+
+    async def counting_close():
+        closed.append(1)
+        return await original_close()
+
+    solver.close = counting_close
+
+    class _ChallengeResp:
+        status_code = 200
+        text = "<html>Just a moment...</html>"
+
+    class _Client:
+        async def get(self, url, **kwargs):
+            return _ChallengeResp()
+
+        async def __aexit__(self, *exc):
+            return None
+
+    solver._client = _Client()
+    asyncio.run(solver.get("https://animepahe.com/api"))
+    assert closed, "the client must be rebuilt before the re-solve"
+
+
+def test_desktop_solver_bails_on_plain_server_pages():
+    """The owner saw pywebview sit on an nginx page for the full two-minute
+    wait: a plainly non-challenge page must fail fast with a message the
+    parent surfaces, not poll for cf_clearance that will never come."""
+    from services.desktop_cf_solver import served_a_plain_page
+
+    class _Win:
+        def __init__(self, title):
+            self._title = title
+
+        def evaluate_js(self, _expr):
+            return self._title
+
+    assert served_a_plain_page(_Win("Welcome to nginx!")) == "Welcome to nginx!"
+    assert served_a_plain_page(_Win("502 Bad Gateway")) == "502 Bad Gateway"
+    assert served_a_plain_page(_Win("Index of /")) == "Index of /"
+    assert served_a_plain_page(_Win("Just a moment...")) is None
+    assert served_a_plain_page(_Win("AnimePahe")) is None
+    assert served_a_plain_page(_Win("")) is None
+
+
+def test_desktop_solver_bails_on_a_403_nginx_page_too():
+    """The owner's latest run: the animeout file host answered a plain
+    nginx 403 (not a Cloudflare challenge) and the solver sat on it. 403
+    must be in the fail-fast set as well as the welcome page."""
+    from services.desktop_cf_solver import served_a_plain_page
+
+    class _Win:
+        def evaluate_js(self, _expr):
+            return "403 Forbidden"
+
+    assert served_a_plain_page(_Win()) == "403 Forbidden"
+
+
+# ---------------------------------------------------------------------------
+# desktop_cf_solver & webview_solver — Phase 2 Step 7: the UA pin, the
+# renderer guard, and the loaded-page fast path
+# ---------------------------------------------------------------------------
+
+
+class _DesktopPlatform:
+    """Any platform whose is_mobile() is False sends solve_challenge down
+    the desktop path — no enum guessing needed."""
+
+    def is_mobile(self):
+        return False
+
+
+class _DesktopPage:
+    platform = _DesktopPlatform()
+
+
+class _Morsel:
+    def __init__(self, value):
+        self.value = value
+
+
+class _Loaded:
+    def __init__(self):
+        self.callbacks = []
+
+    def __iadd__(self, callback):
+        self.callbacks.append(callback)
+        return self
+
+
+class _RunWindow:
+    def __init__(self):
+        self.events = type("_Ev", (), {"loaded": _Loaded()})()
+        self.destroyed = False
+
+    def destroy(self):
+        self.destroyed = True
+
+
+class _RunWebview:
+    """The pywebview module surface run() touches."""
+
+    def __init__(self, renderer="edgechromium"):
+        self.renderer = renderer
+        self.created = None
+        self.started = None
+
+    def create_window(self, title, url, **kwargs):
+        self.created = (title, url, kwargs)
+        return _RunWindow()
+
+    def start(self, func, window, **kwargs):
+        self.started = (func, window, kwargs)
+
+
+def test_desktop_argv_carries_the_pinned_user_agent():
+    """cf_clearance is bound to the UA that solved it, so the child must
+    present the stored string, not the system default."""
+    from services.webview_solver import _desktop_argv
+
+    assert _desktop_argv("py", "solver.py", "https://x/", None) == [
+        "py",
+        "solver.py",
+        "https://x/",
+    ]
+    assert _desktop_argv("py", "solver.py", "https://x/", "UA/7") == [
+        "py",
+        "solver.py",
+        "https://x/",
+        "UA/7",
+    ]
+
+
+def test_solve_challenge_forwards_the_pinned_ua_to_the_subprocess(monkeypatch):
+    import services.webview_solver as wvs
+
+    seen = {}
+
+    async def _recorder(page, url, user_agent=None):
+        seen["url"] = url
+        seen["ua"] = user_agent
+        return ("cookies", "ua")
+
+    monkeypatch.setattr(wvs.WebViewSolver, "_solve_desktop", staticmethod(_recorder))
+    asyncio.run(
+        wvs.WebViewSolver.solve_challenge(
+            _DesktopPage(), "https://animepahe.com/", user_agent="UA/9"
+        )
+    )
+    assert seen == {"url": "https://animepahe.com/", "ua": "UA/9"}
+
+
+def test_desktop_run_pins_the_stored_ua_into_the_window(monkeypatch):
+    """A re-solve must present the same UA the clearance is bound to — and
+    the child must carry that UA home even if the page never reports one."""
+    import services.desktop_cf_solver as dcs
+
+    fake = _RunWebview()
+    monkeypatch.setattr(dcs, "webview", fake)
+    monkeypatch.setattr(dcs, "captured_ua", dcs.FALLBACK_UA)
+    # test_store.py sets FLET_APP_STORAGE_DATA at import; unset it so this
+    # test pins the ephemeral-profile fallback deterministically.
+    monkeypatch.delenv("FLET_APP_STORAGE_DATA", raising=False)
+    dcs.run("https://animepahe.com/", "UA/stored")
+    func, window, kwargs = fake.started
+    assert func is dcs.check_cookies
+    assert window is dcs.window
+    assert kwargs["user_agent"] == "UA/stored"
+    # No FLET_APP_STORAGE_DATA in the test env -> ephemeral profile fallback.
+    assert kwargs["private_mode"] is True
+    assert kwargs["storage_path"] is None
+    assert dcs.captured_ua == "UA/stored"
+    assert fake.created[1] == "https://animepahe.com/"
+
+
+def test_desktop_solver_refuses_a_non_chromium_renderer(monkeypatch):
+    """MSHTML (or a missing WebView2 runtime) has no get_cookies() — the old
+    code spun the full two minutes for it."""
+    import services.desktop_cf_solver as dcs
+
+    class _Win:
+        def __init__(self):
+            self.events = _Events(_NotClosedEvent())
+            self.destroyed = False
+
+        def get_cookies(self):
+            raise AssertionError("must not poll with no cookie support")
+
+        def destroy(self):
+            self.destroyed = True
+
+    win = _Win()
+    monkeypatch.setattr(dcs, "webview", _FakeWebview("mshtml"))
+    calls = []
+
+    def _fail(reason):
+        calls.append(reason)
+        raise _SolverExited(reason)
+
+    monkeypatch.setattr(dcs, "_fail", _fail)
+    with pytest.raises(_SolverExited):
+        dcs.check_cookies(win)
+    assert win.destroyed
+    assert calls == ["unsupported-renderer (mshtml) — install the WebView2 Runtime"]
+
+
+def test_desktop_solver_emits_success_the_moment_a_solved_page_loads(monkeypatch, capsys):
+    """A page that already carries the clearance (a returning user whose
+    cookie survived) is judged on load, not after the first 1 s tick."""
+    import services.desktop_cf_solver as dcs
+
+    class _Win:
+        def __init__(self):
+            self.destroyed = False
+
+        def evaluate_js(self, expr):
+            return "UA/live" if expr == "navigator.userAgent" else "AnimePahe"
+
+        def get_cookies(self):
+            return [
+                {
+                    "cf_clearance": _Morsel("abc"),
+                    "animepahe_session": _Morsel("s1"),
+                }
+            ]
+
+        def destroy(self):
+            self.destroyed = True
+
+    win = _Win()
+    monkeypatch.setattr(dcs, "window", win)
+    monkeypatch.setattr(dcs, "_done", False)
+    monkeypatch.setattr(dcs, "captured_ua", dcs.FALLBACK_UA)
+    monkeypatch.setattr(dcs, "page_loaded_once", False)
+
+    dcs.on_loaded()
+    assert win.destroyed
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload == {
+        "cookies": "cf_clearance=abc; animepahe_session=s1",
+        "user_agent": "UA/live",
+    }
+    # the latch: a second loaded event must not re-emit
+    dcs.on_loaded()
+    assert capsys.readouterr().out == ""
+
+
+def test_desktop_solver_stays_quiet_while_the_challenge_runs(monkeypatch, capsys):
+    import services.desktop_cf_solver as dcs
+
+    class _Win:
+        def evaluate_js(self, expr):
+            return "UA"
+
+        def get_cookies(self):
+            return [{"__cf_bm": _Morsel("x")}]
+
+        def destroy(self):
+            raise AssertionError("must not destroy while challenging")
+
+    monkeypatch.setattr(dcs, "window", _Win())
+    monkeypatch.setattr(dcs, "_done", False)
+    monkeypatch.setattr(dcs, "page_loaded_once", False)
+    dcs.on_loaded()
+    assert capsys.readouterr().out == ""
+    assert dcs._done is False

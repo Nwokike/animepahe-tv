@@ -1,0 +1,115 @@
+"""Design tokens — the generic scale (ported from the house standard).
+
+Single canonical namespace: import these names directly (``from
+core.tokens import SPACING_XS, ...``). Units: logical pixels throughout,
+EXCEPT ``ANIMATION_*`` which are milliseconds. ``CARD_ASPECT_RATIO`` is
+unitless (width / height).
+
+Split with ``core/constants.py`` is intentional: tokens are the generic
+scale; constants.py holds per-component metrics and copy. Do not merge
+them — component metrics change with redesigns, the scale does not.
+"""
+
+from typing import Final
+
+__all__ = [
+    "ANIMATION_FAST",
+    "ANIMATION_NORMAL",
+    "ANIMATION_SLOW",
+    "BORDER_RADIUS_FULL",
+    "BORDER_RADIUS_LG",
+    "BORDER_RADIUS_MD",
+    "BORDER_RADIUS_SM",
+    "BORDER_RADIUS_XL",
+    "BREAKPOINT_TABLET",
+    "CARD_ASPECT_LANDSCAPE",
+    "CARD_ASPECT_PORTRAIT",
+    "DIALOG_HEIGHT_MD",
+    "DIALOG_WIDTH_MD",
+    "FONT_FAMILY_MONO",
+    "FONT_FAMILY_PRIMARY",
+    "FONT_LG",
+    "FONT_MD",
+    "FONT_SM",
+    "FONT_XL",
+    "FONT_XS",
+    "FONT_XXL",
+    "FONT_XXXL",
+    "GRID_COL",
+    "GRID_RUN_SPACING",
+    "GRID_SPACING",
+    "ICON_LG",
+    "ICON_MD",
+    "ICON_SM",
+    "ICON_XL",
+    "SPACING_LG",
+    "SPACING_MD",
+    "SPACING_SM",
+    "SPACING_XL",
+    "SPACING_XS",
+]
+
+# Typography. Primary is the bundled Outfit (registered in main.py via
+# page.fonts); when it is missing Flet falls back to the platform default
+# automatically, so no explicit fallback stack is needed. Mono is the
+# platform monospace ("Courier New" on desktop, automatic fallback on
+# Android/iOS where it does not ship).
+FONT_FAMILY_PRIMARY: Final = "Outfit"
+FONT_FAMILY_MONO: Final = "Courier New"
+
+FONT_XS: Final = 10
+FONT_SM: Final = 11
+FONT_MD: Final = 12
+FONT_LG: Final = 16
+FONT_XL: Final = 18
+FONT_XXL: Final = 24
+FONT_XXXL: Final = 32
+
+# Spacing & Padding (logical px, 4pt grid: every step divisible by 4).
+SPACING_XS: Final = 4
+SPACING_SM: Final = 8
+SPACING_MD: Final = 12
+SPACING_LG: Final = 20
+SPACING_XL: Final = 32
+
+# Border Radii (logical px). FULL is a large-but-finite pill radius —
+# 9999-class values can overflow rounding on some targets; 999 is enough
+# to fully round any realistic pill.
+BORDER_RADIUS_SM: Final = 4
+BORDER_RADIUS_MD: Final = 8
+BORDER_RADIUS_LG: Final = 12
+BORDER_RADIUS_XL: Final = 16
+BORDER_RADIUS_FULL: Final = 999
+
+# Icon Dimensions (logical px).
+ICON_SM: Final = 16
+ICON_MD: Final = 20
+ICON_LG: Final = 24
+ICON_XL: Final = 32
+
+# Animation Durations (milliseconds, not px).
+ANIMATION_FAST: Final = 150
+ANIMATION_NORMAL: Final = 250
+ANIMATION_SLOW: Final = 350
+
+# Component metrics. This app's grid is responsive (ResponsiveRow), so the
+# card shapes are aspect ratios rather than fixed extents.
+CARD_ASPECT_LANDSCAPE: Final = 1.67
+CARD_ASPECT_PORTRAIT: Final = 0.67
+DIALOG_WIDTH_MD: Final = 500
+DIALOG_HEIGHT_MD: Final = 420
+
+# The ONE grid contract: every catalog grid in the app (Home, Discover,
+# Search, the detail episode grid) rides these ResponsiveRow column spans
+# and these grid spacings, so a card is the same size on every screen and
+# a fix here lands everywhere. Fix once, solved everywhere (owner's
+# requirement, 2026-10-19).
+GRID_COL: Final = {"xs": 6, "sm": 4, "md": 3, "lg": 2, "xl": 2}
+GRID_SPACING: Final = 16
+GRID_RUN_SPACING: Final = 16
+
+# Material 3 window-class boundary (dp): below it the header drops the
+# redundant backend badge, because the title pill already opens the same
+# source picker and a phone's action row needs the room. Above it (tablet,
+# TV) both readouts ride the scrolling action row.
+BREAKPOINT_TABLET: Final = 600

@@ -1,0 +1,919 @@
+"""Local HLS reverse proxy & playlist rewriter.
+
+Why this exists: the stream hosts (kwik unpacked CDNs) require the exact
+User-Agent + Referer this app resolves with, and the video backends do not
+send them. A raw m3u8 URL handed to the player fails with "Failed to open".
+The proxy fetches playlists/segments/keys with the right headers and
+rewrites every URI in the playlist so the player only ever talks to
+127.0.0.1 — which also makes quality and audio switching possible
+(manifest rewriting pins a variant or an audio rendition).
+
+Ported from the house player's proxy (same design, no shared code): the
+upstream client is primp with Chrome impersonation, the local socket is
+hand-rolled HTTP/1.1, reads are bounded, and headers are injected per
+request. Nothing leaves the device except the media requests the user made.
+"""
+
+import asyncio
+import base64
+import json
+import logging
+import re
+import time
+import urllib.parse
+
+import primp
+
+from core.artwork import PROBE_REFERERS, guarded_host
+
+logger = logging.getLogger(__name__)
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+KEY_URI_PATTERN = re.compile(r'URI=["\']([^"\']+)["\']')
+
+# #EXT-X-STREAM-INF:BANDWIDTH=123,RESOLUTION=1920x1080,CODECS="..."
+_ATTR_PATTERN = re.compile(r'([A-Z0-9\-]+)=("([^"]*)"|[^,]*)')
+
+MEDIA_URI_PATTERN = re.compile(r"""(URI=)["']([^"']+)["']""")
+
+# Local reason table for the hand-rolled status lines. primp 2.0.1 exposes no
+# response.reason_phrase, so upstream phrases cannot be forwarded verbatim —
+# strict players reject "Unknown", which is why 429/418 (what CDNs answer
+# with) are named here.
+REASON_PHRASES = {
+    200: "OK",
+    206: "Partial Content",
+    301: "Moved Permanently",
+    302: "Found",
+    400: "Bad Request",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    416: "Range Not Satisfiable",
+    418: "I'm a Teapot",
+    429: "Too Many Requests",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+}
+
+
+class PlaylistFetchError(Exception):
+    """Upstream playlist fetch failed (network or non-200)."""
+
+    def __init__(self, url: str, reason):
+        super().__init__(f"{url}: {reason}")
+        self.url = url
+        self.reason = reason
+
+
+def _parse_attrs(attr_text: str) -> dict[str, str]:
+    """Parse an HLS attribute list into a dict (quoted values unquoted)."""
+    result: dict[str, str] = {}
+    for m in _ATTR_PATTERN.finditer(attr_text):
+        result[m.group(1)] = m.group(3) if m.group(3) is not None else m.group(2)
+    return result
+
+
+def _fmt_bandwidth(bandwidth: int) -> str:
+    if bandwidth >= 1_000_000:
+        return f"{bandwidth / 1_000_000:.1f} Mbps"
+    if bandwidth > 0:
+        return f"{round(bandwidth / 1_000)} kbps"
+    return ""
+
+
+def _variant_label(variant: dict) -> str:
+    resolution = variant.get("resolution") or ""
+    bw = _fmt_bandwidth(variant.get("bandwidth", 0))
+    if resolution and bw:
+        return f"{resolution}  ({bw})"
+    return resolution or bw or f"Variant {variant.get('index', '?')}"
+
+
+def parse_hls_variants(content: str) -> list[dict]:
+    """Parse a master playlist's #EXT-X-STREAM-INF variants.
+
+    Returns [{index, uri, bandwidth, resolution, label}] in playlist order.
+    A media playlist (no variants) returns [].
+    """
+    variants: list[dict] = []
+    pending: dict | None = None
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#EXT-X-STREAM-INF:"):
+            attrs = _parse_attrs(stripped[len("#EXT-X-STREAM-INF:") :])
+            try:
+                bandwidth = int(attrs.get("BANDWIDTH", "0") or 0)
+            except ValueError:
+                bandwidth = 0
+            pending = {
+                "bandwidth": bandwidth,
+                "resolution": attrs.get("RESOLUTION", ""),
+            }
+        elif stripped and not stripped.startswith("#") and pending is not None:
+            pending["uri"] = stripped
+            variants.append(pending)
+            pending = None
+    for i, v in enumerate(variants):
+        v["index"] = i
+        v["label"] = _variant_label(v)
+    return variants
+
+
+def parse_hls_audio_tracks(content: str) -> list[dict]:
+    """Parse a master playlist's external #EXT-X-MEDIA TYPE=AUDIO renditions.
+
+    Only renditions with their own URI are returned — audio muxed into the
+    video variants cannot be switched via manifest rewriting.
+    """
+    tracks: list[dict] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("#EXT-X-MEDIA:"):
+            continue
+        attrs = _parse_attrs(stripped[len("#EXT-X-MEDIA:") :])
+        if attrs.get("TYPE", "").upper() != "AUDIO" or not attrs.get("URI"):
+            continue
+        tracks.append(
+            {
+                "name": attrs.get("NAME") or attrs.get("LANGUAGE") or "Audio",
+                "language": attrs.get("LANGUAGE", ""),
+                "group": attrs.get("GROUP-ID", ""),
+                "uri": attrs["URI"],
+                "default": attrs.get("DEFAULT", "").upper() == "YES",
+            }
+        )
+    return tracks
+
+
+def _b64_encode(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode("utf-8")).decode("utf-8").rstrip("=")
+
+
+def _b64_decode(s: str) -> str:
+    padding = (4 - len(s) % 4) % 4
+    return base64.urlsafe_b64decode(s + ("=" * padding)).decode("utf-8")
+
+
+# --- The display context: display-ready srcs for remote artwork -----------
+# The controller sets this once the proxy is up. `image_url()` is what the
+# display sites call; it wraps a RAW provider URL on the way to a control,
+# so nothing persisted ever carries a loopback port (the port changes every
+# run).
+_display_base: str | None = None
+_display_web = False
+
+IMAGE_CACHE_TTL = 900.0
+IMAGE_CACHE_MAX = 128
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+# Failed fetches are negative-cached briefly and answered with a 1x1
+# transparent PNG (200): the renderer treats any non-200 as a page error
+# per image, and one walled host (animeout's CF-challenged wp-content)
+# used to bury the log in hundreds of them per render — every repeat also
+# re-fetched the wall. The placeholder + cache makes a blocked host quiet
+# and cheap; a routable host that recovers serves real bytes after the TTL.
+IMAGE_FAIL_TTL = 90.0
+PLACEHOLDER_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+    "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+)
+
+
+def set_display_context(base: str | None, web: bool) -> None:
+    """The running proxy's base URL, and whether the platform is web (where
+    CORS blocks every cross-origin image)."""
+    global _display_base, _display_web
+    _display_base = base
+    _display_web = web
+
+
+def image_url(url: str, provider: str = "") -> str:
+    """The display src for remote artwork: the raw URL, or the loopback
+    /image route when the platform needs it — web (CORS) or a guarded host
+    (animeout's CF-challenged images; live probe 2026-10-15). data: URIs
+    (animepahe bakes those) and URLs with no context pass through."""
+    if not url or url.startswith("data:") or _display_base is None:
+        return url
+    if not (_display_web or guarded_host(url)):
+        return url
+    params = {"url": _b64_encode(url)}
+    referer = PROBE_REFERERS.get(provider or "", "")
+    if referer:
+        params["referer"] = _b64_encode(referer)
+    return f"{_display_base}/image?{urllib.parse.urlencode(params)}"
+
+
+class HLSProxy:
+    """A loopback HTTP server that rewrites HLS playlists and streams media."""
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 0):
+        self.host = host
+        self.requested_port = port
+        self.port: int | None = None
+        self._server: asyncio.Server | None = None
+        self._http_client = None
+        self._handlers: set[asyncio.Task] = set()
+        self._started = False
+        # Memoized master fetches: variants + audio double-fetched the same
+        # URL (2 upstream GETs per dialog open).
+        self._master_cache: dict[str, tuple[float, str, str]] = {}
+        self._master_ttl = 30.0
+        # Artwork fetches (the /image route): small, immutable-ish, TTL'd.
+        self._image_cache: dict[str, tuple[bytes, str, float]] = {}
+        # Failed image keys -> retry-after stamp (negative cache).
+        self._image_fail: dict[str, float] = {}
+
+    async def start(self) -> str:
+        """Start the proxy server and return base URL e.g. http://127.0.0.1:8888."""
+        if self._server is not None:
+            return f"http://{self.host}:{self.port}"
+
+        # primp with Chrome impersonation is NOT optional here: the stream
+        # hosts fingerprint TLS and answer 403 to plain httpx (verified -
+        # httpx 403 on every header combination, primp 200). This is the same
+        # client the kwik resolver uses, so the CDN sees one consistent
+        # fingerprint for the resolve and for playback.
+        self._http_client = primp.AsyncClient(
+            impersonate="chrome",
+            timeout=20.0,
+        )
+
+        async def _tracked_client(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            task = asyncio.current_task()
+            if task is not None:
+                self._handlers.add(task)
+                try:
+                    await self._handle_client(reader, writer)
+                finally:
+                    self._handlers.discard(task)
+            else:
+                await self._handle_client(reader, writer)
+
+        try:
+            self._server = await asyncio.start_server(
+                _tracked_client,
+                host=self.host,
+                port=self.requested_port,
+            )
+        except BaseException:
+            # Socket bind failed: close the client we already created, or it
+            # leaks for the process. primp 2.0.1's AsyncClient has no
+            # aclose() — the context-manager protocol is the only release.
+            await self._http_client.__aexit__(None, None, None)
+            self._http_client = None
+            raise
+
+        sockets = self._server.sockets
+        if sockets:
+            self.port = sockets[0].getsockname()[1]
+        else:
+            self.port = self.requested_port
+
+        # The local socket is hand-rolled HTTP/1.1 (see _send_response).
+        self._started = True
+        logger.info("HLSProxy started at http://%s:%s (upstream HTTP/2)", self.host, self.port)
+        return f"http://{self.host}:{self.port}"
+
+    async def stop(self):
+        """Stop the proxy server cleanly."""
+        was_running = self._started or self._server is not None
+        try:
+            for task in list(self._handlers):
+                task.cancel()
+            if self._handlers:
+                await asyncio.gather(*self._handlers, return_exceptions=True)
+                self._handlers.clear()
+            if self._server:
+                self._server.close()
+                try:
+                    await asyncio.wait_for(self._server.wait_closed(), timeout=2.0)
+                except TimeoutError:
+                    logger.debug("Proxy server still draining after 2s — continuing")
+                except asyncio.CancelledError:
+                    raise
+        finally:
+            self._server = None
+            if self._http_client:
+                try:
+                    await self._http_client.__aexit__(None, None, None)
+                except Exception:
+                    logger.debug("suppressed")
+                self._http_client = None
+            self.port = None
+            self._started = False
+            self._master_cache.clear()
+            self._image_cache.clear()
+            self._image_fail.clear()
+            set_display_context(None, False)
+            if was_running:
+                logger.info("HLSProxy stopped")
+
+    def get_proxy_url(
+        self,
+        target_url: str,
+        referer: str | None = None,
+        headers: dict[str, str] | None = None,
+        variant: int | None = None,
+        audio: str | None = None,
+    ) -> str:
+        """Construct a local proxy playlist URL for the player.
+
+        variant: index into parse_hls_variants() order — pins that quality.
+        audio: NAME of an #EXT-X-MEDIA audio rendition �� pins that track.
+        """
+        if not self.port:
+            raise RuntimeError("HLSProxy is not running. Call start() first.")
+
+        params = {"url": _b64_encode(target_url)}
+        if referer:
+            params["referer"] = _b64_encode(referer)
+        if headers:
+            params["headers"] = _b64_encode(json.dumps(headers))
+        if variant is not None:
+            params["variant"] = str(variant)
+        if audio:
+            params["audio"] = audio
+
+        query = urllib.parse.urlencode(params)
+        return f"http://{self.host}:{self.port}/playlist.m3u8?{query}"
+
+    def _upstream_headers(
+        self, referer: str | None, headers: dict[str, str] | None
+    ) -> dict[str, str]:
+        upstream = {"User-Agent": USER_AGENT}
+        if referer:
+            upstream["Referer"] = referer
+        upstream.update(headers or {})
+        return upstream
+
+    async def fetch_master(
+        self,
+        target_url: str,
+        headers: dict[str, str] | None = None,
+        referer: str | None = None,
+    ):
+        """Fetch a playlist for inspection. Returns (content_type, text)."""
+        now = time.monotonic()
+        cache_key = f"{target_url}|{referer or ''}|{json.dumps(headers or {}, sort_keys=True)}"
+        cached = self._master_cache.get(cache_key)
+        if cached and now - cached[0] < self._master_ttl:
+            return cached[1], cached[2]
+        if not self._http_client:
+            raise PlaylistFetchError(target_url, "proxy client not started")
+        # Same default UA as the proxy path (bare clients are blocked by some
+        # origins).
+        merged = {"User-Agent": USER_AGENT}
+        if referer:
+            merged["Referer"] = referer
+        merged.update(headers or {})
+        try:
+            resp = await self._http_client.get(target_url, headers=merged, follow_redirects=True)
+        except Exception as ex:
+            raise PlaylistFetchError(target_url, ex) from ex
+        if resp.status_code != 200:
+            raise PlaylistFetchError(target_url, f"upstream status {resp.status_code}")
+        content_type = next((v for k, v in resp.headers.items() if k.lower() == "content-type"), "")
+        text = resp.text
+        # Cap master cache size to 50 entries
+        if len(self._master_cache) >= 50:
+            expired = [k for k, v in self._master_cache.items() if now - v[0] >= self._master_ttl]
+            for k in expired:
+                self._master_cache.pop(k, None)
+            if len(self._master_cache) >= 50:
+                oldest = sorted(self._master_cache.items(), key=lambda kv: kv[1][0])
+                for k, _ in oldest[: len(self._master_cache) - 49]:
+                    self._master_cache.pop(k, None)
+        self._master_cache[cache_key] = (now, content_type, text)
+        return content_type, text
+
+    async def fetch_variants(
+        self, target_url: str, headers: dict[str, str] | None = None, referer: str | None = None
+    ) -> list[dict]:
+        """Fetch and parse the variant list of an HLS master playlist."""
+        try:
+            _, text = await self.fetch_master(target_url, headers, referer)
+        except PlaylistFetchError:
+            return []
+        if not text:
+            return []
+        return parse_hls_variants(text)
+
+    async def fetch_audio_tracks(
+        self, target_url: str, headers: dict[str, str] | None = None, referer: str | None = None
+    ) -> list[dict]:
+        """Fetch and parse the external audio renditions of an HLS master."""
+        try:
+            _, text = await self.fetch_master(target_url, headers, referer)
+        except PlaylistFetchError:
+            return []
+        if not text:
+            return []
+        return parse_hls_audio_tracks(text)
+
+    # Hand-rolled server hardening: no read timeout = Slowloris hold;
+    # unbounded headers = memory abuse. Local-only, but cheap to bound.
+    _READ_TIMEOUT = 5.0
+    _MAX_HEADER_LINES = 64
+    _MAX_HEADER_BYTES = 8192
+    _MAX_QUERY_BYTES = 16384
+
+    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        async def _send400(msg: bytes) -> None:
+            try:
+                await self._send_response(writer, 400, "text/plain", msg)
+
+            except Exception:
+                logger.debug("suppressed")
+
+        try:
+            try:
+                line = await asyncio.wait_for(reader.readline(), timeout=self._READ_TIMEOUT)
+            except TimeoutError:
+                writer.close()
+                return
+            if not line:
+                writer.close()
+                await writer.wait_closed()
+                return
+            if len(line) > self._MAX_HEADER_BYTES:
+                await _send400(b"Request line too long")
+                return
+
+            req_line = line.decode("utf-8", errors="ignore").strip()
+            parts = req_line.split()
+            if len(parts) < 2:
+                await _send400(b"Bad request line")
+                return
+
+            method, path_qs = parts[0].upper(), parts[1]
+            if method != "GET":
+                # The player only ever GETs from the proxy.
+                await self._send_response(writer, 405, "text/plain", b"Method Not Allowed")
+                return
+            if len(path_qs) > self._MAX_QUERY_BYTES:
+                await _send400(b"Request URI too long")
+                return
+
+            req_headers = {}
+            header_bytes = 0
+            for _ in range(self._MAX_HEADER_LINES + 1):
+                try:
+                    h_line = await asyncio.wait_for(reader.readline(), timeout=self._READ_TIMEOUT)
+                except TimeoutError:
+                    writer.close()
+                    return
+                if not h_line or h_line in (b"\r\n", b"\n"):
+                    break
+                header_bytes += len(h_line)
+                if header_bytes > self._MAX_HEADER_BYTES:
+                    await _send400(b"Headers too large")
+                    return
+                h_str = h_line.decode("utf-8", errors="ignore").strip()
+                if ":" in h_str:
+                    k, v = h_str.split(":", 1)
+                    req_headers[k.strip().lower()] = v.strip()
+            else:
+                await _send400(b"Too many headers")
+                return
+
+            parsed = urllib.parse.urlparse(path_qs)
+            query = urllib.parse.parse_qs(parsed.query)
+
+            raw_target_url = query.get("url", [None])[0]
+            if not raw_target_url:
+                await self._send_response(writer, 400, "text/plain", b"Missing url param")
+                return
+
+            try:
+                target_url = _b64_decode(raw_target_url)
+            except Exception:
+                await _send400(b"Invalid url encoding")
+                return
+
+            referer = None
+            raw_ref = query.get("referer", [None])[0]
+            if raw_ref:
+                try:
+                    referer = _b64_decode(raw_ref)
+                except Exception:
+                    await _send400(b"Invalid referer encoding")
+                    return
+
+            custom_headers = {}
+            raw_hdrs = query.get("headers", [None])[0]
+            if raw_hdrs:
+                try:
+                    decoded = json.loads(_b64_decode(raw_hdrs))
+                except Exception:
+                    await _send400(b"Invalid headers encoding")
+                    return
+                # Must be a flat string map: a JSON list/str would crash
+                # upstream.update() later, and CRLF smuggles response splits.
+                if not isinstance(decoded, dict):
+                    await _send400(b"Headers must be a JSON object")
+                    return
+                for k, v in decoded.items():
+                    if not isinstance(k, str) or not isinstance(v, str):
+                        await _send400(b"Header keys and values must be strings")
+                        return
+                    if len(k) > 64 or len(v) > 2048:
+                        await _send400(b"Header key/value too long")
+                        return
+                    if "\r" in k or "\n" in k or "\r" in v or "\n" in v:
+                        await _send400(b"Invalid header value")
+                        return
+                    if k.lower() in (
+                        "host",
+                        "content-length",
+                        "transfer-encoding",
+                        "connection",
+                    ):
+                        continue
+                    custom_headers[k.strip()] = v.strip()
+
+            variant: int | None = None
+            raw_variant = query.get("variant", [None])[0]
+            if raw_variant is not None:
+                try:
+                    variant = int(raw_variant)
+                except ValueError:
+                    logger.debug("suppressed")
+            audio = query.get("audio", [None])[0]
+
+            upstream_headers = self._upstream_headers(referer, custom_headers)
+
+            if parsed.path.endswith("/playlist.m3u8"):
+                await self._handle_playlist(
+                    writer, target_url, upstream_headers, referer, variant, audio
+                )
+            elif parsed.path == "/image":
+                await self._handle_image(writer, target_url, upstream_headers)
+            elif parsed.path in ("/segment", "/key"):
+                range_header = req_headers.get("range")
+                if range_header:
+                    upstream_headers["Range"] = range_header
+                # Conditional cache validators: without them every playlist
+                # poll is a full 200 (no 304s).
+                for ck in ("if-none-match", "if-modified-since"):
+                    if req_headers.get(ck):
+                        upstream_headers[ck.title()] = req_headers[ck]
+                await self._handle_passthrough(writer, target_url, upstream_headers)
+            else:
+                await self._send_response(writer, 404, "text/plain", b"Not Found")
+
+        except Exception as ex:
+            logger.debug("Error handling proxy client request: %s", ex)
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                ...
+
+    async def _handle_playlist(
+        self,
+        writer: asyncio.StreamWriter,
+        target_url: str,
+        upstream_headers: dict[str, str],
+        referer: str | None,
+        variant: int | None = None,
+        audio: str | None = None,
+    ):
+        if not self._http_client:
+            await self._send_response(writer, 500, "text/plain", b"Proxy client uninitialized")
+            return
+
+        try:
+            resp = await self._http_client.get(
+                target_url, headers=upstream_headers, follow_redirects=True
+            )
+        except Exception as ex:
+            logger.warning("Upstream playlist request failed: %s", ex)
+            await self._send_response(writer, 502, "text/plain", b"Upstream unavailable")
+            return
+        if resp.status_code != 200:
+            await self._send_response(
+                writer,
+                resp.status_code,
+                "text/plain",
+                f"Upstream error: {resp.status_code}".encode(),
+            )
+            return
+
+        content_type = next((v for k, v in resp.headers.items() if k.lower() == "content-type"), "")
+        playlist_text = resp.text
+        if "#EXTM3U" not in playlist_text[:1024] and "mpegurl" not in content_type.lower():
+            # Not actually a playlist (extension-less segment misrouted here
+            # by the rewrite heuristic, or an error page): stream the bytes
+            # instead of serving garbage as application/vnd.apple.mpegurl.
+            await self._send_bytes(writer, resp)
+            return
+        # Pinning only applies to masters (playlists with variants); media
+        # playlists pass through with segment rewriting as before.
+        if variant is not None and "#EXT-X-STREAM-INF" in playlist_text:
+            pinned = parse_hls_variants(playlist_text)
+            if not (0 <= variant < len(pinned)):
+                variant = None
+        else:
+            variant = None
+
+        rewritten = self._rewrite_m3u8(
+            playlist_text, target_url, referer, upstream_headers, variant, audio
+        )
+        body_bytes = rewritten.encode("utf-8")
+
+        await self._send_response(
+            writer,
+            200,
+            "application/vnd.apple.mpegurl",
+            body_bytes,
+        )
+
+    def _rewrite_m3u8(
+        self,
+        content: str,
+        base_url: str,
+        referer: str | None,
+        upstream_headers: dict[str, str],
+        variant: int | None = None,
+        audio: str | None = None,
+    ) -> str:
+        lines = content.splitlines()
+        output_lines = []
+        variant_counter = 0
+        stream_inf_line: str | None = None
+
+        ref_param = f"&referer={_b64_encode(referer)}" if referer else ""
+        hdrs_param = ""
+        extra_hdrs = {
+            k: v
+            for k, v in upstream_headers.items()
+            if k.lower() not in ("user-agent", "referer", "host")
+        }
+        if extra_hdrs:
+            hdrs_param = f"&headers={_b64_encode(json.dumps(extra_hdrs))}"
+
+        base_proxy = f"http://{self.host}:{self.port}"
+
+        def _proxy_sub(abs_url: str) -> str:
+            return f"{base_proxy}/playlist.m3u8?url={_b64_encode(abs_url)}{ref_param}{hdrs_param}"
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                output_lines.append(line)
+                continue
+
+            if stripped.startswith("#EXT-X-STREAM-INF"):
+                # Hold the tag; the following URI line decides keep/drop
+                stream_inf_line = line
+                continue
+
+            if stripped.startswith("#EXT-X-MEDIA:"):
+                attrs = _parse_attrs(stripped[len("#EXT-X-MEDIA:") :])
+                media_type = attrs.get("TYPE", "").upper()
+                if attrs.get("URI"):
+                    if media_type == "AUDIO" and audio is not None and attrs.get("NAME") != audio:
+                        # Pinned to a different rendition — drop this one
+                        continue
+                    abs_uri = urllib.parse.urljoin(base_url, attrs["URI"])
+                    new_line = MEDIA_URI_PATTERN.sub(
+                        lambda m, u=abs_uri: f'{m.group(1)}"{_proxy_sub(u)}"', stripped
+                    )
+                    if media_type == "AUDIO" and audio is not None and attrs.get("NAME") == audio:
+                        attr_text = new_line[len("#EXT-X-MEDIA:") :]
+                        attr_text = re.sub(r",?\s*DEFAULT=[^,]*", "", attr_text)
+                        attr_text = re.sub(r",?\s*AUTOSELECT=[^,]*", "", attr_text)
+                        attr_text = attr_text.strip(",")
+                        if attr_text:
+                            new_line = f"#EXT-X-MEDIA:{attr_text},DEFAULT=YES,AUTOSELECT=YES"
+                        else:
+                            new_line = "#EXT-X-MEDIA:DEFAULT=YES,AUTOSELECT=YES"
+                    output_lines.append(new_line)
+                    continue
+                output_lines.append(line)
+                continue
+
+            if stripped.startswith("#EXT-X-MAP"):
+                match = KEY_URI_PATTERN.search(stripped)
+                if match:
+                    map_url = match.group(1)
+                    abs_map_url = urllib.parse.urljoin(base_url, map_url)
+                    proxy_map_url = (
+                        f"{base_proxy}/segment?"
+                        f"url={_b64_encode(abs_map_url)}{ref_param}{hdrs_param}"
+                    )
+                    new_map_tag = KEY_URI_PATTERN.sub(f'URI="{proxy_map_url}"', stripped)
+                    output_lines.append(new_map_tag)
+                else:
+                    output_lines.append(line)
+                continue
+
+            if stripped.startswith(("#EXT-X-KEY", "#EXT-X-SESSION-KEY")):
+                match = KEY_URI_PATTERN.search(stripped)
+                if match:
+                    key_url = match.group(1)
+                    abs_key_url = urllib.parse.urljoin(base_url, key_url)
+                    proxy_key_url = (
+                        f"{base_proxy}/key?url={_b64_encode(abs_key_url)}{ref_param}{hdrs_param}"
+                    )
+                    new_key_tag = KEY_URI_PATTERN.sub(f'URI="{proxy_key_url}"', stripped)
+                    output_lines.append(new_key_tag)
+                else:
+                    output_lines.append(line)
+                continue
+
+            if stripped.startswith("#"):
+                output_lines.append(line)
+                continue
+
+            abs_seg_url = urllib.parse.urljoin(base_url, stripped)
+            if stream_inf_line is not None:
+                # This URI belongs to a variant — apply quality pinning
+                if variant is None or variant_counter == variant:
+                    output_lines.append(stream_inf_line)
+                    output_lines.append(_proxy_sub(abs_seg_url))
+                variant_counter += 1
+                stream_inf_line = None
+                continue
+
+            # Everything else in a media playlist is a SEGMENT — route it to
+            # /segment unconditionally. The extension guess that used to live
+            # here misrouted this CDN's .jpg-named segments to
+            # /playlist.m3u8, which streamed JPEG bytes with an mpegurl
+            # content type and killed playback with "Failed to recognize
+            # file format". (A line that really is a nested playlist still
+            # works: /segment streams the bytes it fetches.)
+            output_lines.append(
+                f"{base_proxy}/segment?url={_b64_encode(abs_seg_url)}{ref_param}{hdrs_param}"
+            )
+
+        if stream_inf_line is not None:
+            # Trailing STREAM-INF with no URI line — keep verbatim
+            output_lines.append(stream_inf_line)
+
+        return "\n".join(output_lines)
+
+    async def _placeholder_image(self, writer: asyncio.StreamWriter, key: str, now: float) -> None:
+        """A failed fetch: quiet 1x1 PNG + negative cache (see the
+        constants' comment — non-200 image responses are page errors)."""
+        if len(self._image_fail) >= IMAGE_CACHE_MAX:
+            oldest = min(self._image_fail, key=lambda k: self._image_fail[k])
+            self._image_fail.pop(oldest, None)
+        self._image_fail[key] = now + IMAGE_FAIL_TTL
+        await self._send_response(writer, 200, "image/png", PLACEHOLDER_PNG)
+
+    async def _handle_image(
+        self,
+        writer: asyncio.StreamWriter,
+        target_url: str,
+        upstream_headers: dict[str, str],
+    ):
+        """One artwork fetch, served with the CORS header — the web-CORS
+        and guarded-host route. Bodies are read whole (artwork is small),
+        capped, and memoized after the master cache's TTL/eviction shape;
+        failures serve the placeholder and are negative-cached."""
+        key = f"{target_url}|{upstream_headers.get('Referer', '')}"
+        now = time.monotonic()
+        hit = self._image_cache.get(key)
+        if hit is not None and now < hit[2]:
+            await self._send_response(writer, 200, hit[1], hit[0])
+            return
+        if now < self._image_fail.get(key, 0.0):
+            await self._send_response(writer, 200, "image/png", PLACEHOLDER_PNG)
+            return
+        if not self._http_client:
+            await self._send_response(writer, 500, "text/plain", b"Proxy client uninitialized")
+            return
+        try:
+            resp = await self._http_client.get(
+                target_url, headers=upstream_headers, follow_redirects=True
+            )
+        except Exception as ex:
+            logger.debug("image fetch failed for %s: %s", target_url, ex)
+            await self._placeholder_image(writer, key, now)
+            return
+        if resp.status_code != 200:
+            logger.debug("image upstream %s for %s", resp.status_code, target_url)
+            await self._placeholder_image(writer, key, now)
+            return
+        body = resp.content
+        if len(body) > MAX_IMAGE_BYTES:
+            logger.debug("image too large for %s", target_url)
+            await self._placeholder_image(writer, key, now)
+            return
+        content_type = next((v for k, v in resp.headers.items() if k.lower() == "content-type"), "")
+        if not str(content_type).lower().startswith("image/"):
+            # A non-image upstream response is forwarded honestly as bytes,
+            # never as a fake image type.
+            content_type = "application/octet-stream"
+        if len(self._image_cache) >= IMAGE_CACHE_MAX:
+            oldest = min(self._image_cache, key=lambda k: self._image_cache[k][2])
+            self._image_cache.pop(oldest, None)
+        self._image_cache[key] = (body, content_type, now + IMAGE_CACHE_TTL)
+        await self._send_response(writer, 200, content_type, body)
+
+    async def _handle_passthrough(
+        self,
+        writer: asyncio.StreamWriter,
+        target_url: str,
+        upstream_headers: dict[str, str],
+    ):
+        if not self._http_client:
+            await self._send_response(writer, 500, "text/plain", b"Proxy client uninitialized")
+            return
+
+        try:
+            resp = await self._http_client.get(
+                target_url,
+                headers=upstream_headers,
+                stream=True,
+                follow_redirects=True,
+            )
+        except Exception as ex:
+            logger.warning("Upstream stream request failed: %s", ex)
+            await self._send_response(writer, 502, "text/plain", b"Upstream unavailable")
+            return
+
+        try:
+            status_line = (
+                f"HTTP/1.1 {resp.status_code} {REASON_PHRASES.get(resp.status_code, 'Unknown')}\r\n"
+            )
+            writer.write(status_line.encode("latin1"))
+
+            for k, v in resp.headers.items():
+                k_lower = k.lower()
+                if k_lower in (
+                    "content-type",
+                    "content-length",
+                    "accept-ranges",
+                    "content-range",
+                    "etag",
+                    "last-modified",
+                    "cache-control",
+                ):
+                    clean_v = str(v).replace("\r", "").replace("\n", "")
+                    writer.write(f"{k}: {clean_v}\r\n".encode("latin1"))
+
+            writer.write(b"Connection: close\r\n\r\n")
+            await writer.drain()
+
+            try:
+                # Larger buffer for high-throughput low-latency streaming
+                async for chunk in resp.aiter_bytes(chunk_size=262144):
+                    writer.write(chunk)
+                    await writer.drain()
+            except asyncio.CancelledError:
+                # CancelledError is a BaseException: swallowing it leaves
+                # the task running past shutdown.
+                raise
+            except (ConnectionResetError, BrokenPipeError):
+                ...
+            except Exception as ex:
+                # Upstream died mid-segment: the headers are already out,
+                # so the only honest answer is to end the stream.
+                logger.warning("Upstream stream failed mid-segment: %s", ex)
+        finally:
+            try:
+                await resp.aclose()
+
+            except Exception:
+                logger.debug("suppressed")
+
+    async def _send_bytes(self, writer: asyncio.StreamWriter, resp) -> None:
+        """Stream an already-fetched upstream response body to the player."""
+        try:
+            writer.write(
+                f"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+                f"Content-Length: {len(resp.content)}\r\nConnection: close\r\n\r\n".encode("latin1")
+                + resp.content
+            )
+            await writer.drain()
+        except (ConnectionResetError, BrokenPipeError):
+            ...
+
+    async def _send_response(
+        self,
+        writer: asyncio.StreamWriter,
+        status_code: int,
+        content_type: str,
+        body: bytes,
+    ):
+        reason = REASON_PHRASES.get(status_code, "Unknown")
+
+        headers = (
+            f"HTTP/1.1 {status_code} {reason}\r\n"
+            f"Content-Type: {content_type}\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            f"Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n"
+        )
+        writer.write(headers.encode("latin1") + body)
+        await writer.drain()

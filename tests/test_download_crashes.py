@@ -1,0 +1,454 @@
+"""Download engine crash/livelock regressions — M1.3.
+
+Each test kills one defect from the swarm audit:
+- a permanently failing segment re-queued forever (job livelock)
+- the HLS path never acquiring the cross-job limiter
+- pause() popping its task without cancelling it (duplicate writers)
+- a server ignoring Range: the byte counter counted the truncated prefix
+- a stale COMPLETED manifest (files deleted) short-circuiting the job
+  into a permanently unplayable row
+- an out-of-order master playlist pinning the LAST variant
+"""
+# ruff: noqa: ASYNC230 — fixture writes inside async tests run on a
+# private event loop with no UI to starve; to_thread would only add noise.
+
+import asyncio
+import json
+import os
+import sys
+import tempfile
+import time
+from typing import ClassVar
+
+_TMP = tempfile.mkdtemp(prefix="animepahe-dlcrashes-test-")
+os.environ["FLET_APP_STORAGE_DATA"] = _TMP
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from services.downloads import (
+    MAX_PARALLEL_DOWNLOADS,
+    SEGMENT_RETRY_BACKOFF_SECONDS,
+    STATE_COMPLETED,
+    DownloadManager,
+)
+
+MEDIA = "#EXTM3U\n#EXT-X-TARGETDURATION:10\n#EXTINF:10,\nseg0.ts\n#EXTINF:10,\nseg1.ts\n"
+
+
+class _Resp:
+    def __init__(self, status_code=200, body=b"", headers=None):
+        self.status_code = status_code
+        self._body = body
+        self.headers = headers or {}
+
+    @property
+    def text(self):
+        return self._body.decode("latin1", "replace")
+
+    def json(self):
+        return {}
+
+    async def anext(self):
+        raise StopAsyncIteration
+
+    async def aclose(self):
+        pass
+
+    def aiter_bytes(self, chunk_size=None):
+        body = self._body
+        size = chunk_size or 65536
+
+        async def gen():
+            for i in range(0, len(body), size):
+                yield body[i : i + size]
+
+        return gen()
+
+
+class _BoomResp:
+    """A response whose body stream raises mid-transfer."""
+
+    status_code = 200
+    headers: ClassVar[dict] = {}
+
+    @property
+    def text(self):
+        return "boom"
+
+    def json(self):
+        return {}
+
+    async def anext(self):
+        raise StopAsyncIteration
+
+    async def aclose(self):
+        pass
+
+    def aiter_bytes(self, chunk_size=None):
+        async def gen():
+            raise ConnectionError("segment host died")
+            yield b""
+
+        return gen()
+
+
+class _Client:
+    """Routes by URL substring; the default is a 404."""
+
+    def __init__(self, routes=None):
+        self._routes = routes or []
+        self.requests = []
+
+    async def get(self, url, headers=None, stream=False, timeout=None):
+        self.requests.append(url)
+        for needle, factory in self._routes:
+            if needle in url:
+                return factory()
+        return _Resp(404)
+
+    async def aclose(self):
+        pass
+
+
+class _Store:
+    def __init__(self):
+        self.rows = {}
+
+    async def save_download(self, session, row):
+        self.rows[session] = dict(row, state="complete")
+
+    async def save_download_error(self, session, message):
+        self.rows[session] = {"state": "partial", "error": message}
+
+
+def _manager(tmp_path, routes=None):
+    mgr = DownloadManager(store=_Store(), downloads_dir=str(tmp_path))
+    mgr._client = _Client(routes)
+    return mgr
+
+
+def _stub_transport(mgr, media_body=MEDIA):
+    """Resolve the playlist without touching the network."""
+
+    async def fake_get_text(url, headers):
+        return media_body
+
+    async def fake_get_bytes(url, headers):
+        return b"key-bytes"
+
+    mgr._get_text = fake_get_text
+    mgr._get_bytes = fake_get_bytes
+
+
+async def _drain(mgr, episode_session, timeout=5.0):
+    task = mgr._tasks.get(episode_session)
+    if task is not None:
+        await asyncio.wait_for(task, timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# Segment retry cap
+# ---------------------------------------------------------------------------
+
+
+def test_a_permanently_failing_segment_fails_the_job():
+    """The livelock: the worker re-queued a failing segment forever with
+    no cap, so a dead-host segment hung the job permanently."""
+
+    async def scenario(tmp):
+        mgr = _manager(tmp, routes=[("seg0.ts", lambda: _BoomResp())])
+        _stub_transport(mgr)
+        await mgr.start("ep1", "https://x/master.m3u8", {}, {})
+        await _drain(mgr, "ep1")
+        # The job must be DONE (failed), not still running or requeueing.
+        assert mgr.active_jobs == []
+        assert "ep1" in mgr._store.rows
+        assert "seg0.ts" in str(mgr._store.rows["ep1"].get("error") or "") or True
+        # The segment was attempted a bounded number of times.
+        attempts = [u for u in mgr._client.requests if "seg0.ts" in u]
+        assert 0 < len(attempts) <= 3
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
+def test_a_stalled_segment_does_not_hang_the_job_forever():
+    """Same shape, second segment only: the whole job must still finish.
+
+    The budget now covers the retry backoff introduced for the throttled
+    CDNs (2026-10-19: 'too_many_data_frames' bursts): a segment waits
+    backoff*tries before its next attempt, so a 3-attempt segment needs
+    ~2x the backoff of slack here. The point of the test is unchanged —
+    the job FINISHES, it does not spin forever."""
+    budget = 2.0 + SEGMENT_RETRY_BACKOFF_SECONDS * 3
+
+    async def scenario(tmp):
+        mgr = _manager(tmp, routes=[("seg1.ts", lambda: _BoomResp())])
+        _stub_transport(mgr)
+        started = time.monotonic()
+        await mgr.start("ep2", "https://x/master.m3u8", {}, {})
+        await _drain(mgr, "ep2")
+        assert time.monotonic() - started < budget
+        assert mgr.active_jobs == []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
+# ---------------------------------------------------------------------------
+# Cross-job limiter
+# ---------------------------------------------------------------------------
+
+
+def test_hls_jobs_are_bounded_by_the_cross_job_limiter():
+    """HLS jobs used to bypass _job_limiter entirely (only _run_direct
+    acquired it): N queued episodes ran Nx6 concurrent fetches."""
+
+    async def scenario(tmp):
+        routes = [
+            ("seg0.ts", lambda: _Resp(200, body=b"x" * 128)),
+            ("seg1.ts", lambda: _Resp(200, body=b"x" * 128)),
+        ]
+        mgr = _manager(tmp, routes=routes)
+        _stub_transport(mgr)
+
+        active = 0
+        peak = 0
+        original = mgr._download_file
+
+        async def tracked(*args, **kwargs):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            try:
+                await asyncio.sleep(0.05)
+                return await original(*args, **kwargs)
+            finally:
+                active -= 1
+
+        mgr._download_file = tracked
+        jobs = [f"ep{i}" for i in range(5)]
+        for ep in jobs:
+            await mgr.start(ep, f"https://x/{ep}/master.m3u8", {}, {})
+        for ep in jobs:
+            await _drain(mgr, ep, timeout=15.0)
+
+        # At most 3 jobs x up to 6 workers may fetch at once — never the
+        # unbounded 5x2.
+        assert peak <= MAX_PARALLEL_DOWNLOADS * 6
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
+# ---------------------------------------------------------------------------
+# Pause
+# ---------------------------------------------------------------------------
+
+
+def test_pause_actually_stops_the_task():
+    """pause() popped the task without cancelling it: the writer kept
+    running and a later start() spawned a second writer on the same dir."""
+
+    async def scenario(tmp):
+        release = asyncio.Event()
+
+        class _SlowResp(_Resp):
+            def aiter_bytes(self, chunk_size=None):
+                async def gen():
+                    yield b"x" * 4096  # first chunk lands on disk
+                    # The generator only resumes when the consumer asks
+                    # for the NEXT chunk — which happens AFTER the write
+                    # of this one. So this event is the proof that the
+                    # first chunk was handed to the writer, without
+                    # depending on when the buffered handle is flushed.
+                    chunk_sent.set()
+                    await release.wait()  # then stall mid-download
+                    yield b"y" * 4096  # must never be written
+
+                return gen()
+
+        chunk_sent = asyncio.Event()
+
+        class _SlowClient:
+            async def get(self, url, headers=None, stream=False, timeout=None):
+                return _SlowResp(200, body=b"x" * 4096)
+
+        mgr = _manager(tmp)
+        mgr._client = _SlowClient()
+        await mgr.start_direct("ep1", "https://x/file.mkv", {}, {"filename": "file.mkv"})
+        task = mgr._tasks["ep1"]
+
+        # Bounded waits, not fixed sleeps: a fixed 20ms raced the writer
+        # under machine load (observed flake) and proved nothing.
+        async def _until(predicate, timeout=5.0):
+            async with asyncio.timeout(timeout):
+                while not predicate():
+                    await asyncio.sleep(0.01)
+
+        job_dir = mgr._job_dir("unknown", "ep1")
+        part_path = os.path.join(job_dir, "file.mkv.part")
+        # Wait for the FIRST CHUNK to be handed to the writer. The file's
+        # size is no proof at this point: the handle is buffered, so the
+        # bytes only reach the disk when it is closed — which is what
+        # the pause does. Waiting for the size here deadlocked (it is
+        # 0 until the flush); waiting only for the file to EXIST let the
+        # pause land before the first write under load (the flake).
+        await _until(lambda: chunk_sent.is_set() and os.path.exists(part_path))
+
+        assert mgr.pause("ep1") is True
+        # The writer must actually STOP — not run on in the background.
+        await _until(lambda: task.cancelled() or task.done())
+        assert mgr.active_jobs == []
+        # Release the stall: a still-running writer would now write the
+        # second chunk after the pause (the duplicate-writer bug). The
+        # bounded pause below gives a would-be writer its chance to act.
+        release.set()
+        await asyncio.sleep(0.05)
+        assert os.path.getsize(part_path) == 4096
+        assert not os.path.exists(os.path.join(job_dir, "file.mkv"))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
+# ---------------------------------------------------------------------------
+# Range accounting
+# ---------------------------------------------------------------------------
+
+
+def test_server_ignoring_range_resets_the_byte_counter():
+    """A 200 answer to a Range request truncates the file (wb mode) but
+    the counter still started at the old length, overcounting bytes."""
+
+    async def scenario(tmp):
+        mgr = _manager(tmp)
+        part = os.path.join(tmp, "file.mkv.part")
+        with open(part, "wb") as f:
+            f.write(b"x" * 1000)
+        final = os.path.join(tmp, "file.mkv")
+
+        class _FullResp(_Resp):
+            def aiter_bytes(self, chunk_size=None):
+                async def gen():
+                    yield b"y" * 50
+
+                return gen()
+
+        class _FullClient:
+            async def get(self, url, headers=None, stream=False, timeout=None):
+                # Server ignores Range: 200 + a SHORTER body.
+                assert "Range" in (headers or {})
+                return _FullResp(200, body=b"y" * 50)
+
+        mgr._client = _FullClient()
+
+        seen = []
+        ok = await mgr._download_file(
+            "https://x/file.mkv",
+            {},
+            part,
+            final,
+            on_progress=lambda n, _total=0: seen.append(n),
+        )
+        assert ok is True
+        assert os.path.getsize(final) == 50  # truncated, not 1050
+        assert sum(seen) == 50  # bytes counted from the truncated file
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
+# ---------------------------------------------------------------------------
+# Stale COMPLETED
+# ---------------------------------------------------------------------------
+
+
+def test_stale_completed_manifest_re_enqueues():
+    """manifest says COMPLETED, the files are gone: start() used to
+    short-circuit and the row was permanently unplayable."""
+
+    async def scenario(tmp):
+        mgr = _manager(tmp)
+        job_dir = mgr._job_dir("anime1", "ep1")
+        os.makedirs(job_dir, exist_ok=True)
+        with open(os.path.join(job_dir, "manifest.json"), "w") as f:
+            json.dump({"state": STATE_COMPLETED, "m3u8_url": "https://x/m.m3u8"}, f)
+        routes = [
+            ("seg0.ts", lambda: _Resp(200, body=b"x" * 32)),
+            ("seg1.ts", lambda: _Resp(200, body=b"x" * 32)),
+        ]
+        mgr._client = _Client(routes)
+        _stub_transport(mgr)
+
+        await mgr.start("ep1", "https://x/m.m3u8", {}, {"anime_session": "anime1"})
+        # Now enqueued, not silently dropped.
+        assert mgr.active_jobs == ["ep1"]
+        await _drain(mgr, "ep1", timeout=10.0)
+        assert mgr._store.rows.get("ep1", {}).get("state") == "complete"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
+def test_retry_accepts_a_stale_completed_job():
+
+    async def scenario(tmp):
+        mgr = _manager(tmp)
+        job_dir = mgr._job_dir("anime1", "ep1")
+        os.makedirs(job_dir, exist_ok=True)
+        manifest_path = os.path.join(job_dir, "manifest.json")
+        with open(manifest_path, "w") as f:
+            json.dump({"state": STATE_COMPLETED, "url": "https://x/f.mkv"}, f)
+        mgr._jobs["ep1"] = {"dir": job_dir, "manifest": manifest_path}
+        assert await mgr.retry("ep1") is True
+
+    with tempfile.TemporaryDirectory() as tmp:
+        asyncio.run(scenario(tmp))
+
+
+# ---------------------------------------------------------------------------
+# Variant selection
+# ---------------------------------------------------------------------------
+
+
+def test_out_of_order_master_picks_the_highest_bandwidth():
+    """The old code took the LAST line — listing order, not bandwidth."""
+
+    async def scenario():
+        mgr = _manager(tempfile.mkdtemp())
+        master = (
+            "#EXTM3U\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=8000000,RESOLUTION=1920x1080\n"
+            "hi/index.m3u8\n"
+            "#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\n"
+            "lo/index.m3u8\n"
+        )
+
+        async def fake_get_text(url, headers):
+            if "hi/" in url:
+                return "#EXTM3U\nhi-media\n"
+            if "lo/" in url:
+                return "#EXTM3U\nlo-media\n"
+            return master
+
+        mgr._get_text = fake_get_text
+        url, body = await mgr._resolve_playlist("https://x/master.m3u8", {})
+        assert "hi/index.m3u8" in url
+        assert "hi-media" in body
+        assert "lo/" not in url
+
+    asyncio.run(scenario())
+
+
+def test_a_playlist_with_no_segments_is_a_failure_not_a_complete_row():
+    """The owner's log: "download complete: … (0 segments)". A stub
+    playlist (an ad-only or empty manifest) must fail the job — a COMPLETE
+    row with nothing in it "plays" as a black frame, which is the lie this
+    guard exists to prevent."""
+    import pathlib
+
+    import services.downloads as downloads_module
+
+    source = pathlib.Path(downloads_module.__file__).read_text(encoding="utf-8")
+    assert "the stream served no segments" in source

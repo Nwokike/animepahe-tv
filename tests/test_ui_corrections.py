@@ -1,0 +1,298 @@
+"""UI corrections from the owner's walkthrough — 2026-10-16 (night).
+
+His report, item by item:
+1. "I can't even enter any screen from the navigation bar in the anime
+   detail page" — the shell set `show_nav = False` for the detail view,
+   so the bottom bar/rail vanished.
+2. "The episode cards are just big… the discover page looks good" — the
+   episode grid must match Discover's card size on every breakpoint.
+3. "Remove the 'via' in the discover page, it's already in the header."
+4. "Genre, type, status, season, sort can all be dropdowns" — not a wall
+   of chips.
+5. "An ad after every 12, both in home, discover, in fact every screen."
+6. "Your app doesn't know what a safe area is" — status-bar/notch insets.
+7. Settings: house section cards with three banners (DDGS/Sherlock).
+"""
+
+import inspect
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+import flet as ft
+
+# ---------------------------------------------------------------------------
+# 1. The nav bar stays on the detail view
+# ---------------------------------------------------------------------------
+
+
+def test_the_nav_bar_stays_visible_on_the_detail_view():
+    import app_shell
+
+    source = inspect.getsource(app_shell)
+    detail_branch = source[source.index('if active_view == "anime"') :][:700]
+    assert "show_nav = True" in detail_branch, (
+        "hiding the nav on the detail view stranded the owner — his report"
+    )
+    assert "show_nav = False" not in detail_branch
+
+
+# ---------------------------------------------------------------------------
+# 2. SafeArea wraps the whole shell
+# ---------------------------------------------------------------------------
+
+
+def test_the_shell_root_is_a_safe_area():
+    import app_shell
+
+    source = inspect.getsource(app_shell)
+    # Every shell return path (rail + bar) must carry the inset.
+    assert source.count("ft.SafeArea(") >= 3, (
+        "the rail, the full-bleed fallback and the phone bar must all be "
+        "within SafeArea (house standard: KTV/Sherlock/DDGS shells)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3. Episode cards match Discover's sizing on every breakpoint
+# ---------------------------------------------------------------------------
+
+
+class _Ep:
+    session = "e1"
+    episode = 1
+    snapshot = ""
+    duration = "24m"
+    filler = False
+    subs = True
+    dub = False
+
+
+def test_episode_card_is_portrait_like_discover():
+    from screens.anime_detail_screen import _episode_card
+
+    card = _episode_card(_Ep(), lambda a, e: None, "sess", now_playing=False)
+    # Stack(button, menu) — grab the button.
+    button = card.controls[0]
+    assert button.content.aspect_ratio == 0.67, "portrait = Discover's card shape"
+
+
+def test_the_episode_grid_uses_discover_spans():
+    """Episodes ride the ONE grid contract — the same token Discover, Search
+    and Home read, so a card is the same size everywhere and a change lands
+    everywhere (owner, 2026-10-19)."""
+    import screens.anime_detail_screen as detail
+    from core.tokens import GRID_COL
+
+    source = inspect.getsource(detail)
+    assert "col=GRID_COL" in source, "episodes ride the shared contract"
+    assert '"xs": 12, "sm": 6, "md": 4, "lg": 4, "xl": 3' not in source, (
+        "the old one-giant-card-per-row phone layout is gone"
+    )
+    assert GRID_COL["xs"] == 6, "two up on a phone, like Discover"
+
+
+# ---------------------------------------------------------------------------
+# 4. Discover: no "via", dropdowns
+# ---------------------------------------------------------------------------
+
+
+def test_discover_drops_the_via_line_and_uses_dropdowns():
+    import screens.discover_screen as discover
+
+    source = inspect.getsource(discover)
+    assert "via {" not in source, "the header already names the source — no 'via'"
+    assert "ft.PopupMenuButton(" in source, (
+        "the filters are the house's PopupMenuButton pills, the way the "
+        "owner's own apps do it (KTV components/filter_bar.py)"
+    )
+    assert "def _pill(" in source, "the house's pill, copied"
+    assert "_filter_choices" not in source, "the chip wall is gone"
+    # The pill bar is ONE horizontal line that pans sideways — never a
+    # wrapping Wrap (whose Expand-ed children crash Flutter with
+    # "WrapParentData is not a subtype of FlexParentData"). NB: the only
+    # "wrap=True"-like substring allowed in this file is `no_wrap=True` on
+    # the label text, which is a text-overflow flag, not a Row wrap.
+    assert "wrap=True" not in source.replace("no_wrap=True", ""), "the pill row must never wrap"
+    assert "scroll=ft.ScrollMode.AUTO" in source, "the pill row pans sideways"
+    assert "filter_row = ft.Container(" in source, (
+        "the bar is KTV's Container-wrapped Row, not a bare Row"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5. Ad breaks every 24 items (KTV's AD_ROW_INTERVAL) — one helper, every grid
+# ---------------------------------------------------------------------------
+
+
+def test_grid_with_ads_breaks_every_24(monkeypatch):
+    from components import ad_breaks
+
+    pages: list = []
+
+    def _banner(page=None, inline=False):
+        marker = ft.Container(height=50, data="ad")
+        pages.append(marker)
+        return marker
+
+    monkeypatch.setattr(ad_breaks, "build_banner_ad", _banner)
+    cards = [ft.Container(key=f"c{i}") for i in range(50)]
+    sections = ad_breaks.grid_with_ads(cards, None, spacing=16, run_spacing=16)
+
+    rows = [s for s in sections if isinstance(s, ft.ResponsiveRow)]
+    assert [len(r.controls) for r in rows] == [24, 24, 2]
+    # A break between chunks — never before the first.
+    kinds = ["ad" if getattr(s, "data", None) == "ad" else "row" for s in sections]
+    assert kinds == ["row", "ad", "row", "ad", "row"]
+
+
+def test_every_grid_screen_uses_the_shared_helper():
+    import screens.anime_detail_screen as detail
+    import screens.discover_screen as discover
+    import screens.home_screen as home
+    import screens.search_screen as search
+
+    for module in (home, discover, search, detail):
+        assert "grid_with_ads(" in inspect.getsource(module), (
+            f"{module.__name__} must ride the shared ad-break helper"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 6. Settings: three banners, house section cards
+# ---------------------------------------------------------------------------
+
+
+def test_settings_has_three_banners_separating_sections():
+    import screens.settings_screen as settings
+
+    source = inspect.getsource(settings)
+    body = source[source.index("return ft.Column(") :]
+    assert body.count("build_banner_ad(page, inline=True)") == 3, (
+        "the house pattern (DDGS/Sherlock): three banners in Settings"
+    )
+    # Pinned order: after the source section, after Playback, before About.
+    first = body.index("build_banner_ad(page, inline=True)")
+    second = body.index("build_banner_ad(page, inline=True)", first + 1)
+    third = body.index("build_banner_ad(page, inline=True)", second + 1)
+    assert body.index('_section_header("PLAYBACK"') > first
+    assert body.index('_section_header("DIAGNOSTICS"') > second
+    assert body.index('_section_header("ABOUT"') > third
+
+
+# ---------------------------------------------------------------------------
+# 7. The detail hero is banner-first on a phone
+# ---------------------------------------------------------------------------
+
+
+def test_the_compact_hero_is_banner_first_and_only_under_720px():
+    import screens.anime_detail_screen as detail
+
+    source = inspect.getsource(detail)
+    assert "compact = bool(page is not None and not is_tv and 0 < width < 720)" in source
+    assert "compact_cover" in source and "compact_poster" in source, (
+        "the compact hero is a cover with the poster over its edge"
+    )
+    # The poster sits INSIDE the cover's Stack, positioned over the art's
+    # lower band — WITHOUT a negative right/bottom offset (the independent
+    # audit forbids those: they clip across densities).
+    assert "compact_cover = ft.Container(" in source
+    assert "bottom=-" not in source, "no negative absolute offsets in the hero"
+
+
+def test_no_screen_owns_its_own_grid_spans():
+    """The owner: "Why are you even hardcoding them individually? I expected
+    it to be something that you fix once and it's solved everywhere."
+
+    Every catalog screen must read the ONE token. A hardcoded col map
+    anywhere outside core/tokens.py is a regression."""
+    import screens.anime_detail_screen as detail
+    import screens.discover_screen as discover
+    import screens.home_screen as home
+    import screens.search_screen as search
+
+    for module in (home, discover, search, detail):
+        src = inspect.getsource(module)
+        assert '"xs":' not in src, f"{module.__name__} still hardcodes grid spans"
+        assert "col=GRID_COL" in src or "GRID_COL" in src, (
+            f"{module.__name__} does not read the shared grid contract"
+        )
+
+
+def test_picking_a_tab_leaves_the_detail_view():
+    """The owner: "I can be in a screen and click something in navigation
+    and I can't leave... if I'm in an anime detail screen and I press
+    downloads, I can't go to downloads unless I use the back button."
+    Root cause: the body is gated on active_view BEFORE active_tab, and
+    _on_tab only set_active_tab. Picking a tab must return to the tab
+    view too."""
+    import app_shell
+
+    src = inspect.getsource(app_shell)
+    on_tab = src[src.index("def _on_tab(") :][:600]
+    assert "set_active_tab(name)" in on_tab
+    assert 'set_active_view("tabs")' in on_tab, (
+        "picking a tab must leave the detail view — that is the dead-end fix"
+    )
+
+
+def test_the_detail_title_scales_with_the_viewport():
+    """A fixed 22px title read oversized on a phone (owner, 2026-10-19).
+    The title now steps down with the viewport width."""
+    import screens.anime_detail_screen as detail
+
+    src = inspect.getsource(detail)
+    assert "title_size = FONT_XXL if width >= 640" in src
+    assert "FONT_XL if width >= 480" in src
+    assert "FONT_LG" in src
+
+
+def test_quality_dialogs_offer_uniform_rows():
+    """The owner: 'the quality selector, you have one that's like filled
+    red, and then the rest are not filled. It affects it when you're using
+    remote control... remove it so that they are all the same.' Both
+    dialogs build one control type; the best pick is a label marker."""
+    import app_shell
+
+    source = inspect.getsource(app_shell)
+    # No button family is chosen per-index any more in either dialog.
+    for builder in ("_build_quality_dialog", "_build_download_quality_dialog"):
+        block = source[source.index(f"def {builder}(") :]
+        next_def = block.find(chr(10) + "def ", 5)
+        block = block if next_def == -1 else block[:next_def]
+        assert "if is_first" not in block, f"{builder} still branches on the index"
+        assert "·  Best" in block, f"{builder} must mark the best row in its label"
+
+
+def test_the_episodes_empty_state_names_a_real_way_out():
+    """The old text blamed the series for our failure ('may have no
+    releases yet'). The honest message says the fetch failed and points
+    at the ways out (owner, 2026-10-19)."""
+    import screens.anime_detail_screen as detail
+
+    source = inspect.getsource(detail)
+    assert "Episodes couldn't be fetched" in source
+    assert "Try another source" in source
+    # The old blaming text is gone from the rendered copy (it may live on
+    # only in this file's comments).
+    assert "no releases yet — try again later" not in source
+
+
+def test_discover_sort_has_no_all_option():
+    """There is no 'sort by all' (owner, 2026-10-19): the sort group's
+    options are the site's own orders, with Recently updated first."""
+    import screens.discover_screen as ds
+
+    assert "orderby" in ds._NO_ALL_KEYS
+    assert "sort" in ds._NO_ALL_KEYS
+
+
+def test_discover_sort_has_a_direction_toggle():
+    """Every catalog sort carries an up/down control (owner, 2026-10-19)."""
+    import screens.discover_screen as ds
+
+    source = inspect.getsource(ds)
+    assert "_ORDER_KEY" in source
+    assert "ARROW_UPWARD_ROUNDED" in source and "ARROW_DOWNWARD_ROUNDED" in source
+    assert "_toggle_order" in source

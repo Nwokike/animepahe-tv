@@ -1,0 +1,95 @@
+[project]
+name = "animepahe-tv"
+version = "2.0.0"
+description = "Multi-source client-side Android TV / mobile / desktop app for streaming anime — independent backends, one chosen at startup."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "flet-yandex-ads>=0.1.0",
+        "primp>=1.3.1",
+    "anyio>=4.14.1",
+    "flet>=1.1.0.dev3",
+    "flet-webview>=1.1.0.dev3",
+    "flet-notifications>=1.1.0.dev3",
+    "flet-video>=1.1.0.dev3",
+]
+
+[tool.flet]
+org = "com.animepahe"
+product = "AnimePahe TV"
+build_number = 11
+# The full desktop flavor ships the complete runner (the same shape KTV
+# Player declares) rather than the slim one, so `flet run` / a built
+# desktop binary behave identically on Linux, Windows and macOS.
+desktop_flavor = "full"
+
+[tool.flet.app]
+path = "src"
+
+[tool.flet.android]
+bundle_id = "com.animepahe.tv"
+dependencies = ["pyjnius"]
+# Compress native libs in the APK (the pre-0.86 behaviour). Since 0.86 flet
+# stores .so files UNCOMPRESSED (modern packaging), which doubled APK download
+# size while AAB stayed the same. proot-distro ships 30 MB with this exact
+# key; without it the 1.0.4 arm64 APK was 83 MB.
+legacy_packaging = true
+
+[tool.flet.android.permission]
+"android.permission.INTERNET" = true
+"android.permission.ACCESS_NETWORK_STATE" = true
+"android.permission.WAKE_LOCK" = true
+
+[tool.flet.android.feature]
+"android.software.leanback" = true
+"android.hardware.touchscreen" = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.13",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pywebview>=6.2.1",
+    "qtpy>=2.4.3",
+    "pyqt6-webengine>=6.11.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_test_loop_scope = "function"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "asyncio: run the test in an asyncio event loop (pytest-asyncio, strict mode)",
+]
+filterwarnings = [
+    "error::pytest.PytestDeprecationWarning",
+]
+log_cli = false
+
+[tool.ruff]
+# Deliberately below the dev interpreter (3.14), same rule as KTV Player:
+# with target-version 3.14 ruff's pyupgrade rules strip the parentheses
+# from `except (A, B):` into the PEP 758 form, which only parses on 3.14+.
+# Pinning the linter lower keeps every source file importable on 3.12 —
+# including Android and desktop builds produced with an older bundled
+# interpreter — and ruff then reports any PEP 758 slip as invalid-syntax.
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = [
+    "B",   # flake8-bugbear: real bug patterns (mutable defaults, etc.)
+    "RUF", # ruff-specific: dead code, redundant constructs
+    "SIM", # flake8-simplify: collapsible branches, yoda conditions
+    "UP",  # pyupgrade: modern syntax within the py312 target
+]
+# The house pattern, as in KTV Player: every provider/scraper boundary
+# catches broadly on purpose (a dead mirror, a changed selector and a CDN
+# tantrum must all degrade to "no answer", never kill a screen), and the
+# best-effort cleanup paths (a cookie jar that will not clear, a dialog
+# that is already gone) are silence-by-design. BLE001 and S110 are the
+# two ways ruff states that; both are audited and ignored.
+extend-ignore = ["E501", "BLE001", "S110"]
+
+

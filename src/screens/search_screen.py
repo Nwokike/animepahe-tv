@@ -1,0 +1,554 @@
+"""Search — submit-driven, debounced suggestions, paginated results.
+
+Input follows the Sherlock pattern: typing updates local state only, and
+Enter/submit fires the search. Debounce lives where it belongs — filtering
+the recent-search suggestions, never the network call. Portrait cards keep
+the original craft: top-to-bottom gradient, centre play icon, bottom-left
+title/year/type/score, 4px border reserve for the focus ring.
+"""
+
+import flet as ft
+
+from components.ad_breaks import grid_with_ads
+from components.banner_ad import build_banner_ad
+from components.empty_state import EmptyState
+from components.focus_styles import (
+    attach_focus_zoom,
+    card_button_style,
+    card_focus_scale,
+)
+from components.guarded_controls import (
+    GuardedFilledButton,
+    GuardedIconButton,
+    GuardedTextButton,
+)
+from components.offline_state import empty_or_offline
+from components.pagination import pager as ft_pager
+from components.result_card import result_card as _result_card
+from core.artwork import LANDSCAPE
+from core.constants import (
+    LBL_CF_BLOCKED_SEARCH,
+    LBL_OFFLINE,
+    LBL_SEARCH_EMPTY,
+    MAX_SEARCH_QUERY_LENGTH,
+)
+from core.theme import AppColors
+from core.tokens import GRID_COL, GRID_RUN_SPACING, GRID_SPACING
+from hooks.use_debounce import use_debounce
+from hooks.use_grid_mode import grid_sources, use_grid_mode
+from services.hls_proxy import image_url
+from services.providers.base import owner_of
+from state.app_state import AppStateCtx
+from state.controller_ctx import ControllerMethodsCtx
+
+
+def _build_clear_confirm_dialog(controller) -> ft.AlertDialog:
+    """The confirm for the destructive clear: one tap wipes every recent
+    pick, so it asks first. The controller's Undo snack stays as the
+    second net (DDGS's history pattern)."""
+
+    def _do_clear():
+        controller.close_dialog()
+        controller.clear_search_history()
+
+    return ft.AlertDialog(
+        modal=True,
+        title=ft.Text("Clear recent searches?"),
+        content=ft.Text(
+            "Every recent pick on this device is removed. You get one Undo right after."
+        ),
+        actions=[
+            ft.TextButton(
+                content="Cancel",
+                on_click=lambda e: controller.close_dialog(),
+            ),
+            ft.FilledButton(
+                content="Clear",
+                style=ft.ButtonStyle(bgcolor=AppColors.ERROR),
+                on_click=lambda e: _do_clear(),
+            ),
+        ],
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+
+def _row_title_session(row) -> tuple[str, str]:
+    """Normalize one recent-search row to (title, session).
+
+    Rows are ``{title, session, ts}`` dicts — the ANIME the user opened, so
+    recents read "Black Clover Season 1" instead of what was typed. Rows
+    written before that shape were bare strings. Suggestions must never
+    render a raw row (passing a dict to the search field is what broke
+    submit), so every read of a row goes through here.
+    """
+    if isinstance(row, dict):
+        return str(row.get("title") or ""), str(row.get("session") or "")
+    return str(row or ""), ""
+
+
+@ft.component
+def SearchScreen() -> ft.Control:
+    state = ft.use_context(AppStateCtx)
+    controller = ft.use_context(ControllerMethodsCtx)
+    _ = state.search_version
+
+    from flet import context as flet_context
+
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+    _ = state.search_query
+
+    query, set_query = ft.use_state("")
+    debounced_query = use_debounce(query, 250)
+
+    # The detected grid shape for this screen (its own backend's own art).
+    result_sources = grid_sources(state.search_results, lambda a: a.poster)
+    grid_mode = use_grid_mode(
+        "search",
+        result_sources,
+        state.search_source or state.current_source_name,
+        state,
+    )
+
+    def _submit(e=None):
+        # `query` is local state and only ever set from a string, but the
+        # retry button re-enters this path with whatever was last set —
+        # coerce so a stray non-string can never crash submit.
+        q = query.strip() if isinstance(query, str) else ""
+        if not q:
+            return
+        # Double-submit guard: a second tap while the first is in flight
+        # would queue a duplicate request and jump the results twice.
+        if state.is_loading:
+            return
+        # Network check first — offline is not the same as the CF gate,
+        # and telling an offline user to "verify you're human" is wrong.
+        if not state.is_online:
+            _warn_offline()
+            return
+        # The original gated search behind the CF check too — a request
+        # while blocked would just fail and look like "no results".
+        if state.cf_blocked:
+            from core.notify import show_snack
+
+            show_snack(
+                page,
+                LBL_CF_BLOCKED_SEARCH,
+                bgcolor=AppColors.WARNING,
+            )
+            return
+        controller.load_search(q, 1)
+
+    def _pick(row):
+        # Tapping a recent row: open the anime directly when it carries a
+        # session (recents store what was opened, not what was typed);
+        # otherwise fill the field and search by title.
+        title, session = _row_title_session(row)
+        if session:
+            controller.open_anime(session)
+            return
+        set_query(title)
+        if state.is_loading:
+            return
+        if not state.is_online:
+            _warn_offline()
+            return
+        if state.cf_blocked:
+            from core.notify import show_snack
+
+            show_snack(
+                page,
+                LBL_CF_BLOCKED_SEARCH,
+                bgcolor=AppColors.WARNING,
+            )
+            return
+        controller.load_search(title, 1)
+
+    def _warn_offline():
+        from core.notify import show_snack
+
+        show_snack(
+            page,
+            LBL_OFFLINE,
+            bgcolor=AppColors.ERROR,
+        )
+
+    def _confirm_clear_recent(e=None):
+        """The clear goes through the confirm builder — the actions close
+        the dialog and clear, never one without the other."""
+        controller.open_sheet(_build_clear_confirm_dialog(controller))
+
+    # Suggestions: recent selections filtered by what has been typed
+    # (debounced). Filter matches the row's title — the anime that was
+    # opened — so typing "black" still surfaces "Black Clover Season 1".
+    history = state.search_history or []
+    needle = (debounced_query or "").strip().lower()
+    suggestions = (
+        [h for h in history if needle in _row_title_session(h)[0].lower()]
+        if needle
+        else history[:8]
+    )
+
+    def _on_change(e):
+        # The original clamped the field; an unbounded paste could push a
+        # 100KB string into the query param.
+        value = (e.control.value or "")[:MAX_SEARCH_QUERY_LENGTH]
+        set_query(value)
+
+    field = ft.TextField(
+        autofocus=True,
+        hint_text="Search anime...",
+        # The flet family is on the 1.x line (pyproject), where the flat
+        # InputBorder.OUTLINE enum is deprecated — the per-state
+        # OutlineInputBorder class is the version's own API and paints the
+        # same shape: invisible hairline at rest, PRIMARY ring when focused.
+        border=ft.OutlineInputBorder(
+            border_radius=16,
+            side=ft.BorderSide(1, ft.Colors.TRANSPARENT),
+        ),
+        border_width=1,
+        border_color=ft.Colors.TRANSPARENT,
+        focused_border_width=1.5,
+        focused_border_color=AppColors.PRIMARY,
+        bgcolor=ft.Colors.with_opacity(0.05, ft.Colors.ON_SURFACE),
+        focused_bgcolor=ft.Colors.with_opacity(0.1, AppColors.PRIMARY),
+        prefix_icon=ft.Icons.SEARCH_ROUNDED,
+        content_padding=20,
+        max_length=MAX_SEARCH_QUERY_LENGTH,
+        text_size=16,
+        value=query,
+        on_submit=_submit,
+        on_change=_on_change,
+    )
+
+    # Inline spinner on the submit button while a search is in flight —
+    # the visible half of the double-submit guard.
+    searching = bool(state.is_loading and not state.search_results)
+    # Type refinement for the visible results (client-side, resets per page).
+    type_filter_state = ft.use_state("")
+    type_filter = type_filter_state[0]
+    set_type_filter = type_filter_state[1]
+
+    header = ft.Row(
+        [
+            GuardedIconButton(
+                icon=ft.Icons.EXPLORE_ROUNDED,
+                tooltip="Discover",
+                on_click=lambda e: controller.open_discover(),
+            ),
+            ft.Container(content=field, expand=True),
+            GuardedFilledButton(
+                content=ft.ProgressRing(width=16, height=16, stroke_width=2, color=ft.Colors.WHITE)
+                if searching
+                else "Search",
+                disabled=searching,
+                on_click=_submit,
+                style=ft.ButtonStyle(bgcolor=AppColors.PRIMARY, color=ft.Colors.WHITE),
+            ),
+        ],
+        spacing=8,
+    )
+
+    suggestion_rows = ft.Column(
+        controls=[
+            ft.Container(
+                content=ft.Row(
+                    [
+                        ft.Icon(
+                            ft.Icons.HISTORY_ROUNDED,
+                            size=18,
+                            color=ft.Colors.ON_SURFACE_VARIANT,
+                        ),
+                        ft.Container(width=8),
+                        ft.Text(
+                            _row_title_session(row)[0],
+                            size=13,
+                            color=ft.Colors.ON_SURFACE,
+                            expand=True,
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                border_radius=8,
+                ink=True,
+                on_click=lambda e, row=row: _pick(row),
+            )
+            for row in suggestions
+        ],
+        spacing=2,
+        visible=bool(suggestions) and not state.search_results,
+    )
+
+    clear_btn = (
+        GuardedTextButton(content="Clear recent", on_click=_confirm_clear_recent)
+        if history
+        else ft.Container(width=0, height=0)
+    )
+
+    if state.is_loading and not state.search_results:
+        # Skeleton cards under the progress bar — the lone ring reads
+        # as a frozen screen on a slow source.
+        def _skeleton(col: dict):
+            return ft.Container(
+                col=col,
+                height=250,
+                border_radius=14,
+                bgcolor=ft.Colors.with_opacity(0.08, ft.Colors.ON_SURFACE),
+            )
+
+        results = ft.Container(
+            content=ft.Column(
+                [
+                    ft.ProgressRing(color=AppColors.PRIMARY),
+                    ft.Container(height=16),
+                    ft.ResponsiveRow(
+                        controls=[_skeleton(GRID_COL) for _ in range(10)],
+                        spacing=GRID_SPACING,
+                        run_spacing=GRID_RUN_SPACING,
+                    ),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=8,
+            ),
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+        )
+    elif state.search_error:
+        results = ft.Container(
+            content=ft.Column(
+                [
+                    ft.Icon(ft.Icons.CLOUD_OFF_ROUNDED, size=56, color=AppColors.ERROR),
+                    ft.Text(
+                        "Search failed",
+                        size=16,
+                        weight=ft.FontWeight.W_600,
+                        color=ft.Colors.ON_SURFACE,
+                    ),
+                    ft.Text(state.search_error, size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+                    ft.OutlinedButton(content="Retry", on_click=_submit),
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=10,
+            ),
+            alignment=ft.Alignment.CENTER,
+            expand=True,
+        )
+    elif state.search_results:
+        # Type refinement over the CURRENT page: the source returns mixed
+        # types (TV, Movie, OVA…), so a chip row narrows what is already
+        # here without a second query. Only types the page actually
+        # contains are offered — a chip that can only empty the grid is a
+        # lie, and a source whose results carry no type shows no chips.
+        page_types = sorted(
+            {str(a.type).strip() for a in state.search_results if str(a.type).strip()}
+        )
+
+        def _type_chip(label, value):
+            active = (type_filter or "") == value
+            return ft.Container(
+                content=ft.Text(
+                    label,
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    color=ft.Colors.ON_SURFACE,
+                ),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=6),
+                border_radius=16,
+                ink=True,
+                tooltip="Show only this type" if value else "Show everything",
+                bgcolor=ft.Colors.with_opacity(0.18, AppColors.PRIMARY)
+                if active
+                else ft.Colors.with_opacity(0.06, ft.Colors.ON_SURFACE),
+                on_click=lambda e, v=value: set_type_filter(v),
+            )
+
+        chips_row = (
+            ft.Row(
+                [
+                    ft.Text("Type", size=12, weight=ft.FontWeight.W_700),
+                    _type_chip("All", ""),
+                    *[_type_chip(one, one) for one in page_types],
+                ],
+                spacing=6,
+                wrap=True,
+            )
+            if len(page_types) > 1
+            else None
+        )
+        shown = [
+            a for a in state.search_results if not type_filter or str(a.type).strip() == type_filter
+        ]
+        pager = ft_pager(
+            page=state.search_page,
+            has_more=state.search_has_more,
+            on_prev=lambda e: controller.load_search(state.search_query, state.search_page - 1),
+            on_next=lambda e: controller.load_search(state.search_query, state.search_page + 1),
+            is_loading=state.is_loading,
+        )
+        search_cards = [
+            _result_card(
+                a,
+                controller.open_anime,
+                col=GRID_COL,
+                now_playing=state.current_anime_session == a.session,
+                mode=grid_mode,
+                provider=state.search_source or state.current_source_name,
+            )
+            for a in shown
+        ]
+        results = ft.Column(
+            [
+                *([chips_row] if chips_row is not None else []),
+                # Banner after the search bar/type filters, BEFORE the
+                # results (owner's placement, 2026-11-02).
+                build_banner_ad(page, inline=True),
+                # A banner every 24 results, then one before the pager —
+                # the shared grid rule (owner's order).
+                *grid_with_ads(search_cards, page),
+                # Banner rides the pagination (KTV channel pattern).
+                build_banner_ad(page, inline=True),
+                pager,
+            ],
+            spacing=16,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
+    elif state.search_query:
+        results = empty_or_offline(
+            state,
+            title=f"No results found for '{state.search_query}'",
+            message="Check the spelling or try a different title.",
+            icon=ft.Icons.SEARCH_OFF_ROUNDED,
+            on_retry=lambda e: controller.load_search(state.search_query, 1),
+            on_downloads=lambda e: controller.open_downloads(),
+        )
+    elif not getattr(state, "is_online", True):
+        results = empty_or_offline(
+            state,
+            title="You're offline",
+            message="Check your connection, or continue in offline mode with your downloaded episodes.",
+            icon=ft.Icons.CLOUD_OFF_ROUNDED,
+            on_downloads=lambda e: controller.open_downloads(),
+        )
+    else:
+        results = EmptyState(
+            "Search for anime to get started",
+            message=LBL_SEARCH_EMPTY,
+            icon=ft.Icons.SEARCH_ROUNDED,
+        )
+
+    # Following shelf (whole anime) — the Browse tab doubles as Discover,
+    # so a curated library is one tab away. Hidden while a query is active.
+    _ = state.follows_version
+    follows_shelf = ft.Container(width=0)
+    if not state.search_results and not state.search_query:
+        follows = sorted(
+            (state.follows or {}).values(),
+            key=lambda row: row.get("added_at", 0),
+            reverse=True,
+        )
+        if follows:
+            cards = [
+                attach_focus_zoom(
+                    ft.FilledButton(
+                        content=ft.Column(
+                            [
+                                ft.Container(
+                                    content=ft.Image(
+                                        src=image_url(
+                                            row.get("poster") or "",
+                                            owner_of(row["anime_session"]),
+                                        ),
+                                        fit=ft.BoxFit.COVER,
+                                        expand=True,
+                                    )
+                                    if row.get("poster")
+                                    else ft.Container(
+                                        content=ft.Icon(
+                                            ft.Icons.MOVIE_ROUNDED,
+                                            size=32,
+                                            color=ft.Colors.ON_SURFACE_VARIANT,
+                                        ),
+                                        alignment=ft.Alignment.CENTER,
+                                        bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.ON_SURFACE),
+                                    ),
+                                    width=120,
+                                    height=68 if grid_mode == LANDSCAPE else 170,
+                                    border_radius=10,
+                                    clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+                                ),
+                                ft.Text(
+                                    row.get("title", ""),
+                                    size=12,
+                                    weight=ft.FontWeight.W_600,
+                                    color=ft.Colors.ON_SURFACE,
+                                    max_lines=2,
+                                    overflow=ft.TextOverflow.ELLIPSIS,
+                                    width=120,
+                                ),
+                            ],
+                            spacing=6,
+                            width=120,
+                        ),
+                        style=card_button_style(padding=4, radius=12, overlay_alpha=0.18),
+                        animate_scale=card_focus_scale(1.03),
+                        on_click=lambda e, row=row: (
+                            controller.open_anime(row.get("anime_session"))
+                            if row.get("anime_session")
+                            else None
+                        ),
+                    )
+                )
+                for row in follows[:20]
+                if isinstance(row, dict) and row.get("anime_session")
+            ]
+            follows_shelf = ft.Column(
+                [
+                    ft.Text(
+                        "Favorites",
+                        size=16,
+                        weight=ft.FontWeight.W_700,
+                        color=ft.Colors.ON_SURFACE,
+                    ),
+                    ft.Row(controls=cards, spacing=8, wrap=False, scroll=ft.ScrollMode.AUTO),
+                ],
+                spacing=8,
+            )
+
+    # Column has no `padding` field in flet 1.0.4 — the screen inset lives
+    # on the wrapper Container (passing it to Column raises TypeError the
+    # moment the component re-renders).
+    from components.app_header import app_header
+
+    return ft.Container(
+        content=ft.Column(
+            [
+                # The shared header first: the source pill and badge live on
+                # EVERY screen, so swapping a walled backend never depends
+                # on being on Home (owner's reuse pattern).
+                #
+                # "Clear recent" rides that same bar (owner, 2026-10-20:
+                # "the search and recents are alone on their line. Let us
+                # add them to the header"), so this screen puts nothing on
+                # a row of its own below it.
+                app_header(
+                    state,
+                    page,
+                    controller,
+                    subtitle="Search",
+                    extra_actions=[clear_btn] if history else None,
+                ),
+                header,
+                follows_shelf,
+                suggestion_rows,
+                ft.Container(content=results, expand=True),
+            ],
+            spacing=8,
+            expand=True,
+        ),
+        expand=True,
+        padding=ft.Padding.only(left=24, right=24, top=16, bottom=8),
+    )

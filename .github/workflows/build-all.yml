@@ -1,0 +1,236 @@
+name: Build Android APKs & Create Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_version:
+        description: "Build version"
+        required: true
+        default: "2.0.0"
+      build_number:
+        description: "Build number"
+        required: true
+        default: "20"
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUTF8: "1"
+  FLET_CLI_NO_RICH_OUTPUT: "1"
+  UV_PYTHON: "3.14"
+  BUILD_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.build_version || '2.0.0' }}
+  BUILD_NUMBER: ${{ startsWith(github.ref, 'refs/tags/v') && github.run_number || inputs.build_number || '20' }}
+
+jobs:
+  # ─── 0. Create Release Tag & Placeholder ────────────
+  prepare-release:
+    runs-on: ubuntu-latest
+    outputs:
+      TAG_NAME: ${{ steps.tag_info.outputs.TAG_NAME }}
+      RELEASE_NAME: ${{ steps.tag_info.outputs.RELEASE_NAME }}
+      IS_PRERELEASE: ${{ steps.tag_info.outputs.IS_PRERELEASE }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Generate Release Tag & Name
+        id: tag_info
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "RELEASE_NAME=AnimePahe TV ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
+          else
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            echo "TAG_NAME=build-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "RELEASE_NAME=Automated Build (${SHORT_SHA})" >> $GITHUB_OUTPUT
+            echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Create GitHub Release Placeholder
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag_info.outputs.TAG_NAME }}
+          name: ${{ steps.tag_info.outputs.RELEASE_NAME }}
+          prerelease: ${{ steps.tag_info.outputs.IS_PRERELEASE }}
+          make_latest: true
+          body: |
+            Automated multi-platform build generated from commit `${{ github.sha }}`.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── 1. Android APK (split per ABI) — simplified, proot-distro pattern ─
+  #   Phase 1: generate the Android project (Gradle stops early, expected).
+  #   Phase 2: inject KTV player package-visibility queries into the manifest.
+  #   Phase 3: build the split APKs, reusing the patched Flutter project.
+  build-apk-split:
+    needs: [prepare-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: astral-sh/setup-uv@v10.0.1
+      # ── Caches (single biggest win; match proot-distro's set) ────
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: ${{ runner.os }}-uv-
+      - name: Cache Flutter SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter
+          key: flutter-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flutter-${{ runner.os }}-
+      - name: Cache flet templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.flet/cache
+          key: flet-tpl-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flet-tpl-${{ runner.os }}-
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 --decode > tv_keystore.jks
+      # Phase 1: generate the Android project (expected to stop at Gradle).
+      - name: Generate the Android project
+        env:
+          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set +e
+          uv run --frozen flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "flet build apk completed on the first pass; no patch required."
+          elif [ -f build/flutter/android/app/build.gradle.kts ]; then
+            echo "::warning::flet build apk stopped at its Gradle run (expected: core library desugaring missing). Project generated; patching and re-running."
+          else
+            echo "::error::flet build apk failed before generating the Android project"
+            exit 1
+          fi
+      # Phase 2: inject KTV player package-visibility queries (kept as-is).
+      - name: Patch the generated Android project (KTV queries)
+        run: |
+          manifest="build/flutter/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$manifest" ] && ! grep -q 'scheme="ktv"' "$manifest"; then
+            sed -i '/<\/manifest>/i \    <queries>\n        <package android:name="ng.kiri.ktvplayer" \/>\n        <intent>\n            <action android:name="android.intent.action.VIEW" \/>\n            <data android:scheme="ktv" \/>\n        <\/intent>\n    <\/queries>' "$manifest"
+            echo "Injected KTV player queries into AndroidManifest.xml"
+          fi
+      # Phase 3: build the split APKs, reusing the patched Flutter project.
+      - name: Build APK (split per ABI)
+        env:
+          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: uv run --frozen flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} --split-per-abi -v
+      - name: Size report
+        if: always()
+        run: |
+          ls -l build/apk/*.apk
+          for a in build/apk/*.apk; do
+            echo "== $a ($(du -h "$a" | cut -f1))"
+          done
+      - name: Upload APKs to Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
+          files: build/apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── 2. Android APK (universal/fat, side-by-side with split-per-abi) ─
+  build-apk-universal:
+    needs: [prepare-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: ${{ runner.os }}-uv-
+      - name: Cache Flutter SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter
+          key: flutter-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flutter-${{ runner.os }}-
+      - name: Cache flet templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.flet/cache
+          key: flet-tpl-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: flet-tpl-${{ runner.os }}-
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 --decode > tv_keystore.jks
+      # Phase 1: generate the Android project (expected to stop at Gradle).
+      - name: Generate the Android project
+        env:
+          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set +e
+          uv run --frozen flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "flet build apk completed on the first pass; no patch required."
+          elif [ -f build/flutter/android/app/build.gradle.kts ]; then
+            echo "::warning::flet build apk stopped at its Gradle run (expected: core library desugaring missing). Project generated; patching and re-running."
+          else
+            echo "::error::flet build apk failed before generating the Android project"
+            exit 1
+          fi
+      # Phase 2: inject KTV player package-visibility queries.
+      - name: Patch the generated Android project (KTV queries)
+        run: |
+          manifest="build/flutter/android/app/src/main/AndroidManifest.xml"
+          if [ -f "$manifest" ] && ! grep -q 'scheme="ktv"' "$manifest"; then
+            sed -i '/<\/manifest>/i \    <queries>\n        <package android:name="ng.kiri.ktvplayer" \/>\n        <intent>\n            <action android:name="android.intent.action.VIEW" \/>\n            <data android:scheme="ktv" \/>\n        <\/intent>\n    <\/queries>' "$manifest"
+            echo "Injected KTV player queries into AndroidManifest.xml"
+          fi
+      # Phase 3: build the universal APK.
+      - name: Build APK (universal)
+        env:
+          FLET_ANDROID_SIGNING_KEY_STORE: ${{ github.workspace }}/tv_keystore.jks
+          FLET_ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          FLET_ANDROID_SIGNING_KEY_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          FLET_ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: uv run --frozen flet build apk --yes --project animepahe-tv --product "AnimePahe TV" --org com.animepahe --build-version ${{ env.BUILD_VERSION }} --build-number ${{ env.BUILD_NUMBER }} -v
+      - name: Size report
+        if: always()
+        run: |
+          ls -l build/apk/*.apk
+          for a in build/apk/*.apk; do
+            echo "== $a ($(du -h "$a" | cut -f1))"
+          done
+      - name: Upload universal APK to Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare-release.outputs.TAG_NAME }}
+          files: build/apk/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

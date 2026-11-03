@@ -1,0 +1,462 @@
+import asyncio
+import json
+import logging
+import os
+import platform
+import sys
+
+import flet as ft
+
+from services.cf_judge import challenge_complete, target_host_of
+
+logger = logging.getLogger(__name__)
+
+
+class VerificationError(RuntimeError):
+    """The Cloudflare verification window closed, timed out, or the solver
+    child failed. Callers catch it (or Exception) and report the reason."""
+
+
+# The child solver caps its own wait at ~2 minutes; this is the parent's
+# backstop for a wedged GUI thread. The mobile path gets its own budget
+# below.
+DESKTOP_SOLVER_TIMEOUT = 150.0
+MOBILE_SOLVER_TIMEOUT = 300.0
+
+
+def _desktop_argv(python: str, script: str, url: str, user_agent: str | None) -> list[str]:
+    """The subprocess argv. The UA rides argv[2] when one is pinned — the
+    clearance cookie is bound to the UA that solved the challenge, so the
+    solve must present the same string the later API calls will."""
+    argv = [python, script, url]
+    if user_agent:
+        argv.append(user_agent)
+    return argv
+
+
+def _get_python_executable() -> str:
+    cwd = os.getcwd()
+    if platform.system() == "Windows":
+        venv_python = os.path.join(cwd, ".venv", "Scripts", "python.exe")
+    else:
+        venv_python = os.path.join(cwd, ".venv", "bin", "python")
+
+    if os.path.exists(venv_python):
+        return venv_python
+    return sys.executable
+
+
+class WebViewSolver:
+    @staticmethod
+    async def solve_challenge(
+        page: ft.Page, url: str, user_agent: str | None = None
+    ) -> tuple[str, str]:
+        """Open the challenge and return (cookies, ua). ``user_agent`` pins
+        the window to a stored UA when one exists: cf_clearance is bound to
+        the string that solved it, so a re-solve must present the same."""
+        # flet-webview-all renders on Android (and Android TV, which Flutter
+        # reports as TargetPlatform.android); desktop dev uses the pywebview
+        # subprocess because third-party extension controls do not render
+        # under `flet run` (flet-dev/flet#5168).
+        is_mobile_family = page.platform.is_mobile() or (
+            page.platform == ft.PagePlatform.ANDROID_TV
+        )
+        if is_mobile_family:
+            logger.info("WebViewSolver using flet_webview WebView (mobile/TV)")
+            return await WebViewSolver._solve_mobile(page, url, user_agent)
+        logger.info("WebViewSolver using pywebview subprocess (Desktop dev)")
+        return await WebViewSolver._solve_desktop(page, url, user_agent)
+
+    @staticmethod
+    async def _solve_desktop(
+        page: ft.Page, url: str, user_agent: str | None = None
+    ) -> tuple[str, str]:
+        # Path to the desktop solver script
+        dir_path = os.path.dirname(os.path.abspath(__file__))
+        solver_script = os.path.join(dir_path, "desktop_cf_solver.py")
+
+        from services.desktop_cf_solver import FALLBACK_UA
+
+        # Show loading indicator in Flet app while solver runs
+        loading_dlg = ft.AlertDialog(
+            title=ft.Text("Cloudflare Security Challenge", weight=ft.FontWeight.BOLD),
+            content=ft.Column(
+                [
+                    ft.Text(
+                        "Opening verification window... Please complete the challenge in the popup window.",
+                        size=13,
+                    ),
+                    ft.Container(height=8),
+                    ft.Row(
+                        [
+                            ft.ProgressRing(color=ft.Colors.PRIMARY),
+                            ft.Text("Waiting for verification...", size=14),
+                        ],
+                        alignment=ft.MainAxisAlignment.CENTER,
+                    ),
+                ],
+                tight=True,
+            ),
+            modal=True,
+        )
+        page.show_dialog(loading_dlg)
+        page.update()
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *_desktop_argv(_get_python_executable(), solver_script, url, user_agent),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            # A timeout on the wait itself: the child caps at ~2 minutes,
+            # but a wedged GUI thread (no window station, a modal hang)
+            # must not pin the app forever. The child's own guard fires
+            # first in every normal case.
+            stdout_data, stderr_data = await asyncio.wait_for(
+                proc.communicate(), timeout=DESKTOP_SOLVER_TIMEOUT
+            )
+
+            stderr_out = stderr_data.decode().strip()
+            if stderr_out:
+                logger.info("Subprocess stderr logs:\n%s", stderr_out)
+
+            if proc.returncode != 0:
+                logger.error(
+                    "Desktop solver failed with code %d: %s",
+                    proc.returncode,
+                    stderr_out,
+                )
+                raise VerificationError(f"Desktop solver failed: {stderr_out}")
+
+            out = stdout_data.decode().strip()
+
+            # Find the JSON line in the stdout
+            json_str = None
+            for line in out.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("{") and stripped.endswith("}"):
+                    json_str = stripped
+                    break
+
+            if not json_str:
+                raise VerificationError("Verification was closed or failed.")
+
+            data = json.loads(json_str)
+            # The child now exits non-zero with {"error": "closed"|"timeout"}
+            # — surface it verbatim instead of the generic message.
+            if data.get("error"):
+                raise VerificationError(f"Verification {data['error']}.")
+            cookies = data.get("cookies") or ""
+            ua = data.get("user_agent") or FALLBACK_UA
+            return cookies, ua
+        finally:
+            try:
+                page.pop_dialog()
+            except Exception:
+                logger.debug("suppressed")
+            page.update()
+
+    @staticmethod
+    async def _solve_mobile(
+        page: ft.Page, url: str, user_agent: str | None = None
+    ) -> tuple[str, str]:
+        from flet_webview import WebView, WebViewConsoleMessageEvent
+
+        # Try to initialize pyjnius CookieManager for reading HttpOnly cookies
+        _cookie_manager = None
+        try:
+            from jnius import autoclass  # type: ignore[import-not-found]
+
+            CookieManager = autoclass("android.webkit.CookieManager")
+            _cookie_manager = CookieManager.getInstance()
+            logger.info("Mobile solver: pyjnius CookieManager initialized")
+        except Exception as ex:
+            logger.warning(
+                "Mobile solver: pyjnius not available, fallback to document.cookie: %s",
+                ex,
+            )
+
+        loop = asyncio.get_running_loop()
+        result_future = loop.create_future()
+
+        async def _android_cookies(current_url: str) -> str:
+            if _cookie_manager is None:
+                return ""
+            try:
+                # getCookie is a blocking JNI call — off the event loop it
+                # used to stall the app's frames for the call's duration.
+                return await asyncio.to_thread(_cookie_manager.getCookie, current_url) or ""
+            except Exception as ex:
+                logger.error("CookieManager.getCookie error: %s", ex)
+                return ""
+
+        async def _try_resolve(cookie_str: str, current_url: str = ""):
+            if "cf_clearance" not in cookie_str:
+                return
+
+            # flet_webview's WebView exposes get_title()/get_user_agent()
+            # directly (a JS round-trip method does not exist here).
+            title = ""
+            try:
+                result = await webview.get_title()
+                if isinstance(result, str):
+                    title = result
+            except Exception:
+                ...
+            # The completion test is SHARED with the desktop solver
+            # (services/cf_judge.py): one rule, two transports. This file
+            # used to carry its own copy that demanded the literal string
+            # "animepahe" in the title and the animepahe session cookies,
+            # so on a phone AnimePahe solved and every other source —
+            # AnimeOut in particular — sat on "Waiting for verification"
+            # over an already-cleared challenge and timed out with nothing
+            # captured (owner's run, 2026-10-20).
+            if not challenge_complete(
+                cookie_keys=[k.split("=", 1)[0].strip() for k in cookie_str.split(";")],
+                url=current_url,
+                title=title,
+                target_host=target_host_of(url),
+            ):
+                logger.debug(
+                    "Mobile solver: challenge still in progress (title=%s, url=%s)",
+                    title,
+                    current_url,
+                )
+                return
+
+            logger.info("Mobile solver verified challenge completion! Title: %s", title)
+            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            # The WebView reports its own UA directly — the JS round-trip
+            # this used to attempt does not exist in flet_webview, so the
+            # real device UA was silently never captured.
+            try:
+                final_ua = await webview.get_user_agent()
+                if isinstance(final_ua, str) and final_ua:
+                    ua = final_ua
+            except Exception as ex:
+                logger.debug("UA read failed: %s", ex)
+            if not result_future.done():
+                result_future.set_result((cookie_str, ua))
+
+        async def on_console(e: WebViewConsoleMessageEvent):
+            msg = e.message
+            if msg.startswith("COOKIE:"):
+                current_url = ""
+                try:
+                    current_url = (await webview.get_current_url()) or ""
+                except Exception:
+                    logger.debug("suppressed")
+                await _try_resolve(msg[7:].strip(), current_url=current_url)
+
+        async def on_url_change(e):
+            # Events carry payloads in .data — dict-shaped data is a
+            # transport artifact, so read it defensively rather than
+            # str()-ing it.
+            raw = getattr(e, "data", None)
+            if isinstance(raw, str):
+                current_url = raw
+            elif isinstance(raw, dict):
+                current_url = str(raw.get("url") or "")
+            else:
+                current_url = ""
+            logger.info("WebView page started: %s", current_url)
+            # Read native cookies on ANY navigation off the challenge
+            # host, not just animepahe's: the jar is where cf_clearance
+            # lands, and the target host is decided by the URL we were
+            # asked to solve (the hardcoded animepahe gate left every
+            # other source's capture to the 1.5 s poll alone).
+            if _cookie_manager and current_url and "__cf_chl" not in current_url:
+                cookies = await _android_cookies(current_url)
+                if cookies:
+                    await _try_resolve(cookies, current_url=current_url)
+
+        is_tv = page.platform == ft.PagePlatform.ANDROID_TV
+
+        async def on_page_ended(e):
+            logger.info("WebView page load finished: %s", e.data)
+            # NOTE: we intentionally do NOT inject viewport/scale CSS or mutate
+            # document.title here. Cloudflare's Turnstile challenge is a JS app
+            # that watches the DOM; mutating it trips its integrity checks and
+            # causes the page to reload itself — the reload loop seen on TV.
+            # Zoom is disabled at construction (zoom_enabled=False), so there is
+            # nothing to call here and the page is never disturbed.
+
+        webview = WebView(
+            url=url,
+            expand=True,
+            on_console_message=on_console,
+            on_page_started=on_url_change,
+            on_page_ended=on_page_ended,
+        )
+
+        async def poll_cookies():
+            while not result_future.done():
+                current_url = ""
+                try:
+                    current_url = (await webview.get_current_url()) or ""
+
+                except Exception:
+                    logger.debug("suppressed")
+                # Primary (and on Android, the ONLY path that works for
+                # cf_clearance): read native cookies via pyjnius. cf_clearance is
+                # an HttpOnly cookie, so document.cookie can NEVER see it — the
+                # native CookieManager is the real capture path on every device.
+                if current_url and _cookie_manager:
+                    cookies = await _android_cookies(current_url)
+                    if cookies:
+                        await _try_resolve(cookies, current_url=current_url)
+                        if result_future.done():
+                            break
+
+                # Last-resort fallback ONLY when pyjnius is unavailable
+                # (should not happen on Android, but kept defensively). Uses a
+                # single READ-ONLY console.log — we deliberately avoid mutating
+                # document.title, which previously disturbed the Cloudflare
+                # challenge and caused the reload loop on Android TV.
+                if _cookie_manager is None:
+                    try:
+                        await webview.run_javascript(
+                            "console.log('COOKIE:' + (document.cookie || ''))"
+                        )
+
+                    except Exception:
+                        logger.debug("suppressed")
+                # Poll every 1.5s instead of 0.5s. Native cookie reads are cheap
+                # and non-intrusive, so the longer interval does not slow down
+                # detection meaningfully — but it stops starving the Cloudflare
+                # challenge JS of CPU on low-power TV hardware (the slowness).
+                await asyncio.sleep(1.5)
+
+        polling_task = asyncio.create_task(poll_cookies())
+
+        loading_ring = ft.ProgressRing(color=ft.Colors.PRIMARY, stroke_width=4)
+
+        dialog_width = 600 if is_tv else 360
+        dialog_height = 450 if is_tv else 280
+
+        wv_container = ft.Container(
+            content=webview,
+            width=dialog_width,
+            height=dialog_height,
+            border_radius=8,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+
+        dialog_content = ft.Column(
+            [
+                ft.Text(
+                    "Scroll down and verify you are human to continue.",
+                    size=14,
+                    weight=ft.FontWeight.W_500,
+                ),
+                ft.Container(height=4),
+                ft.Row(
+                    [loading_ring, ft.Text("Waiting for verification...", size=13)],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                ),
+                ft.Container(height=8),
+                wv_container,
+            ],
+            tight=True,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+        def on_cancel(e):
+            if not result_future.done():
+                result_future.set_exception(Exception("Verification cancelled by user."))
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("Security Verification", weight=ft.FontWeight.BOLD),
+            content=dialog_content,
+            actions=[ft.Button(content=ft.Text("Cancel"), on_click=on_cancel)],
+            modal=True,
+        )
+
+        page.show_dialog(dlg)
+        page.update()
+
+        # POST-MOUNT ONLY. Every WebView method needs self.page — called
+        # before show_dialog they raised RuntimeError and were swallowed,
+        # so the JS mode and zoom never actually applied. And on a device
+        # that reports PagePlatform.ANDROID_TV they are gated off
+        # entirely (flet_webview's allow-list is Android/iOS/macOS):
+        # detect that once here and use the desktop solver instead of
+        # spinning forever on FletUnsupportedPlatformException.
+        try:
+            await asyncio.wait_for(webview.get_current_url(), timeout=5.0)
+        except ft.FletUnsupportedPlatformException:
+            logger.warning(
+                "flet_webview is unsupported on this platform (Android TV?) "
+                "— falling back to the desktop solver"
+            )
+            try:
+                page.pop_dialog()
+            except Exception:
+                logger.debug("suppressed")
+            page.update()
+            polling_task.cancel()
+            try:
+                await polling_task
+            except BaseException:
+                logger.debug("suppressed")
+            return await WebViewSolver._solve_desktop(page, url, user_agent)
+        except Exception:
+            pass  # a generic failure here is the poll loop's problem
+
+        try:
+            from flet_webview import JavaScriptMode
+
+            await webview.set_javascript_mode(JavaScriptMode.UNRESTRICTED)
+        except Exception as ex:
+            logger.warning("webview set_javascript_mode failed: %s", ex)
+        try:
+            await webview.disable_zoom()
+        except Exception as ex:
+            logger.warning("webview disable_zoom failed: %s", ex)
+
+        original_on_keyboard = page.on_keyboard_event
+        if is_tv:
+
+            async def handle_tv_keys(e: ft.KeyboardEvent):
+                key_map = {
+                    "ArrowUp": (0, -120),
+                    "ArrowDown": (0, 120),
+                    "ArrowLeft": (-120, 0),
+                    "ArrowRight": (120, 0),
+                }
+                if e.key in key_map:
+                    dx, dy = key_map[e.key]
+                    try:
+                        await webview.scroll_by(dx, dy)
+                    except Exception as ex:
+                        logger.error("TV scroll error: %s", ex)
+                    return
+                if original_on_keyboard:
+                    await original_on_keyboard(e)
+
+            page.on_keyboard_event = handle_tv_keys
+            page.update()
+
+        try:
+            # A bounded wait: the user who never solves AND never cancels
+            # must not pin the app open forever.
+            cookies, ua = await asyncio.wait_for(result_future, timeout=MOBILE_SOLVER_TIMEOUT)
+            return cookies, ua
+        finally:
+            # Await the cancelled poll task: dropping the reference left
+            # the loop to destroy it mid-call at shutdown.
+            polling_task.cancel()
+            try:
+                await polling_task
+            except BaseException:
+                logger.debug("suppressed")
+            if is_tv and original_on_keyboard is not None:
+                page.on_keyboard_event = original_on_keyboard
+            elif is_tv:
+                page.on_keyboard_event = None
+            try:
+                page.pop_dialog()
+            except Exception:
+                logger.debug("suppressed")
+            page.update()
