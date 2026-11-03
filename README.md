@@ -30,6 +30,7 @@ Get the latest version of AnimePahe TV. Modern phones and TVs use the **ARM64** 
 | 🤖 **Android (ARM64)** | [**animepahe-tv-arm64-v8a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-arm64-v8a.apk) | ~42 MB | For modern 64-bit Android TVs and smartphones |
 | 🤖 **Android (ARM32)** | [**animepahe-tv-armeabi-v7a.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-armeabi-v7a.apk) | ~41 MB | For older 32-bit Android devices and older Firesticks |
 | 🤖 **Android (x86_64)** | [**animepahe-tv-x86_64.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv-x86_64.apk) | ~44 MB | For Android emulators / ChromeOS |
+| 📦 **Android (Universal)** | [**animepahe-tv.apk**](https://github.com/Nwokike/animepahe-tv/releases/latest/download/animepahe-tv.apk) | ~100 MB | One APK for **every device** — all architectures in a single install |
 
 APK download size is kept small with `legacy_packaging = true` in `pyproject.toml` (native libraries stored compressed in the APK; since Flet 0.86 they default to uncompressed, which doubles the download).
 
@@ -37,7 +38,17 @@ APK download size is kept small with `legacy_packaging = true` in `pyproject.tom
 
 ## Screenshots
 
-*Coming soon.*
+| Home | Discover | Search |
+|:----:|:--------:|:------:|
+| ![Home](screenshots/home.png) | ![Discover](screenshots/discover.png) | ![Search](screenshots/search.png) |
+
+| Anime Detail | Downloads | Source Picker |
+|:------------:|:---------:|:-------------:|
+| ![Anime Detail](screenshots/anime-detail.png) | ![Downloads](screenshots/downloads.png) | ![Source Picker](screenshots/source-picker.png) |
+
+| Settings |
+|:--------:|
+| ![Settings](screenshots/settings.png) |
 
 ---
 
