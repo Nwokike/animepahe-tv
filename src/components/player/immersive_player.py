@@ -1062,11 +1062,20 @@ class ImmersivePlayer(ft.Stack):
 
     def teardown(self):
         """Sync final cleanup — safe to call from the close funnel after the
-        awaited save. Clears the playlist so native playback halts now."""
+        awaited save. Exits native fullscreen FIRST (a popped view under an
+        open fullscreen route corrupts the engine's view stack —
+        'FlutterEngineRemoveView kInvalidArguments' then a Dart RangeError
+        on the next rebuild), then clears the playlist so native playback
+        halts immediately."""
         self._cancel_watchdog()
         self._cancel_checkpoints()
         if self.video:
             self._is_closing = True
+            try:
+                if self.video.fullscreen:
+                    self.video.fullscreen = False
+            except Exception:
+                logger.debug("suppressed")
             try:
                 self.video.playlist = []
                 self.video.update()
