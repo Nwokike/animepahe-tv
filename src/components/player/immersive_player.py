@@ -325,16 +325,26 @@ class ImmersivePlayer(ft.Stack):
             return None
 
     def _run_async(self, coro_fn, *args):
-        """Run a coroutine method on the page loop from a sync callback."""
+        """Run a handler on the page loop from a sync callback.
+
+        `page.run_task` requires a coroutine FUNCTION — a sync callable or a
+        bare lambda raises "handler must be a coroutine function" (the TV
+        crash: the error overlay's Retry passed a sync def). Sync callables
+        run directly; only real coroutine functions go through run_task."""
         page = self.safe_page or self._page()
-        if page is not None:
+        if page is not None and asyncio.iscoroutinefunction(coro_fn):
             page.run_task(coro_fn, *args)
             return
-        try:
-            loop = asyncio.get_running_loop()
-            _keep(loop.create_task(coro_fn(*args)))
-        except RuntimeError:
-            pass
+        result = coro_fn(*args)
+        if hasattr(result, "__await__"):
+            if page is not None:
+                page.run_task(_await_result, result)
+                return
+            try:
+                loop = asyncio.get_running_loop()
+                _keep(loop.create_task(result))
+            except RuntimeError:
+                pass
 
     # --- lifecycle ----------------------------------------------------
 
@@ -454,30 +464,23 @@ class ImmersivePlayer(ft.Stack):
 
         await cycle_speed(self)
 
-    def _manual_retry(self):
+    async def _manual_retry(self):
         if self._is_closing:
             return
         self._is_final_error = False
         self._reconnect_count = 0
         self._show_progress("Reconnecting stream...")
-
-        async def _retry():
-            try:
-                self.video.playlist = [
-                    fv.VideoMedia(self.resource, http_headers=self.http_headers),
-                ]
-                self.video.update()
-                await self.video.play()
-            except Exception:
-                self._show_final_error("Stream is not responding. Retry or go back.")
-                return
-            self._start_watchdog()
-
         try:
-            loop = asyncio.get_running_loop()
-            _keep(loop.create_task(_retry()))
-        except RuntimeError:
-            pass
+            self.video.playlist = [
+                fv.VideoMedia(self.resource, http_headers=self.http_headers),
+            ]
+            self.video.update()
+            await self.video.play()
+        except Exception as ex:
+            logger.error("Manual retry playback failed: %s", ex)
+            self._show_final_error("Stream is not responding. Retry or go back.")
+            return
+        self._start_watchdog()
 
     # --- events ---------------------------------------------------------
 
