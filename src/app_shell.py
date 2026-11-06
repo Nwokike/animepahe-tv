@@ -266,8 +266,6 @@ def AppShell() -> ft.Control:
     # visibility, retry buttons, playback rate, quality swap). KTV mounts
     # its player in a ft.View for the same reason; page.views is gone in
     # flet 1.0.4, so page.overlay is the equivalent top-level slot.
-    _use_player_view(state, controller)
-
     # Stream resolution takes seconds — the overlay is how the tap is
     # acknowledged (KTV's rule: anything slower than a beat gets a spinner).
     _ = state.busy_version
@@ -473,6 +471,23 @@ def _pop_play_view(page) -> bool:
     return False
 
 
+def pop_player_view() -> None:
+    """Public close path: pop the /play view and release player page state.
+
+    Called from the close funnel and `close_player` (event context)."""
+    global _active_player, _active_key
+    try:
+        page = flet_context.page
+    except Exception:
+        page = None
+    if page is None:
+        return
+    _active_player = None
+    _active_key = None
+    if _pop_play_view(page):
+        _release_player_page_state(page)
+
+
 def _release_player_page_state(page) -> None:
     """The player is gone: the screen may sleep again (unless downloads run)
     and the window-level key stream must stop feeding it."""
@@ -536,39 +551,37 @@ async def _close_player_with_save(player):
         logger.debug("close-path: position save failed", exc_info=True)
     # Release native resources while the control tree is still attached.
     try:
-        player.teardown()
+        await player.teardown()
     except Exception:
         logger.debug("suppressed")
 
     from state.app_state import state
 
-    page = None
-    try:
-        page = flet_context.page
-    except Exception:
-        page = None
     _active_player = None
     state.player_open = False
     state.player_error = None
     state.episodes_version += 1
-    if page is not None:
-        _pop_play_view(page)
-        _release_player_page_state(page)
+    pop_player_view()
 
 
-def _use_player_view(state, controller) -> None:
-    """Mount/unmount the player as a /play VIEW on the views stack (KTV
-    exact). The view — not an overlay — is what makes the Android system
-    back reach Python (on_view_pop) instead of exiting the app. No
-    SafeArea on the player mount: the view carries padding=0, exactly like
-    KTV's ft.View. The key comparison is what makes retries and episode
-    switches remount instead of reusing a stale stage."""
+def open_player_view(controller) -> None:
+    """Mount the player as a /play VIEW on the views stack (KTV exact).
+
+    `controller` is the AppController. MUST be called from event-handler
+    context (controller methods), NEVER during the shell's component
+    render: a render-cycle `page.views.append()` + `page.update()`
+    re-enters flet's update machinery mid-diff and produces the
+    RangeError(length) spam that killed sessions (owner logs 2026-11-05).
+
+    The view — not an overlay — is what makes the Android system back
+    reach Python (on_view_pop) instead of exiting the app. No SafeArea on
+    the player mount: the view carries padding=0, exactly like KTV's
+    ft.View."""
     global _active_player, _active_key
 
-    try:
-        page = flet_context.page
-    except Exception:
-        page = None
+    from state.app_state import state
+
+    page = getattr(controller, "page", None)
     if page is None:
         return
 
@@ -618,9 +631,7 @@ def _use_player_view(state, controller) -> None:
         on_close=lambda: _close_player(),
         on_next=lambda: _play_adjacent(1, controller),
         on_previous=lambda: _play_adjacent(-1, controller),
-        hls_proxy=getattr(
-            getattr(controller, "_app_controller", None), "hls_proxy", None
-        ),
+        hls_proxy=getattr(controller, "hls_proxy", None),
         source_url=spec.get("source_url") or "",
         source_referer=spec.get("source_referer"),
         source_headers=spec.get("source_headers"),

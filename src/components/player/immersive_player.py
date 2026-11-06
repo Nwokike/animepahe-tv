@@ -22,6 +22,7 @@ manager); everything animepahe-specific rides on top:
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import os
 import time
@@ -184,7 +185,6 @@ class ImmersivePlayer(ft.Stack):
         self._is_final_error = False
         self._is_closing = False
         self._watchdog_task: asyncio.Task | None = None
-        self._checkpoint_task: asyncio.Task | None = None
 
         # Overlay controls
         self.status_text = ft.Text(
@@ -332,7 +332,7 @@ class ImmersivePlayer(ft.Stack):
         crash: the error overlay's Retry passed a sync def). Sync callables
         run directly; only real coroutine functions go through run_task."""
         page = self.safe_page or self._page()
-        if page is not None and asyncio.iscoroutinefunction(coro_fn):
+        if page is not None and inspect.iscoroutinefunction(coro_fn):
             page.run_task(coro_fn, *args)
             return
         result = coro_fn(*args)
@@ -368,7 +368,6 @@ class ImmersivePlayer(ft.Stack):
         except Exception:
             pass
         self._cancel_watchdog()
-        self._cancel_checkpoints()
         # Orphan position save: the view can be detached without the close
         # funnel ever running (remount races) — never lose the position.
         # save_position_now queries the live video, so this is correct even
@@ -421,7 +420,6 @@ class ImmersivePlayer(ft.Stack):
                 self.video.update()
             await self.video.play()
             self._start_watchdog()
-            self._start_checkpoints()
         except Exception:
             logger.exception("start_playback error")
             self._show_final_error("Could not start playback.")
@@ -963,26 +961,6 @@ class ImmersivePlayer(ft.Stack):
             self._watchdog_task.cancel()
         self._watchdog_task = None
 
-    def _start_checkpoints(self):
-        if self._checkpoint_task is not None:
-            return
-
-        async def _checkpoint_loop():
-            while not self._is_closing:
-                await asyncio.sleep(_POSITION_SAVE_INTERVAL)
-                self._maybe_save_position_periodically()
-
-        try:
-            loop = asyncio.get_running_loop()
-            self._checkpoint_task = loop.create_task(_checkpoint_loop())
-        except RuntimeError:
-            pass
-
-    def _cancel_checkpoints(self):
-        if self._checkpoint_task and not self._checkpoint_task.done():
-            self._checkpoint_task.cancel()
-        self._checkpoint_task = None
-
     # --- error handling & retry ------------------------------------------
 
     def _on_error(self, e: ft.ControlEvent):
@@ -1063,27 +1041,30 @@ class ImmersivePlayer(ft.Stack):
         except Exception as ex:
             logger.debug("Saving playback position failed: %s", ex)
 
-    def teardown(self):
-        """Sync final cleanup — safe to call from the close funnel after the
-        awaited save. Exits native fullscreen FIRST (a popped view under an
-        open fullscreen route corrupts the engine's view stack —
-        'FlutterEngineRemoveView kInvalidArguments' then a Dart RangeError
-        on the next rebuild), then clears the playlist so native playback
-        halts immediately."""
+    async def teardown(self):
+        """Final cleanup, awaited by the close funnel. Exits native
+        fullscreen FIRST (a popped view under an open fullscreen route
+        corrupts the engine's view stack — 'FlutterEngineRemoveView
+        kInvalidArguments' then a Dart RangeError on the next rebuild),
+        then STOPS playback. Deliberately does NOT push an empty playlist:
+        flet_video's Dart re-opens the patched playlist, and an empty one
+        is media-kit's verified RangeError (media-kit #1104/#1006 — index
+        accessed without an empty check). `stop()` halts playback and
+        re-opens the CURRENT playlist paused; the /play view pop then
+        detaches the Video and media_kit releases on dispose."""
         self._cancel_watchdog()
-        self._cancel_checkpoints()
         if self.video:
             self._is_closing = True
             try:
                 if self.video.fullscreen:
                     self.video.fullscreen = False
+                    self.video.update()
             except Exception:
                 logger.debug("suppressed")
             try:
-                self.video.playlist = []
-                self.video.update()
-            except Exception:
-                pass
+                await self.video.stop()
+            except Exception as ex:
+                logger.debug("video.stop failed: %s", ex)
 
     def _on_complete(self, e: ft.ControlEvent | None = None):
         # flet_video notifies `complete` the moment a fresh playlist is
@@ -1398,6 +1379,18 @@ class ImmersivePlayer(ft.Stack):
 
     def _apply_track(self, src: str, title: str | None = None) -> None:
         try:
+            # The value-equality trap (flet's Prop.__set__, value_types.py
+            # 62-63: `old == value` -> "no change — skip everything"). An
+            # equal value marks nothing dirty, so `update()` pushes no
+            # delta and mpv never re-issues the subtitle load — exactly
+            # the owner's symptom: re-selecting the already-selected
+            # English track showed nothing until another language was
+            # picked in between. Force the change through: clear, push,
+            # then apply.
+            current = self.video.subtitle_track
+            if current is not None and getattr(current, "src", None) == src:
+                self.video.subtitle_track = fv.VideoSubtitleTrack.none()
+                self.video.update()
             self.video.subtitle_track = fv.VideoSubtitleTrack(src=src, title=title)
             self.video.update()
         except Exception as ex:

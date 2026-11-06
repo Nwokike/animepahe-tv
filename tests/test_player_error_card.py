@@ -23,8 +23,9 @@ from state.app_state import state as app_state
 
 
 class _FakeController:
-    def __init__(self):
+    def __init__(self, page):
         self._app_controller = self
+        self.page = page
         self.played: list[str] = []
 
     async def play_downloaded(self, episode_session: str):
@@ -79,7 +80,7 @@ def _mount(state, controller, page, first: bool = False):
         _reset_mount()
     token = _context_page.set(page)
     try:
-        app_shell._use_player_view(state, controller)
+        app_shell.open_player_view(controller)
     finally:
         _context_page.reset(token)
 
@@ -95,7 +96,7 @@ def test_player_mounts_as_a_view_not_the_component_tree():
     }
     page = _FakePage()
 
-    _mount(state, _FakeController(), page, first=True)
+    _mount(state, _FakeController(page), page, first=True)
 
     assert len(page.views) == 1
     assert page.views[-1].route == "/play"
@@ -111,7 +112,7 @@ def test_second_render_does_not_remount():
     state.player_open = True
     state.player_spec = {"resource": "https://cdn/index.m3u8", "episode_session": "ep1"}
     page = _FakePage()
-    controller = _FakeController()
+    controller = _FakeController(page)
 
     _mount(state, controller, page, first=True)
     first = app_shell._active_player
@@ -127,7 +128,7 @@ def test_episode_switch_remounts():
     state.player_open = True
     state.player_spec = {"resource": "a.m3u8", "episode_session": "ep1"}
     page = _FakePage()
-    controller = _FakeController()
+    controller = _FakeController(page)
 
     _mount(state, controller, page, first=True)
     first = app_shell._active_player
@@ -148,7 +149,7 @@ def test_close_pops_the_view():
     state.player_spec = {"resource": "a.m3u8", "episode_session": "ep1"}
     page = _FakePage()
 
-    _mount(state, _FakeController(), page, first=True)
+    _mount(state, _FakeController(page), page, first=True)
     assert len(page.views) == 1
     player = app_shell._active_player
 
@@ -171,7 +172,7 @@ def test_player_error_renders_card():
     state.current_episode_session = "ep123"
     page = _FakePage()
 
-    _mount(state, _FakeController(), page, first=True)
+    _mount(state, _FakeController(page), page, first=True)
 
     view = page.views[-1]
     texts = [c.value for c in _walk(view) if isinstance(c, ft.Text)]
@@ -188,8 +189,8 @@ def test_retry_clears_error_and_replays():
     state.player_open = True
     state.player_error = "The downloaded file is missing."
     state.current_episode_session = "ep123"
-    controller = _FakeController()
     page = _FakePage()
+    controller = _FakeController(page)
 
     _mount(state, controller, page, first=True)
     retry = next(
@@ -215,7 +216,7 @@ def test_go_back_clears_error_and_unmounts():
     state.player_error = "The downloaded file is missing."
     page = _FakePage()
 
-    _mount(state, _FakeController(), page, first=True)
+    _mount(state, _FakeController(page), page, first=True)
     back = next(
         b
         for b in _find_buttons(page.views[-1])
@@ -226,7 +227,7 @@ def test_go_back_clears_error_and_unmounts():
     assert state.player_open is False
 
     # The next render drops the view from the stack.
-    _mount(state, _FakeController(), page)
+    _mount(state, _FakeController(page), page)
     assert page.views == []
 
 

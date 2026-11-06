@@ -58,6 +58,28 @@ def show_snack(
 
         except Exception:
             logger.debug("suppressed")
+    # A SnackBar appended while a REAL dialog (AlertDialog) is open
+    # triggers `_dialogs.update()` — and flet's documented snapshot desync
+    # (use_dialog.py:118-127) REPLACEs that dialog on Dart, which then
+    # "refuses to close": a modal=True selector blocks every input and the
+    # app looks hung (owner, 2026-11-05). Never stack a snack on an open
+    # dialog — the message is dropped (the dialog is modal, so the user
+    # is busy with it anyway; queued snacks after a close would arrive
+    # stale).
+    try:
+        open_dialog = next(
+            (
+                d
+                for d in reversed(page._dialogs.controls)
+                if d.open and not isinstance(d, ft.SnackBar)
+            ),
+            None,
+        )
+    except Exception:
+        open_dialog = None
+    if open_dialog is not None:
+        logger.debug("snack skipped: a modal dialog is open: %r", message)
+        return
     try:
         action = None
         if action_label:

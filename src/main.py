@@ -1187,7 +1187,25 @@ class AppController:
         pending = state.pending_playback
         if not pending:
             return
+        # The selection is CONSUMED here: the dialog state must die with it.
+        # Leaving pending_playback/quality_choices set kept the selector's
+        # state alive across the whole player session — the modal re-appeared
+        # after returning from the player and Cancel froze the app behind it
+        # (owner, 2026-11-05; mechanism in
+        # docs/investigation-2026-11-01/quality-modal-hang-root-cause.md).
         state.quality_dialog_open = False
+        state.quality_choices = None
+        state.pending_playback = None
+        state.episodes_version += 1
+        # Close the modal NOW, synchronously, through the page's own dialog
+        # API (pop_dialog targets the instance Dart actually knows — the
+        # shell's render-based dismissal patched a possibly-unflushed
+        # instance and the close was dropped; the modal then covered the
+        # player and blocked every input). None open -> no-op.
+        try:
+            self.page.pop_dialog()
+        except Exception as ex:
+            logger.debug("pop_dialog at quality consumption failed: %s", ex)
         choices = state.quality_choices or []
         if choice_index < 0 or choice_index >= len(choices):
             await self._open_player(
@@ -1356,6 +1374,12 @@ class AppController:
         # about what was playing (owner's report: "it only shows Black
         # Clover"). Resolution comes from the chosen source when one is
         # known; a local/unknown one simply omits it.
+        # The quality dialog's job is done the moment the player opens —
+        # through ANY path. A surviving selector state re-showed the modal
+        # after returning from the player (owner, 2026-11-05).
+        state.quality_dialog_open = False
+        state.quality_choices = None
+        state.pending_playback = None
         title_parts = [(anime or {}).get("title") or "AnimePahe"]
         ep_row = next((e for e in state.episodes if e.session == episode_session), None)
         if ep_row is not None and ep_row.episode:
@@ -1385,6 +1409,12 @@ class AppController:
             episode_session,
             "proxy" if self.hls_proxy is not None else "direct",
         )
+        # Mount the /play view from THIS event-handler context — never from
+        # the shell's render (a render-cycle page.views mutation re-entered
+        # flet's update machinery and killed sessions; owner log 2026-11-05).
+        import app_shell
+
+        app_shell.open_player_view(self)
 
     async def test_all_sources(self):
         """Dev panel: probe every provider, then hit it with a real
@@ -1890,8 +1920,17 @@ class AppController:
         state.backend_picker_open = False
 
     async def close_player(self):
+        """Close the player through the full funnel: awaited position save,
+        teardown, view pop (the flags-only version left the modal and the
+        media alive across the switch — owner, 2026-11-03)."""
+        import app_shell
+
+        if app_shell._active_player is not None:
+            await app_shell._close_player_with_save(app_shell._active_player)
+            return
         state.player_open = False
         state.episodes_version += 1
+        app_shell.pop_player_view()
 
     async def play_adjacent(self, delta: int):
         """Next/previous episode within the loaded page."""
@@ -2587,6 +2626,9 @@ class AppController:
             state.episodes = self._episodes_from_downloads(rows, anime_session)
         state.player_open = True
         state.episodes_version += 1
+        import app_shell
+
+        app_shell.open_player_view(self)
 
     @staticmethod
     def _episodes_from_downloads(rows: dict, anime_session: str) -> list:
@@ -3089,6 +3131,9 @@ async def main(page: ft.Page):
     )
     methods.pin_backend = lambda name: spawn(controller.pin_backend(name), name="pin-backend")
     methods._app_controller = controller
+    # app_shell's player-view helpers (open/pop) read the controller off
+    # the page — set before the first play can ever fire.
+    page._app_controller = controller
     controller.shell = methods
 
     # Ads: one SDK service on the page, guarded to the mobile family.
@@ -3158,18 +3203,10 @@ async def main(page: ft.Page):
     page.render(lambda: ControllerMethodsCtx(methods, lambda: AppShell()))
 
     # ── Android system back (KTV's views pattern) ────────────────────────
-    # A /blank underlay beneath the shell means the shell view is never the
-    # root, so the OS back key always reaches Python as on_view_pop instead
-    # of exiting the app. The funnel: open modal → player (awaited position
-    # save + view pop) → the shell's own back handling.
-    def _ensure_back_underlay():
-        try:
-            if "/blank" not in [getattr(v, "route", "") for v in page.views]:
-                page.views.insert(0, ft.View(route="/blank"))
-                page.update()
-        except Exception:
-            logger.debug("back underlay install failed", exc_info=True)
-
+    # The funnel: open modal → player (awaited position save + view pop) →
+    # the shell's own back handling. NO /blank underlay: inserting a view
+    # at views[0] trips flet dev's implicit-view removal on pop
+    # ('FlutterEngineRemoveView kInvalidArguments' + Dart RangeError).
     def _handle_view_pop(e):
         import app_shell
         from core.dialogs import close_app_dialog
@@ -3182,7 +3219,6 @@ async def main(page: ft.Page):
             return
         controller._handle_global_back()
 
-    _ensure_back_underlay()
     page.on_view_pop = _handle_view_pop
 
 
