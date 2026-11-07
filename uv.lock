@@ -29,10 +29,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.14.1" },
-    { name = "flet", specifier = "==1.1.0.dev4" },
-    { name = "flet-notifications", specifier = "==1.1.0.dev4" },
-    { name = "flet-video", specifier = "==1.1.0.dev4" },
-    { name = "flet-webview", specifier = "==1.1.0.dev4" },
+    { name = "flet", specifier = "==1.1.0" },
+    { name = "flet-notifications", specifier = "==1.1.0" },
+    { name = "flet-video", specifier = "==1.1.0" },
+    { name = "flet-webview", specifier = "==1.1.0" },
     { name = "flet-yandex-ads", specifier = ">=0.1.0" },
     { name = "primp", specifier = ">=1.3.1" },
 ]
@@ -136,7 +136,7 @@ wheels = [
 
 [[package]]
 name = "flet"
-version = "1.1.0.dev4"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", marker = "sys_platform != 'emscripten'" },
@@ -144,46 +144,46 @@ dependencies = [
     { name = "oauthlib", marker = "sys_platform != 'emscripten'" },
     { name = "repath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/c0/56deca835cf310858c5a4fdc344bbc15d620a39041c6cd38a5c693e55d76/flet-1.1.0.dev4.tar.gz", hash = "sha256:7c00567d0709654681655506f912383015453d1354bca0862b38fc8ffa3fd94e", size = 607870, upload-time = "2026-11-03T02:37:56.228Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/bb/5f0c595e368d4196d0cb18ac48ac6f58c869ad4bec405971d4751e990978/flet-1.1.0.tar.gz", hash = "sha256:c8bf8b3f4a6663ddec5c9652229ae46a36d030737871ad4344a7d8c446907cdb", size = 607898, upload-time = "2026-11-05T17:25:25.043Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/e7/59b2a848f50a66fbd89bb971a247b7c711f91d0a79b5a4aed2ed3b54cbf7/flet-1.1.0.dev4-py3-none-any.whl", hash = "sha256:ccac2f8005fbebc927d6648b802b676e04f152da246ed4291efd9702fab2312d", size = 655641, upload-time = "2026-11-03T02:37:54.561Z" },
+    { url = "https://files.pythonhosted.org/packages/88/4b/191e490783d5af08ead1ccb51b025e1b7890bafa4c00be18cd0f5a110d5a/flet-1.1.0-py3-none-any.whl", hash = "sha256:f0dd03d98b8c4978c00877b4e883eb0d9ab060c93009178c3b4dee7f33306e52", size = 655576, upload-time = "2026-11-05T17:25:23.615Z" },
 ]
 
 [[package]]
 name = "flet-notifications"
-version = "1.1.0.dev4"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "flet" },
     { name = "tzdata" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/d7/82f4ca30e952dfb91262a8fd9699cbfe7e6f1b3cd2dfeeb3e0d5c36de79b/flet_notifications-1.1.0.dev4.tar.gz", hash = "sha256:6e7c3e173beb6076e9183a6137d145dcb5a3a4e2630061857b425dd2927f9c72", size = 69655, upload-time = "2026-11-03T02:38:42.885Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/97/15/6b9b42d9d908b08d70606b598c88f6e817333f3009690b64bc3ff9012fce/flet_notifications-1.1.0.tar.gz", hash = "sha256:ba7fc7d1f0c532c80c2cd1395200a70f945c8cc3ab58d891fd1a90b8c58d5bc2", size = 69631, upload-time = "2026-11-05T17:26:16.994Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/9b/9ba755d7e6f994c3c4d8ffe095a1a9e9737bc1a8ec20fcaffd9298b6ead6/flet_notifications-1.1.0.dev4-py3-none-any.whl", hash = "sha256:04748d4d6918247d344066951a8c8fb938508b01644ff632fbd5e04bbb4e5bc5", size = 85275, upload-time = "2026-11-03T02:38:41.938Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/38/8cf5ccc3fcd0fbd08b8d39e42b5b1b65c28acd040b01a32ad0f6675df9ad/flet_notifications-1.1.0-py3-none-any.whl", hash = "sha256:09240a8aa3c147e66e77d7d4f922299b34726a9f9a3661e4c49d87d06c256061", size = 85217, upload-time = "2026-11-05T17:26:15.899Z" },
 ]
 
 [[package]]
 name = "flet-video"
-version = "1.1.0.dev4"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "flet" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/39/4132303596701d221fe71a870e4c81384abd971725600cfccaedc7656ea3/flet_video-1.1.0.dev4.tar.gz", hash = "sha256:07ac552e1b903422bb7cdc5c82ca6f0e9107b4f4642bc411085869128152c8de", size = 24701, upload-time = "2026-11-03T02:38:56.871Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c4/24/4aa6b730867b3babb8de45ed0e818c4d2d7f455f5147c9cb22931819314c/flet_video-1.1.0.tar.gz", hash = "sha256:19421ccafae742189570fa3a51e2f124783f874b3bada68dca03b32b988f89f0", size = 24656, upload-time = "2026-11-05T17:26:33.977Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/71/f97279a34ea461a17ab37e042a45902abce38d60a63bb652d9014d4f1ec0/flet_video-1.1.0.dev4-py3-none-any.whl", hash = "sha256:732c2b7d3300ed9ef2922aabd12309b8eb91fdc47601d9e1aeb0439b57a95668", size = 26305, upload-time = "2026-11-03T02:38:55.958Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/ac/581c0e421b55d6e127a623cf865ad196b7eb863837b9fde83c52cb8fc8c4/flet_video-1.1.0-py3-none-any.whl", hash = "sha256:9b42ac32a9f3acc9193fddd390d1139a9c89ddbd3952ae8b6f0f346e47a53fab", size = 26248, upload-time = "2026-11-05T17:26:33.073Z" },
 ]
 
 [[package]]
 name = "flet-webview"
-version = "1.1.0.dev4"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "flet" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/ba/0f4ff0fcee74440e73770719b89b931d847e51738f294f1928b213574aa4/flet_webview-1.1.0.dev4.tar.gz", hash = "sha256:bc95cb8dbdbe11a7fe0b8579ebb5e50e3b310d7f3a972367b6e0902ce03cd090", size = 14612, upload-time = "2026-11-03T02:38:58.932Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/44/957f643d517fc6200d61a6ccd9757f8de3e10f3b8308460d53b932a6692c/flet_webview-1.1.0.tar.gz", hash = "sha256:eb13b3429636177d3fd4efc3eedd1115b21e96733b29d45fa5f4f9af4177b97a", size = 14635, upload-time = "2026-11-05T17:26:36.582Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/61/fa89769c9f948061643a3fa0bbaaba1c471bd549a1ddb4f680305f6404b4/flet_webview-1.1.0.dev4-py3-none-any.whl", hash = "sha256:3e53b352b5b79d96510b64b7c92fe27415e085eb4a5c7e955e2731c5d4c95ce3", size = 18390, upload-time = "2026-11-03T02:38:58.083Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/9f/df7f0f5abac944a2c550b544f61df5df9a51a907b45d91443d2c86d981f5/flet_webview-1.1.0-py3-none-any.whl", hash = "sha256:193cca5761496105494d7627e564b582a983a5b3a25e6dd5d79ed0f4d84fde27", size = 18333, upload-time = "2026-11-05T17:26:35.456Z" },
 ]
 
 [[package]]
