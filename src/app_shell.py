@@ -880,16 +880,28 @@ def _build_backend_picker(state, controller) -> ft.Control:
 
 
 def _build_quality_dialog(state, controller) -> ft.Control:
-    """Select Quality & Audio — every site source the scraper found, best
-    first, exactly the list the original build showed. Nothing is filtered:
+    """The pre-play quality picker: a MODAL BOTTOM SHEET, not a centered
+    dialog (owner, 2026-11-07 — the AlertDialog felt heavy; M3 puts option
+    lists in a sheet that slides up and is dismissed BY the choice).
+
+    Every site source the scraper found, best first — nothing filtered:
     an anime with 3 qualities in 2 languages shows all of them.
 
-    Every row is the SAME control. The first (highest) pick carries a
-    small "Best" marker in its label instead of being a differently-shaped
-    filled button: a lone filled-red row between outlined rows breaks
-    D-pad focus symmetry on a TV remote (the owner could feel it moving
-    up and down the list, 2026-10-19). The m3u8 variants of whatever is
-    chosen live in the player's own settings sheet.
+    Rows stay uniform ft.Buttons: in the installed flet 1.1.0.dev4 a
+    ListTile has no on_focus/on_blur, so a ListTile row is unreachable by
+    a TV remote; Button is focusable and every row is the same control.
+    The first (highest) pick carries a small "Best" marker in its label
+    instead of being a differently-shaped filled button: a lone filled-red
+    row between outlined rows breaks D-pad focus symmetry on a TV remote
+    (the owner could feel it moving up and down the list, 2026-10-19).
+    The m3u8 variants of whatever is chosen live in the player's settings.
+
+    Minimal by design: drag handle, one caption line, the rows. No tip
+    text, no Cancel button — scrim tap / swipe down / remote Back all
+    dismiss (on_dismiss clears the state flags so the sheet does not
+    resurrect on the next render). Choosing a row clears
+    quality_dialog_open first thing (choose_quality), so the sheet slides
+    down exactly as the resolve stage / player view takes over.
     """
     choices = state.quality_choices or []
     # A site-source choice re-resolves through kwik (seconds): disable the
@@ -926,46 +938,47 @@ def _build_quality_dialog(state, controller) -> ft.Control:
                 pending.get("episode_session", ""),
             ),
         )
-    return ft.AlertDialog(
-        modal=True,
-        title=ft.Row(
-            [
-                ft.Text(
-                    "Select Quality & Audio",
-                    weight=ft.FontWeight.W_600,
-                    expand=True,
-                ),
-                ft.ProgressRing(
-                    width=16,
-                    height=16,
-                    stroke_width=2,
-                    visible=resolving,
-                ),
-            ],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
+    return ft.BottomSheet(
         content=ft.Column(
             controls=[
-                ft.Text(
-                    "Tip: If the player does not start, try again. Make sure "
-                    "you already have the player installed.",
-                    size=12,
-                    color=ft.Colors.ON_SURFACE_VARIANT,
+                ft.Row(
+                    [
+                        ft.Text(
+                            "Quality",
+                            size=13,
+                            weight=ft.FontWeight.W_600,
+                            color=ft.Colors.ON_SURFACE_VARIANT,
+                            expand=True,
+                        ),
+                        ft.ProgressRing(
+                            width=16,
+                            height=16,
+                            stroke_width=2,
+                            visible=resolving,
+                        ),
+                    ],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 ),
+                ft.Container(height=4),
                 *buttons,
                 # The deliberate Cloudflare press — the ONLY one playback
                 # ever offers (the owner's Cloudflare-free experience).
-                *([more] if more is not None else []),
+                *([ft.Divider(height=1), more] if more is not None else []),
             ],
             tight=True,
-            spacing=10,
+            spacing=2,
         ),
-        actions=[
-            ft.TextButton(
-                content="Cancel",
-                on_click=lambda e: controller.close_dialog(),
-            )
-        ],
-        actions_alignment=ft.MainAxisAlignment.END,
+        show_drag_handle=True,
+        draggable=True,
+        dismissible=True,
+        scrollable=True,
+        bgcolor=ft.Colors.SURFACE,
+        barrier_color=ft.Colors.with_opacity(0.4, ft.Colors.BLACK),
+        # M3: full width on compact screens, capped (and centered) on
+        # medium/expanded — a TV gets a centered sheet, not a full-width one.
+        size_constraints=ft.BoxConstraints(max_width=520),
+        # Snappy in/out so a pick reads as "sheet closes as the player opens".
+        animation_style=ft.AnimationStyle(duration=180, reverse_duration=180),
+        on_dismiss=lambda e: controller.close_dialog(),
     )

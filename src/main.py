@@ -1243,9 +1243,13 @@ class AppController:
             )
             return
         # Every entry is a site source (kwik url): re-resolve it, fetch its
-        # own variants, and play. The dialog buttons spin while it happens
-        # (see _build_quality_dialog).
+        # own variants, and play. The sheet is already dismissed (the flag
+        # cleared above), so the resolve overlay carries the wait — the
+        # picker slides away and "Resolving stream…" holds until the player
+        # view mounts (owner: select = the sheet closes as the player opens).
         state.quality_resolving = True
+        state.is_resolving = True
+        state.resolve_stage = "Resolving stream…"
         state.busy_version += 1
         from core.state import Source as _Source
 
@@ -1270,6 +1274,8 @@ class AppController:
             variants = []
         finally:
             state.quality_resolving = False
+            state.is_resolving = False
+            state.resolve_stage = ""
             state.busy_version += 1
         await self._open_player(
             m3u8 or pending["m3u8"],
