@@ -10,6 +10,7 @@ seconds, and a bare pause reads as a frozen app.
 """
 
 import base64
+import json
 import logging
 import urllib.parse
 
@@ -97,11 +98,43 @@ def show_ktv_install_dialog(page: ft.Page):
     show_app_dialog(page, dlg)
 
 
-def build_deep_link(m3u8_url: str, title: str) -> str:
-    """ktv://play?url=<base64 m3u8>&title=<url-encoded title>."""
-    encoded_url = base64.urlsafe_b64encode(m3u8_url.encode()).decode().rstrip("=")
+def _b64url(text: str) -> str:
+    return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+
+
+def build_deep_link(
+    m3u8_url: str,
+    title: str,
+    headers: dict | None = None,
+    referer: str | None = None,
+) -> str:
+    """ktv://play?url=<base64 m3u8>&title=<url-encoded title>
+    [&referer=<base64>][&headers=<base64 JSON>].
+
+    The source's own headers travel WITH the stream. Every backend except
+    Animepahe answers a bare request with 403 — anikato's MegaPlay CDN
+    requires Referer: megaplay.buzz, animeout's file host is Cloudflare-
+    walled and needs the clearance Cookie, kayoanime's Drive requires its
+    own Referer — so a link carrying only the URL could only ever play
+    Animepahe (KTV Player's built-in CDN_HEADER_OVERRIDES happen to add the
+    kwik pair for owocdn.top). KTV Player has parsed `referer`/`headers`
+    from this scheme since v2.0.2; the handoff now actually sends them.
+    """
+    if referer is None and headers:
+        # KTV Player reads the Referer from the header map too, but carrying
+        # it explicitly keeps the proxy URL and the media request in sync.
+        referer = next(
+            (v for k, v in headers.items() if k.lower() == "referer"), None
+        )
+    encoded_url = _b64url(m3u8_url)
     encoded_title = urllib.parse.quote(title)
-    return f"{KTV_DEEP_LINK_SCHEME}{encoded_url}&title={encoded_title}"
+    link = f"{KTV_DEEP_LINK_SCHEME}{encoded_url}&title={encoded_title}"
+    if referer:
+        link += f"&referer={_b64url(referer)}"
+    if headers:
+        payload = json.dumps(headers, separators=(",", ":"), sort_keys=True)
+        link += f"&headers={_b64url(payload)}"
+    return link
 
 
 def episode_title(anime_title: str, episode_num=None, resolution=None) -> str:
@@ -117,13 +150,19 @@ async def launch_external(
     page: ft.Page,
     m3u8_url: str,
     title: str,
+    headers: dict | None = None,
+    referer: str | None = None,
 ) -> bool:
     """Hand the resolved stream to KTV Player. Returns True on success.
+
+    `headers`/`referer` are the resolved source's own request headers (see
+    `build_deep_link`) — without them the handoff only works for sources
+    whose CDN needs nothing.
 
     A TimeoutError counts as success — KTV comes to the foreground and
     never reports back, so the launcher call simply never returns.
     """
-    deep_link = build_deep_link(m3u8_url, title)
+    deep_link = build_deep_link(m3u8_url, title, headers=headers, referer=referer)
     logger.info("launching external player: %s", title)
     shared = get_shared_services(page)
     # Ask the OS FIRST: a custom scheme with no handler does not raise on

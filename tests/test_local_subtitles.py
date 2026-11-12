@@ -141,6 +141,63 @@ def test_apply_local_subtitle_without_a_file_is_a_noop():
 
 
 # ---------------------------------------------------------------------------
+# The value-equality trap (flet 1.1.0 Prop.__set__)
+# ---------------------------------------------------------------------------
+
+
+class _TrapVideo(_Video):
+    """A video stand-in that reproduces flet's `Prop.__set__` semantics:
+    assigning a value equal to the current one is a no-op, so no delta is
+    pushed to the player. This is why re-applying the same subtitle track
+    (the Android retry path) silently did nothing."""
+
+    def __init__(self):
+        self._track = None
+        self.updates = 0
+
+    @property
+    def subtitle_track(self):
+        return self._track
+
+    @subtitle_track.setter
+    def subtitle_track(self, value):
+        if self._track is not None and self._track == value:
+            return  # no change — skip everything
+        self._track = value
+
+
+def test_reapplying_the_same_track_still_reaches_the_player():
+    player = _player()
+    player.video = _TrapVideo()
+    player._apply_track("SAME", "English")
+    assert player.video.subtitle_track.src == "SAME"
+    # The first apply is dropped by mpv while the demuxer opens; the retry
+    # re-applies the SAME track. Without the clear-first, the trap swallows
+    # it and the phone never shows subtitles.
+    player.video.updates = 0
+    player._apply_track("SAME", "English")
+    assert player.video.subtitle_track.src == "SAME"
+    assert player.video.updates == 2  # clear + apply
+
+
+def test_default_subtitle_retry_survives_the_trap():
+    player = _player()
+    player.video = _TrapVideo()
+    player.subtitles = [{"label": "English", "url": "SAME", "default": True}]
+    player._subtitle_selection = "auto"
+    player._subtitle_applied = False
+    player._is_closing = False
+    asyncio.run(player._apply_default_subtitle(force=True))
+    assert player.video.subtitle_track is not None
+    assert player.video.subtitle_track.src == "SAME"
+    # Second (retry) pass over the same track must still push a delta.
+    player.video.updates = 0
+    asyncio.run(player._apply_default_subtitle(force=True))
+    assert player.video.subtitle_track.src == "SAME"
+    assert player.video.updates == 2
+
+
+# ---------------------------------------------------------------------------
 # The wiring can't silently disappear
 # ---------------------------------------------------------------------------
 

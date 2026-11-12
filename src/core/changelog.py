@@ -16,6 +16,15 @@ from typing import Final
 
 CHANGELOG: Final = MappingProxyType(
     {
+        "2.0.1": (
+            "- Subtitles show on their own again on phones: the source's "
+            "default track is re-applied until the player actually loads it, "
+            "so AniKato's English subs no longer need a manual switch away "
+            "and back\n"
+            "- The external player handoff now carries each source's own "
+            "headers, so AniKato, Kayoanime and AnimeOut open in KTV Player "
+            "instead of only Animepahe"
+        ),
         "2.0.0": (
             "- One app, four independent backends: AniKato, AnimeOut, "
             "AnimePahe and Kayoanime, each with its own catalogue, artwork, "

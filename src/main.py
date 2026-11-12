@@ -1997,9 +1997,16 @@ class AppController:
         state.episodes_version += 1
 
     async def _launch_external_m3u8(
-        self, m3u8: str, resolution, anime_session: str, episode_session: str
+        self,
+        m3u8: str,
+        resolution,
+        anime_session: str,
+        episode_session: str,
+        headers: dict | None = None,
+        referer: str | None = None,
     ) -> None:
-        """Hand ONE resolved media-playlist URL to KTV (the 1.0.9 contract)."""
+        """Hand ONE resolved media-playlist URL to KTV (the 1.0.9 contract),
+        with the source's own headers — the CDNs answer 403 without them."""
         anime = await self._resolve_anime(anime_session)
         ep = next((e for e in state.episodes if e.session == episode_session), None)
         from services.external_player import episode_title, launch_external
@@ -2012,6 +2019,8 @@ class AppController:
                 ep.episode if ep else None,
                 resolution,
             ),
+            headers=headers,
+            referer=referer,
         )
 
     async def _launch_external_variant(
@@ -2029,12 +2038,13 @@ class AppController:
         if not master:
             self._show_error_snackbar("Failed to resolve the stream.")
             return
+        # The chosen source's headers apply to every rendition of the master.
+        headers = dict(parent_choice.get("headers") or {})
+        referer = headers.get("Referer")
         variants: list[dict] = []
         if ".m3u8" in master and self.hls_proxy is not None:
             try:
-                variants = await self.hls_proxy.fetch_variants(
-                    master, headers=parent_choice.get("headers") or {}
-                )
+                variants = await self.hls_proxy.fetch_variants(master, headers=headers)
             except Exception as ex:
                 logger.warning("external variant fetch failed: %s", ex)
         if variants and 0 <= variant_index < len(variants):
@@ -2049,10 +2059,16 @@ class AppController:
                     height = int(res.split("x")[-1])
                 except ValueError:
                     height = None
-            await self._launch_external_m3u8(media, height, anime_session, episode_session)
+            await self._launch_external_m3u8(
+                media, height, anime_session, episode_session,
+                headers=headers or None, referer=referer,
+            )
             return
         # No resolvable variants: the "master" is a media playlist.
-        await self._launch_external_m3u8(master, None, anime_session, episode_session)
+        await self._launch_external_m3u8(
+            master, None, anime_session, episode_session,
+            headers=headers or None, referer=referer,
+        )
 
     async def _resolve_and_launch_external(self, source, anime_session: str, episode_session: str):
         """Resolve one kwik source and hand the m3u8 to KTV, exactly as the
@@ -2067,6 +2083,7 @@ class AppController:
         ep = next((e for e in state.episodes if e.session == episode_session), None)
         from services.external_player import episode_title, launch_external
 
+        headers = dict(getattr(source, "headers", None) or {})
         await launch_external(
             self.page,
             m3u8,
@@ -2075,6 +2092,8 @@ class AppController:
                 ep.episode if ep else None,
                 source.resolution,
             ),
+            headers=headers or None,
+            referer=headers.get("Referer"),
         )
 
     async def _open_external_player(self, anime_session: str, episode_session: str):
@@ -2103,10 +2122,15 @@ class AppController:
             return
 
         resolution = state.selected_source.resolution if state.selected_source else None
+        headers = (
+            dict(state.selected_source.headers) if state.selected_source else {}
+        ) or None
         await launch_external(
             self.page,
             self._resolved_m3u8,
             episode_title(title, ep_num, resolution),
+            headers=headers,
+            referer=(headers or {}).get("Referer"),
         )
 
     # ------------------------------------------------------------------

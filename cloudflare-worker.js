@@ -28,9 +28,9 @@ export default {
           "update_url": `${origin}/sports`
         },
         "animepahe": {
-          "version": "1.0.9",
-          "build_number": 10,
-          "release_notes": "Fixed Cloudflare verification: wait for full Turnstile verification and redirect before capturing cookies, preventing premature window closure and 403 errors.",
+          "version": "2.0.1",
+          "build_number": 12,
+          "release_notes": "Subtitles show on their own again on phones, and the external player handoff now carries each source's own headers so every backend opens in KTV Player.",
           "mandatory": false,
           "update_url": `${origin}/anime`
         },

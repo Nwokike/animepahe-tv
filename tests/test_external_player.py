@@ -27,6 +27,32 @@ def test_deep_link_carries_base64_m3u8():
     assert urllib.parse.unquote(encoded_title) == "Frieren - Episode 3"
 
 
+def test_deep_link_carries_the_source_headers():
+    """The handoff must carry the source's own headers/referer: the backends'
+    CDNs answer a bare request with 403 (anikato needs Referer megaplay.buzz,
+    animeout's file host is Cloudflare-walled and needs the clearance Cookie).
+    KTV Player has parsed these params since v2.0.2."""
+    import json
+
+    url = "https://fetch.nexabloom.top/anime/x/index.m3u8"
+    headers = {"Referer": "https://megaplay.buzz/", "User-Agent": "KTV/1.0"}
+    link = build_deep_link(url, "Slime - Episode 1", headers=headers)
+    query = urllib.parse.parse_qs(urllib.parse.urlparse(link).query)
+
+    def _d(value: str) -> str:
+        return base64.b64decode(value + "=" * (-len(value) % 4)).decode()
+
+    assert _d(query["url"][0]) == url
+    assert _d(query["referer"][0]) == "https://megaplay.buzz/"
+    assert json.loads(_d(query["headers"][0])) == headers
+
+
+def test_deep_link_omits_absent_headers():
+    link = build_deep_link("https://x.test/s.m3u8", "Title")
+    assert "referer=" not in link
+    assert "headers=" not in link
+
+
 def test_no_stream_never_launches_anything(monkeypatch):
     """Live run: with no resolved m3u8 the old code built
     animepahe.com/play/foreign:9538/… (another backend's session — a URL

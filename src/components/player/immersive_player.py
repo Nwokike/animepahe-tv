@@ -1397,8 +1397,22 @@ class ImmersivePlayer(ft.Stack):
         return url
 
     def _apply_track(self, src: str, title: str | None = None) -> None:
+        """Set the player's subtitle track, working around the value-equality
+        trap in flet 1.1.0: `Prop.__set__` (flet/controls/value_types.py:62-63)
+        returns early when the new value compares equal to the old one, so
+        nothing is marked dirty and `update()` pushes no delta — Dart never
+        sees the change. mpv on Android drops an external track added while
+        the demuxer is still opening, so the first apply is lost and every
+        retry re-applies the SAME track object: without a clear first, the
+        retries (and a manual re-select of the same language) are silent
+        no-ops. Clearing to `none()` first guarantees the apply differs."""
         try:
-            self.video.subtitle_track = fv.VideoSubtitleTrack(src=src, title=title)
+            track = fv.VideoSubtitleTrack(src=src, title=title)
+            current = getattr(self.video, "subtitle_track", None)
+            if current is not None and current == track:
+                self.video.subtitle_track = fv.VideoSubtitleTrack.none()
+                self.video.update()
+            self.video.subtitle_track = track
             self.video.update()
         except Exception as ex:
             logger.warning("subtitle switch failed: %s", ex)
