@@ -48,6 +48,12 @@ _POSITION_SAVE_INTERVAL = 10.0
 # write to a loop that is about to close.
 _orphan_tasks: set = set()
 
+# Default-subtitle apply schedule (seconds after on_load / first tick). The
+# media is "safe to sub-add" only once mpv has populated its track list, and
+# media_kit exposes no FILE_LOADED event, so the default is re-applied across
+# the load window instead of applied once and hoped for.
+_SUBTITLE_RETRY_DELAYS: tuple[float, ...] = (0.0, 1.0, 3.0, 6.0, 10.0)
+
 
 def _keep(task: asyncio.Task) -> None:
     """Hold a strong reference to a fire-and-forget task.
@@ -157,6 +163,7 @@ class ImmersivePlayer(ft.Stack):
         self._subtitle_applied = False
         self._subtitle_selection: str | int | None = "auto"
         self._media_attached = False
+        self._subtitle_schedule_started = False
         # The quality the user picked in the dialog rides the spec: the
         # player STARTS pinned to it (no "Auto" — the owner's rule: the
         # label always names a concrete quality).
@@ -358,6 +365,9 @@ class ImmersivePlayer(ft.Stack):
             register_fullscreen_toast(self._toast_show)
         except Exception:
             pass
+        # The resolution already fetched the master's variants: reveal the
+        # quality chip now rather than waiting for the first playback tick.
+        self._reveal_stream_options_from_spec()
         self._run_async(self.start_playback)
 
     def will_unmount(self):
@@ -511,6 +521,11 @@ class ImmersivePlayer(ft.Stack):
         logger.info("player ready")
         if not self._is_closing and not self._is_final_error:
             self._hide_overlay()
+        # flet_video's on_load only means "mpv initialised" — the media may
+        # still be opening. Start the default-track schedule here (the
+        # pre-port player applied on this event alone and Android showed
+        # subtitles), and let the first tick join in below.
+        self._start_default_subtitle_schedule()
 
     def _on_duration_change(self, e=None):
         self._maybe_media_attached()
@@ -543,37 +558,52 @@ class ImmersivePlayer(ft.Stack):
         self._maybe_save_position_periodically()
 
     def _maybe_media_attached(self):
-        """One-shot, per attached media: apply the default subtitle track.
-
-        External tracks set before the media attaches are dropped when mpv
-        loads the media — and on Android mpv ALSO drops one added while the
-        demuxer is still opening (the phone showed subtitles only after a
-        manual reselect). So this schedules the apply with retries: 0s, 3s
-        and 8s after the first tick, stopping early once the user picks a
-        track themselves.
+        """One-shot, per attached media: make sure the default-track schedule
+        is running. The schedule itself lives in _start_default_subtitle_schedule
+        so both on_load and the first tick feed the same, single loop.
         """
         if self._media_attached or self._is_closing:
             return
         self._media_attached = True
+        self._start_default_subtitle_schedule()
 
-        async def _with_retries():
-            for delay in (0.0, 3.0, 8.0):
-                if self._is_closing:
-                    return
-                if delay:
-                    await asyncio.sleep(delay)
-                    if self._is_closing:
-                        return
-                # The user picked something themselves — stop overriding.
-                if self._subtitle_selection != "auto":
-                    return
-                await self._apply_default_subtitle(force=True)
+    def _start_default_subtitle_schedule(self):
+        """Apply the source's default subtitle track on a short schedule.
 
+        flet_video applies `subtitle_track` right after `player.open()` and
+        `open()` does NOT wait for mpv's track list (media_kit handles no
+        MPV_EVENT_FILE_LOADED), while flet's `on_load` only means "mpv
+        initialised". On Android a `sub-add … select` issued while the
+        demuxer is still opening adds the track but the selection does not
+        take effect — mpv never emits `sub-text`, media_kit_video's
+        SubtitleView stays empty, and a manual re-pick (which forces
+        `sid=<id>`) is what finally shows it. So the default applies
+        repeatedly across the load window, stopping early once the user
+        picks a track themselves. Every apply clears the current track first
+        (see `_apply_track`) so neither flet's Prop value equality nor
+        media_kit's `SubtitleTrack.__eq__` can swallow it.
+        """
+        if getattr(self, "_subtitle_schedule_started", False) or self._is_closing:
+            return
+        self._subtitle_schedule_started = True
         try:
             loop = asyncio.get_running_loop()
-            _keep(loop.create_task(_with_retries()))
+            _keep(loop.create_task(self._run_default_subtitle_schedule()))
         except RuntimeError:
             pass
+
+    async def _run_default_subtitle_schedule(self):
+        for delay in _SUBTITLE_RETRY_DELAYS:
+            if self._is_closing:
+                return
+            if delay:
+                await asyncio.sleep(delay)
+                if self._is_closing:
+                    return
+            # The user picked something themselves — stop overriding.
+            if self._subtitle_selection not in ("auto", None):
+                return
+            await self._apply_default_subtitle(force=True)
 
     def _maybe_save_position_periodically(self):
         """Throttled VOD-only checkpoint save (~every 10s). Android can kill
@@ -810,6 +840,7 @@ class ImmersivePlayer(ft.Stack):
         # The new media needs its subtitle track applied again.
         self._media_attached = False
         self._subtitle_applied = False
+        self._subtitle_schedule_started = False
 
         try:
             self.video.playlist = [
@@ -888,40 +919,70 @@ class ImmersivePlayer(ft.Stack):
         chip always names a concrete quality — no "Auto"); audio needs two
         selectable renditions.
 
+        The rows are mounted from the start and the buttons are only flipped
+        visible here, so nothing is patched into a live flet_video bar. The
+        variants resolved at play time are already in `_variants_cache`, so
+        the common case reveals without any network call.
+
         Retried: on the phone the first probe raced the proxy (it was busy
         feeding mpv) and an empty result used to be cached forever — the
         chip then never appeared without opening Settings."""
         if not self.can_switch_quality or self._is_closing:
+            logger.info(
+                "stream options probe skipped (can_switch_quality=%s closing=%s)",
+                self.can_switch_quality,
+                self._is_closing,
+            )
             return
         variants: list[dict] = []
         tracks: list[dict] = []
-        for _ in range(3):
+        for attempt in range(3):
             variants = await self.list_variants()
             if variants or self._is_closing:
                 break
+            logger.info("stream options probe %d/3: no variants yet", attempt + 1)
             await asyncio.sleep(4.0)
         if self._is_closing:
             return
         if variants:
             tracks = await self.list_audio_tracks()
+        else:
+            logger.warning("stream options probe: no variants after 3 attempts")
 
         q_btn = getattr(self, "quality_btn", None)
-        q_row = getattr(self, "quality_row", None)
-        if q_btn is not None and q_row is not None and len(variants) >= 1:
-            q_btn.content = q_row
+        if q_btn is not None and len(variants) >= 1:
+            q_btn.visible = True
             q_btn.padding = ft.Padding(6, 3, 6, 3)
             self._refresh_quality_label()
             with contextlib.suppress(Exception):
                 q_btn.update()
+            logger.info("quality chip revealed (%d variants)", len(variants))
 
         a_btn = getattr(self, "audio_btn", None)
-        a_row = getattr(self, "audio_row", None)
-        if a_btn is not None and a_row is not None and len(tracks) >= 2:
-            a_btn.content = a_row
+        if a_btn is not None and len(tracks) >= 2:
+            a_btn.visible = True
             a_btn.padding = ft.Padding(6, 3, 6, 3)
             self._refresh_audio_label()
             with contextlib.suppress(Exception):
                 a_btn.update()
+            logger.info("audio chip revealed (%d renditions)", len(tracks))
+
+    def _reveal_stream_options_from_spec(self) -> None:
+        """Reveal the quality chip immediately when the resolution already
+        fetched the master's variants — no probe, no network, no waiting for
+        the first playback tick."""
+        cache = getattr(self, "_variants_cache", None)
+        if not cache or getattr(self, "_is_closing", False):
+            return
+        q_btn = getattr(self, "quality_btn", None)
+        if q_btn is not None and not q_btn.visible:
+            q_btn.visible = True
+            q_btn.padding = ft.Padding(6, 3, 6, 3)
+            self._refresh_quality_label()
+            logger.info(
+                "quality chip revealed from the resolved spec (%d variants)",
+                len(cache),
+            )
 
     async def open_player_settings(self) -> None:
         from components.player.handlers import open_player_settings
@@ -1367,33 +1428,21 @@ class ImmersivePlayer(ft.Stack):
     # --- subtitles -----------------------------------------------------------
 
     async def _subtitle_src(self, entry: dict) -> str:
-        """The best `VideoSubtitleTrack.src` for a subtitle entry.
+        """The `VideoSubtitleTrack.src` for one subtitle entry.
 
-        - A local sidecar path (downloads) is used as-is: mpv reads local
-          files, no network, no headers.
-        - A remote URL is fetched to RAW TEXT through the proxy when one is
-          wired — raw text is a documented `src` form and removes mpv's own
-          fetcher (and its missing CDN headers) from the equation entirely;
-          on the phone that fetch was failing silently. Falls back to the
-          URL itself.
+        The proxy-routed URL is the DEVICE-PROVEN form: the pre-port player
+        handed flet_video exactly this and Android showed subtitles. mpv
+        fetches it from the loopback proxy, which carries the CDN headers —
+        no fetcher of ours in the path. Raw text rides media_kit's TempFile
+        `sub-add` route (the form that regressed on Android), so it is only
+        used for local sidecar paths (downloaded subs), which flet_video
+        reads off disk before handing to media_kit.
         """
         url = entry.get("url") or ""
         if not url.startswith(("http://", "https://")):
+            logger.info("subtitle src: local sidecar %s", os.path.basename(url))
             return url  # local sidecar path
-        if self.hls_proxy is not None:
-            try:
-                _ct, text = await asyncio.wait_for(
-                    self.hls_proxy.fetch_master(
-                        url,
-                        headers=self.source_headers or None,
-                        referer=self.source_referer,
-                    ),
-                    timeout=8.0,
-                )
-                if text and text.strip():
-                    return text
-            except Exception as ex:
-                logger.debug("subtitle fetch fell back to URL: %s", ex)
+        logger.info("subtitle src: proxy url %s", url[:120])
         return url
 
     def _apply_track(self, src: str, title: str | None = None) -> None:
@@ -1401,19 +1450,30 @@ class ImmersivePlayer(ft.Stack):
         trap in flet 1.1.0: `Prop.__set__` (flet/controls/value_types.py:62-63)
         returns early when the new value compares equal to the old one, so
         nothing is marked dirty and `update()` pushes no delta — Dart never
-        sees the change. mpv on Android drops an external track added while
-        the demuxer is still opening, so the first apply is lost and every
-        retry re-applies the SAME track object: without a clear first, the
-        retries (and a manual re-select of the same language) are silent
-        no-ops. Clearing to `none()` first guarantees the apply differs."""
+        sees the change. media_kit's `SubtitleTrack.__eq__` (id/uri/data,
+        track.dart:285-293) skips an equal value the same way, and for raw
+        text the `id` IS the whole subtitle text. mpv on Android also drops
+        an external track added while the demuxer is still opening, so the
+        first apply is lost and every retry re-applies the SAME track:
+        without a clear first, the retries (and a manual re-select of the
+        same language) are silent no-ops. Clearing to `none()` first
+        guarantees the apply differs."""
         try:
             track = fv.VideoSubtitleTrack(src=src, title=title)
             current = getattr(self.video, "subtitle_track", None)
+            cleared = False
             if current is not None and current == track:
                 self.video.subtitle_track = fv.VideoSubtitleTrack.none()
                 self.video.update()
+                cleared = True
             self.video.subtitle_track = track
             self.video.update()
+            logger.info(
+                "subtitle apply: title=%s src=%s%s",
+                title,
+                src[:80],
+                " (cleared equal track first)" if cleared else "",
+            )
         except Exception as ex:
             logger.warning("subtitle switch failed: %s", ex)
 

@@ -349,3 +349,58 @@ def test_window_label_agrees_with_the_skip_chip():
 
     player.skip = {"intro": {}, "outro": {}, "episode_intro": [100, 200]}
     assert player._is_intro_window((100.0, 200.0)) is True
+
+
+# ---------------------------------------------------------------------------
+# The quality chip: revealed from the resolved spec, not a racing probe
+# ---------------------------------------------------------------------------
+
+
+def test_quality_chip_reveals_from_the_resolved_spec():
+    """The resolution already fetched the master's variants: the chip
+    reveals at mount with a concrete quality label, instead of waiting for
+    the probe that raced the proxy and never appeared on phones."""
+    player = _player()
+    player._variants_cache = [
+        {"index": 0, "resolution": "1280x720", "bandwidth": 2_000_000}
+    ]
+    player._current_variant = None
+    player.quality_text = _Chip().content
+    player.quality_btn = _Chip()
+
+    player._reveal_stream_options_from_spec()
+
+    assert player.quality_btn.visible is True
+    assert player.quality_btn.updates == 1
+    assert player.quality_text.value == "720p"
+
+
+def test_quality_chip_stays_hidden_without_variants():
+    """A direct file has no variants — the chip must stay hidden rather than
+    name a quality the stream cannot honour."""
+    player = _player()
+    player._variants_cache = None
+    player.quality_btn = _Chip()
+
+    player._reveal_stream_options_from_spec()
+
+    assert player.quality_btn.visible is False
+
+
+def test_quality_button_carries_its_row_as_content():
+    """flet_video control bars reject a `content=None` Container on the 1.1.0
+    line ("type 'Null' is not a subtype of type 'Control'"), so both buttons
+    must mount their row as content and hide by visibility instead."""
+    from components.player import controls as controls_mod
+
+    player = _player()
+    player.title = "Test"
+    player.speed_text = ft.Text("1.0x", size=11)
+    player.on_previous = None
+    player.on_next = None
+    controls_mod.build_player_controls(player)
+
+    assert player.quality_btn.content is player.quality_row
+    assert player.quality_btn.visible is False
+    assert player.audio_btn.content is player.audio_row
+    assert player.audio_btn.visible is False

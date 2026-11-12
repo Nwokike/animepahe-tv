@@ -16,6 +16,18 @@ from typing import Final
 
 CHANGELOG: Final = MappingProxyType(
     {
+        "2.0.2": (
+            "- Player: the quality chip appears as soon as the stream's "
+            "qualities are known (it used to stay hidden behind a racing "
+            "probe on phones), and the ad can no longer hold playback "
+            "hostage offline — it still always shows, exactly like KTV "
+            "Player\n"
+            "- Downloads honour the external-player setting and hand the "
+            "file to KTV Player\n"
+            "- External handoff: streams that need headers are served "
+            "through the in-app proxy so the installed KTV Player plays "
+            "them"
+        ),
         "2.0.1": (
             "- Subtitles show on their own again on phones: the source's "
             "default track is re-applied until the player actually loads it, "

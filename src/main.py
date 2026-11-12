@@ -1996,6 +1996,34 @@ class AppController:
         }
         state.episodes_version += 1
 
+    def _external_handoff_url(self, url: str, headers: dict | None) -> str:
+        """The URL handed to KTV Player.
+
+        KTV Player v2.2.0 (the installed line) drops the deep link's headers
+        on Android — Flet strips the ktv:// scheme and the /?url= fallback
+        rebuilds only url+title — so a stream whose CDN needs a Referer or a
+        Cloudflare cookie would 403 there. HLS therefore goes through THIS
+        app's loopback proxy, which adds the headers itself and hands KTV a
+        plain http URL it can play bare. Direct files keep their direct URL:
+        the proxy's playlist route buffers the whole body and would lose
+        Range seeking, and KTV ≥ 2.3.0 forwards deep-link headers for them.
+        """
+        if self.hls_proxy is None or not headers or ".m3u8" not in (url or "").lower():
+            return url
+        try:
+            proxied = self.hls_proxy.get_proxy_url(
+                url,
+                referer=(headers or {}).get("Referer"),
+                headers=headers,
+            )
+            logger.info(
+                "external handoff routed through the loopback proxy: %s", url[:80]
+            )
+            return proxied
+        except Exception as ex:
+            logger.warning("external proxy url build failed; handing direct: %s", ex)
+            return url
+
     async def _launch_external_m3u8(
         self,
         m3u8: str,
@@ -2013,7 +2041,7 @@ class AppController:
 
         await launch_external(
             self.page,
-            m3u8,
+            self._external_handoff_url(m3u8, headers),
             episode_title(
                 (anime or {}).get("title", "Anime"),
                 ep.episode if ep else None,
@@ -2086,7 +2114,7 @@ class AppController:
         headers = dict(getattr(source, "headers", None) or {})
         await launch_external(
             self.page,
-            m3u8,
+            self._external_handoff_url(m3u8, headers),
             episode_title(
                 (anime or {}).get("title", "Anime"),
                 ep.episode if ep else None,
@@ -2127,7 +2155,7 @@ class AppController:
         ) or None
         await launch_external(
             self.page,
-            self._resolved_m3u8,
+            self._external_handoff_url(self._resolved_m3u8, headers),
             episode_title(title, ep_num, resolution),
             headers=headers,
             referer=(headers or {}).get("Referer"),
@@ -2588,6 +2616,35 @@ class AppController:
             state.episodes_version += 1
             return
         state.player_error = None
+        # External-player mode now covers downloads too: the handoff carries
+        # the LOCAL PATH (KTV Player's deep-link parser accepts paths on the
+        # v2.2.0 line; the network-only gate is 2.3.0-only). ANDROID SANDBOX
+        # CAVEAT, logged rather than hidden: the files live in THIS app's
+        # private storage (`$FLET_APP_STORAGE_DATA/animepahe/downloads/…`),
+        # which no other app can read, so KTV can only actually open one if
+        # it is somewhere shared. A FileProvider content:// handoff is the
+        # real fix and needs a manifest change — owner's call.
+        if await self.store.get_external_player():
+            from services.external_player import episode_title, launch_external
+
+            offline_title = [row.get("title") or "AnimePahe"]
+            if row.get("episode_num"):
+                offline_title.append(f"Episode {row['episode_num']}")
+            if row.get("resolution"):
+                offline_title.append(f"({row['resolution']}p)")
+            logger.warning(
+                "external handoff for a LOCAL download (%s): the file is in "
+                "this app's private storage, which another app cannot read "
+                "on Android — KTV Player will error unless the file is in "
+                "shared storage",
+                local,
+            )
+            await launch_external(
+                self.page,
+                local,
+                episode_title(offline_title[0], row.get("episode_num"), None),
+            )
+            return
         # Local playback (an .m3u8 rewrite or a fetched file) needs no
         # request headers — the bytes are already on disk.
         offline_title = [row.get("title") or "AnimePahe"]

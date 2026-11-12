@@ -85,11 +85,13 @@ def build_player_controls(player_inst) -> fv.AdaptiveVideoControls:
     )
 
     # Quality button (bottom controls): appears once stream options are
-    # probed (multi-variant and/or multi-audio). Kept mounted with
-    # content=None until options are detected to ensure the media_kit
-    # Flutter widget tree mounts it properly.
+    # known (the resolution already fetched the master's variants, and the
+    # probe refreshes/extends them). The row stays MOUNTED as the content
+    # and the button is `visible=False` until then — a `content=None`
+    # Container inside a flet_video control bar throws
+    # "type 'Null' is not a subtype of type 'Control'" on the 1.1.0 line.
     quality_text = ft.Text(
-        "Auto",
+        "—",
         size=11,
         color=ft.Colors.WHITE,
         weight=ft.FontWeight.W_600,
@@ -104,7 +106,8 @@ def build_player_controls(player_inst) -> fv.AdaptiveVideoControls:
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
     quality_btn = ft.Container(
-        content=None,
+        content=quality_row,
+        visible=False,
         padding=0,
         border_radius=4,
         ink=True,
@@ -133,7 +136,8 @@ def build_player_controls(player_inst) -> fv.AdaptiveVideoControls:
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
     audio_btn = ft.Container(
-        content=None,
+        content=audio_row,
+        visible=False,
         padding=0,
         border_radius=4,
         ink=True,

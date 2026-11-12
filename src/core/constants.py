@@ -1,5 +1,5 @@
 APP_NAME = "AnimePahe TV"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 
 # The browser identity the kwik family expects. ONE constant: the player
 # and the kwik FILE resolver must present the same string (a Cloudflare

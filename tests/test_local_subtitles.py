@@ -197,6 +197,63 @@ def test_default_subtitle_retry_survives_the_trap():
     assert player.video.updates == 2
 
 
+def test_default_subtitle_schedule_survives_the_trap(monkeypatch):
+    """The schedule runs the default across the load window and every pass
+    clear-then-applies, so neither flet's Prop value equality nor media_kit's
+    SubtitleTrack.__eq__ can swallow a re-apply (the Android regression)."""
+    player = _player()
+    player.video = _TrapVideo()
+    player.subtitles = [
+        {"label": "English", "url": "https://p/eng.vtt", "default": True}
+    ]
+    player._subtitle_selection = "auto"
+    player._subtitle_applied = False
+    player._is_closing = False
+    player._subtitle_schedule_started = False
+    monkeypatch.setattr(ip, "_SUBTITLE_RETRY_DELAYS", (0.0, 0.01))
+    asyncio.run(player._run_default_subtitle_schedule())
+    assert player.video.subtitle_track is not None
+    assert player.video.subtitle_track.src == "https://p/eng.vtt"
+    # Pass 1 applies (current is None -> plain apply); pass 2 clear-then-
+    # applies the SAME track so the trap cannot swallow it.
+    assert player.video.updates == 3
+
+
+def test_a_user_selection_stops_the_schedule(monkeypatch):
+    """Once the user picks a track (or Off), the schedule must not override
+    them on its later passes."""
+    player = _player()
+    player.video = _TrapVideo()
+    player.subtitles = [
+        {"label": "English", "url": "https://p/eng.vtt", "default": True}
+    ]
+    player._subtitle_selection = 0  # the user picked track 0
+    player._subtitle_applied = False
+    player._is_closing = False
+    player._subtitle_schedule_started = False
+    monkeypatch.setattr(ip, "_SUBTITLE_RETRY_DELAYS", (0.0, 0.01))
+    asyncio.run(player._run_default_subtitle_schedule())
+    assert player.video.updates == 0
+
+
+def test_subtitle_src_prefers_the_proxy_url():
+    """The device-proven form: the proxied URL rides to flet_video untouched
+    (the pre-port behaviour that showed Android subtitles); a local sidecar
+    path is handed over verbatim for mpv to read off disk."""
+    player = _player()
+
+    class _Proxy:
+        pass
+
+    player.hls_proxy = _Proxy()
+    src = asyncio.run(
+        player._subtitle_src({"url": "https://p/eng.vtt", "default": True})
+    )
+    assert src == "https://p/eng.vtt"
+    src = asyncio.run(player._subtitle_src({"url": "/data/subs/eng.vtt"}))
+    assert src == "/data/subs/eng.vtt"
+
+
 # ---------------------------------------------------------------------------
 # The wiring can't silently disappear
 # ---------------------------------------------------------------------------

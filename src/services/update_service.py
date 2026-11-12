@@ -4,7 +4,7 @@ import primp
 
 logger = logging.getLogger(__name__)
 
-CURRENT_BUILD_NUMBER = 12
+CURRENT_BUILD_NUMBER = 13
 CONFIG_URL = "https://tv.kalerosemary7.workers.dev/config"
 APP_KEY = "animepahe"
 

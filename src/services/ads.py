@@ -46,6 +46,15 @@ AD_APP_OPEN_UNIT_ID = AD_UNITS["app_open"]
 INTERSTITIAL_MIN_INTERVAL_SEC = 30.0
 _last_interstitial_time = 0.0
 
+# KTV Player's show_interstitial bounds (ad_service.py:289-380): the pre-roll
+# may hold playback for at most these windows, and never past the outer
+# asyncio.wait_for in start_playback (20 s). Offline, the on-demand ad simply
+# never loads inside its window and playback starts — the ad still shows the
+# moment it arrives, exactly as KTV Player does.
+_PRELOAD_LOAD_WAIT_SEC = 10.0
+_PRELOADED_DISMISS_SEC = 30.0
+_ON_DEMAND_WAIT_SEC = 10.0
+
 # App-open cadence: cold start via on_initialized, then at most once per
 # APP_OPEN_MIN_INTERVAL_SEC on session reconnects (Yandex treats app-open as
 # a resume format, but not on every reconnect).
@@ -141,12 +150,16 @@ async def _discard_ad(page, ad) -> None:
 
 
 async def show_interstitial(page) -> None:
-    """One-shot interstitial before each episode's stream resolve (so "next
-    episode" presses are covered too), rate-limited by the interval guard.
+    """One-shot interstitial — KTV Player's exact flow (ad_service.py:289-380),
+    never skipped and never allowed to hold playback hostage.
 
-    Uses the preloaded ad when it finished loading in time; otherwise falls
-    back to an on-demand instance. Re-preloads after every dismiss (KTV
-    ad_service discipline) so the next episode never pays the load latency.
+    - Preloaded ad: wait ≤10 s for load → show → wait ≤30 s for dismiss.
+    - No preloaded ad (or it failed): the on-demand ad shows ITSELF from
+      ``on_load``; this returns when it is dismissed/failed or after 10 s,
+      whichever comes first — KTV's own rule: "If it fails or takes too
+      long, timeout and let the video play so the user isn't stuck." A slow
+      or offline load still shows the ad the moment it arrives, overlaying
+      playback exactly as KTV Player does.
     """
     if not is_ads_supported(page):
         return
@@ -155,7 +168,7 @@ async def show_interstitial(page) -> None:
     now = time.monotonic()
     if now - _last_interstitial_time < INTERSTITIAL_MIN_INTERVAL_SEC:
         logger.debug(
-            "Interstitial skipped (interval guard: %.1fs < %.1fs)",
+            "Interstitial deferred (interval guard: %.1fs < %.1fs)",
             now - _last_interstitial_time,
             INTERSTITIAL_MIN_INTERVAL_SEC,
         )
@@ -164,38 +177,116 @@ async def show_interstitial(page) -> None:
     async with _preload_lock:
         ad, ready = _preloaded_ad, _preload_ready
         _preloaded_ad, _preload_ready = None, None
-    if ad is not None:
-        loaded = False
-        if ready is not None:
-            try:
-                await asyncio.wait_for(ready.wait(), timeout=10.0)
-                loaded = True
-            except Exception:
-                loaded = False
-        if not loaded:
+
+    # --- preloaded path -------------------------------------------------
+    if ad is not None and ready is not None and not ready.is_set():
+        logger.info("Waiting for the preloaded interstitial to finish loading...")
+        try:
+            await asyncio.wait_for(ready.wait(), timeout=_PRELOAD_LOAD_WAIT_SEC)
+        except TimeoutError:
+            logger.warning(
+                "Preloaded ad not ready within %ss — falling back to on-demand",
+                _PRELOAD_LOAD_WAIT_SEC,
+            )
             await _discard_ad(page, ad)
             ad = None
-    if ad is None:
-        ad = fya.InterstitialAd(
+
+    if ad is not None:
+        try:
+            logger.info("Showing the preloaded interstitial ad...")
+            await ad.show()
+            _last_interstitial_time = time.monotonic()
+            try:
+                await asyncio.wait_for(
+                    ad.wait_for_dismiss(), timeout=_PRELOADED_DISMISS_SEC
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Timed out waiting for the preloaded interstitial to close"
+                )
+            try:
+                asyncio.get_running_loop().create_task(preload_interstitial(page))
+            except Exception:
+                logger.debug("interstitial re-preload skipped")
+            return
+        except Exception:
+            logger.exception("Failed to show the preloaded interstitial ad")
+        finally:
+            await _discard_ad(page, ad)
+
+    # --- on-demand path (KTV's shape: the ad shows itself from on_load) --
+    logger.info("No preloaded ad ready. Loading a fresh ad on-demand...")
+    ad_closed = asyncio.Event()
+
+    def _release(e=None):
+        ad_closed.set()
+        _release_service(page.services, fresh)
+
+    async def _show_when_loaded():
+        try:
+            await fresh.show()
+            _last_interstitial_time = time.monotonic()
+            logger.info("On-demand interstitial ad shown.")
+        except Exception as ex:
+            logger.warning("On-demand ad failed to show: %s", ex)
+            _release()
+
+    def _load_failed(e):
+        logger.warning("On-demand ad load failed: %s", getattr(e, "data", e))
+        _release()
+
+    def _show_failed(e):
+        logger.warning("On-demand ad failed to show: %s", getattr(e, "data", e))
+        _release()
+
+    def _dismissed(e):
+        logger.info("On-demand ad closed by user")
+        _release(e)
+        try:
+            page.run_task(preload_interstitial, page)
+        except Exception:
+            logger.debug("interstitial re-preload skipped")
+
+    fresh = None
+    try:
+        fresh = fya.InterstitialAd(
             unit_id=AD_INTERSTITIAL_UNIT_ID,
+            on_load=lambda e: page.run_task(_show_when_loaded),
+            on_load_failed=_load_failed,
+            on_failed_to_show=_show_failed,
+            on_dismiss=_dismissed,
             on_impression=lambda e: logger.debug(
                 "Interstitial impression: %s", getattr(e, "impression_data", "")
             ),
         )
-        page.services.append(ad)
-    try:
-        await asyncio.wait_for(ad.show(), timeout=20.0)
+        page.services.append(fresh)
+        # A show was ATTEMPTED: arm the interval guard now, not when the ad
+        # eventually appears, so a slow load cannot double-fire.
         _last_interstitial_time = time.monotonic()
-        # show() returns as the ad OPENS; wait for actual dismissal
-        await asyncio.wait_for(ad.wait_for_dismiss(), timeout=120.0)
-    except Exception as ex:
-        logger.warning("interstitial failed: %s", ex)
-    finally:
-        await _discard_ad(page, ad)
         try:
-            asyncio.get_running_loop().create_task(preload_interstitial(page))
-        except Exception:
-            logger.debug("interstitial re-preload skipped")
+            # The ad loads and shows itself; this only gates playback until
+            # it is on screen and closed (or the window passes — KTV's bound).
+            await asyncio.wait_for(ad_closed.wait(), timeout=_ON_DEMAND_WAIT_SEC)
+        except TimeoutError:
+            logger.warning(
+                "On-demand interstitial not ready within %ss — letting the "
+                "video play; the ad still shows when it loads",
+                _ON_DEMAND_WAIT_SEC,
+            )
+    except Exception:
+        logger.exception("Failed to create the on-demand interstitial ad")
+        _release()
+
+
+def _release_service(services, item) -> None:
+    """Drop a spent ad service so Flet's service GC can unregister it."""
+    if item is None:
+        return
+    try:
+        if item in services:
+            services.remove(item)
+    except Exception:
+        logger.debug("ad service release skipped")
 
 
 async def show_app_open(page) -> None:

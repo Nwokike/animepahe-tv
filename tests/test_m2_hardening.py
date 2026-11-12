@@ -413,6 +413,9 @@ def test_interstitial_interval_guard(monkeypatch):
     monkeypatch.setattr(ads, "fya", _FakeFya)
     monkeypatch.setattr(ads, "_HAS_ADS", True)
     monkeypatch.setattr(ads, "_last_interstitial_time", 0.0)
+    # The KTV-shaped on-demand path waits for the ad to load/close; the fake
+    # never loads, so shrink that window to keep the test instant.
+    monkeypatch.setattr(ads, "_ON_DEMAND_WAIT_SEC", 0.01)
 
     page = _MobilePage()
 

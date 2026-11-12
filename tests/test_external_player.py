@@ -53,6 +53,78 @@ def test_deep_link_omits_absent_headers():
     assert "headers=" not in link
 
 
+def test_downloaded_episode_hands_off_to_the_external_player(monkeypatch):
+    """External mode covers downloads too: `play_downloaded` must ATTEMPT the
+    handoff (it used to always open the in-app player without even trying)."""
+    import asyncio
+    import os
+
+    import main as app_main
+
+    launches = []
+
+    async def fake_launch(*args, **kwargs):
+        launches.append(args)
+
+    monkeypatch.setattr("services.external_player.launch_external", fake_launch)
+    monkeypatch.setattr(os.path, "exists", lambda _p: True)
+
+    class _Store:
+        async def get_downloads(self):
+            return {
+                "ep-1": {
+                    "state": "complete",
+                    "file": "/private/downloads/show/ep-1/01.mkv",
+                    "title": "Show",
+                    "episode_num": 1,
+                }
+            }
+
+        async def get_external_player(self):
+            return True
+
+    controller = app_main.AppController.__new__(app_main.AppController)
+    controller.store = _Store()
+    controller.page = None
+
+    asyncio.run(controller.play_downloaded("ep-1"))
+
+    assert launches, "the external handoff was never attempted"
+    assert launches[0][1].endswith("01.mkv")
+
+
+def test_downloaded_episode_plays_in_app_when_external_is_off(monkeypatch):
+    import asyncio
+    import os
+
+    import main as app_main
+    from core.state import state as app_state
+
+    monkeypatch.setattr(os.path, "exists", lambda _p: True)
+
+    class _Store:
+        async def get_downloads(self):
+            return {
+                "ep-1": {
+                    "state": "complete",
+                    "file": "/private/downloads/show/ep-1/01.mkv",
+                    "title": "Show",
+                    "episode_num": 1,
+                }
+            }
+
+        async def get_external_player(self):
+            return False
+
+    controller = app_main.AppController.__new__(app_main.AppController)
+    controller.store = _Store()
+
+    asyncio.run(controller.play_downloaded("ep-1"))
+
+    assert app_state.player_spec["resource"] == "/private/downloads/show/ep-1/01.mkv"
+    assert app_state.player_open is True
+
+
 def test_no_stream_never_launches_anything(monkeypatch):
     """Live run: with no resolved m3u8 the old code built
     animepahe.com/play/foreign:9538/… (another backend's session — a URL

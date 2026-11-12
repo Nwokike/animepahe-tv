@@ -28,9 +28,9 @@ export default {
           "update_url": `${origin}/sports`
         },
         "animepahe": {
-          "version": "2.0.1",
-          "build_number": 12,
-          "release_notes": "Subtitles show on their own again on phones, and the external player handoff now carries each source's own headers so every backend opens in KTV Player.",
+          "version": "2.0.2",
+          "build_number": 13,
+          "release_notes": "Player fixes: the quality chip appears as soon as the stream's qualities are known, the ad never blocks playback offline (it still always shows), downloads honour the external-player setting, and header-needing streams are served through the in-app proxy so the installed KTV Player plays them.",
           "mandatory": false,
           "update_url": `${origin}/anime`
         },
