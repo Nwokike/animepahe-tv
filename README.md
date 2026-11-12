@@ -221,7 +221,7 @@ python -m ruff check src/ tests/
 
 # Releases are built by GitHub Actions on tag pushes
 # (.github/workflows/build-all.yml triggers on tags v*)
-git tag v2.0.2 && git push origin v2.0.2
+git tag v2.0.1 && git push origin v2.0.1
 
 # Reproduce the download pipeline per backend, locally (discovery →
 # episodes → sources → bytes on disk, in a scratch store)

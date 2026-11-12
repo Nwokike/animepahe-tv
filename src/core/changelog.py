@@ -16,26 +16,19 @@ from typing import Final
 
 CHANGELOG: Final = MappingProxyType(
     {
-        "2.0.2": (
-            "- Player: the quality chip appears as soon as the stream's "
-            "qualities are known (it used to stay hidden behind a racing "
-            "probe on phones), and the ad can no longer hold playback "
-            "hostage offline — it still always shows, exactly like KTV "
-            "Player\n"
-            "- Downloads honour the external-player setting and hand the "
-            "file to KTV Player\n"
-            "- External handoff: streams that need headers are served "
-            "through the in-app proxy so the installed KTV Player plays "
-            "them"
-        ),
         "2.0.1": (
             "- Subtitles show on their own again on phones: the source's "
             "default track is re-applied until the player actually loads it, "
             "so AniKato's English subs no longer need a manual switch away "
             "and back\n"
             "- The external player handoff now carries each source's own "
-            "headers, so AniKato, Kayoanime and AnimeOut open in KTV Player "
-            "instead of only Animepahe"
+            "headers, and header-needing streams are served through the "
+            "in-app proxy, so AniKato, Kayoanime and AnimeOut open in KTV "
+            "Player instead of only Animepahe\n"
+            "- The quality chip appears as soon as the stream's qualities are "
+            "known, instead of staying hidden behind a racing probe on phones\n"
+            "- The ad can no longer hold playback hostage offline — it still "
+            "always shows, exactly like KTV Player"
         ),
         "2.0.0": (
             "- One app, four independent backends: AniKato, AnimeOut, "

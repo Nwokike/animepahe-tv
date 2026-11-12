@@ -2616,35 +2616,6 @@ class AppController:
             state.episodes_version += 1
             return
         state.player_error = None
-        # External-player mode now covers downloads too: the handoff carries
-        # the LOCAL PATH (KTV Player's deep-link parser accepts paths on the
-        # v2.2.0 line; the network-only gate is 2.3.0-only). ANDROID SANDBOX
-        # CAVEAT, logged rather than hidden: the files live in THIS app's
-        # private storage (`$FLET_APP_STORAGE_DATA/animepahe/downloads/…`),
-        # which no other app can read, so KTV can only actually open one if
-        # it is somewhere shared. A FileProvider content:// handoff is the
-        # real fix and needs a manifest change — owner's call.
-        if await self.store.get_external_player():
-            from services.external_player import episode_title, launch_external
-
-            offline_title = [row.get("title") or "AnimePahe"]
-            if row.get("episode_num"):
-                offline_title.append(f"Episode {row['episode_num']}")
-            if row.get("resolution"):
-                offline_title.append(f"({row['resolution']}p)")
-            logger.warning(
-                "external handoff for a LOCAL download (%s): the file is in "
-                "this app's private storage, which another app cannot read "
-                "on Android — KTV Player will error unless the file is in "
-                "shared storage",
-                local,
-            )
-            await launch_external(
-                self.page,
-                local,
-                episode_title(offline_title[0], row.get("episode_num"), None),
-            )
-            return
         # Local playback (an .m3u8 rewrite or a fetched file) needs no
         # request headers — the bytes are already on disk.
         offline_title = [row.get("title") or "AnimePahe"]

@@ -53,13 +53,17 @@ def test_deep_link_omits_absent_headers():
     assert "headers=" not in link
 
 
-def test_downloaded_episode_hands_off_to_the_external_player(monkeypatch):
-    """External mode covers downloads too: `play_downloaded` must ATTEMPT the
-    handoff (it used to always open the in-app player without even trying)."""
+def test_downloaded_episode_always_plays_in_app(monkeypatch):
+    """Downloads stay in-app: KTV Player's deep link REJECTS local paths
+    ("Deep link decoded invalid URL", verified on device) and the files live
+    in this app's private storage, which Android does not let another app
+    read. A handoff attempt there only launched a player that did nothing,
+    so the feature is deliberately gone — external mode covers streams only."""
     import asyncio
     import os
 
     import main as app_main
+    from core.state import state as app_state
 
     launches = []
 
@@ -85,12 +89,11 @@ def test_downloaded_episode_hands_off_to_the_external_player(monkeypatch):
 
     controller = app_main.AppController.__new__(app_main.AppController)
     controller.store = _Store()
-    controller.page = None
 
     asyncio.run(controller.play_downloaded("ep-1"))
 
-    assert launches, "the external handoff was never attempted"
-    assert launches[0][1].endswith("01.mkv")
+    assert launches == [], "a local download must never be handed off"
+    assert app_state.player_spec["resource"] == "/private/downloads/show/ep-1/01.mkv"
 
 
 def test_downloaded_episode_plays_in_app_when_external_is_off(monkeypatch):

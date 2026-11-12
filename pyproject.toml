@@ -1,6 +1,6 @@
 [project]
 name = "animepahe-tv"
-version = "2.0.2"
+version = "2.0.1"
 description = "Multi-source client-side Android TV / mobile / desktop app for streaming anime — independent backends, one chosen at startup."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,7 +17,7 @@ dependencies = [
 [tool.flet]
 org = "com.animepahe"
 product = "AnimePahe TV"
-build_number = 13
+build_number = 12
 # The full desktop flavor ships the complete runner (the same shape KTV
 # Player declares) rather than the slim one, so `flet run` / a built
 # desktop binary behave identically on Linux, Windows and macOS.
